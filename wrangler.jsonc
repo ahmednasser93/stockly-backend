@@ -9,7 +9,15 @@
 	"compatibility_date": "2025-11-13",
 	"observability": {
 		"enabled": true
-	}
+	},
+	"d1_databases": [
+		{
+			"binding": "stockly",
+			"database_name": "stockly",
+			"database_id": "d234268d-d8f1-49d2-9643-6a1d5bf0a589",
+			"remote": true
+		}
+	]
 	/**
 	 * Smart Placement
 	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

@@ -1,18 +1,39 @@
-/**
- * Welcome to Cloudflare Workers! This is your first worker.
- *
- * - Run `npm run dev` in your terminal to start a development server
- * - Open a browser tab at http://localhost:8787/ to see your worker in action
- * - Run `npm run deploy` to publish your worker
- *
- * Bind resources to your worker in `wrangler.jsonc`. After adding bindings, a type definition for the
- * `Env` object can be regenerated with `npm run cf-typegen`.
- *
- * Learn more at https://developers.cloudflare.com/workers/
- */
+import { json, CORS_HEADERS } from "./util";
+import { getStock } from "./api/get-stock";
+import { searchStock } from "./api/search-stock";
+import { healthCheck } from "./api/health";
+
+export interface Env {
+  stockly: D1Database;
+}
 
 export default {
-	async fetch(request, env, ctx): Promise<Response> {
-		return new Response('Hello World!');
-	},
-} satisfies ExportedHandler<Env>;
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+    const pathname = url.pathname;
+
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          ...CORS_HEADERS,
+          "Access-Control-Max-Age": "86400",
+        },
+      });
+    }
+
+    if (pathname === "/v1/api/health") {
+      return healthCheck();
+    }
+
+    if (pathname === "/v1/api/get-stock") {
+      return await getStock(url, env);
+    }
+
+    if (pathname === "/v1/api/search-stock") {
+      return await searchStock(url, env);
+    }
+
+    return json({ error: "Not Found" }, 404);
+  },
+};

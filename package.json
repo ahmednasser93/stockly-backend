@@ -4,10 +4,16 @@
 	"private": true,
 	"scripts": {
 		"deploy": "wrangler deploy",
-		"dev": "wrangler dev",
-		"start": "wrangler dev",
+		"dev": "npm run db:migrate:local && wrangler dev --local --persist-to .wrangler/state",
+		"start": "wrangler dev --local --persist-to .wrangler/state",
 		"test": "vitest",
-		"cf-typegen": "wrangler types"
+		"doc": "node scripts/doc-server.mjs",
+		"cf-typegen": "wrangler types",
+		"db:migrate:local": "wrangler d1 migrations apply stockly --local --persist-to .wrangler/state",
+		"select-prices": "wrangler d1 execute stockly --local --command=\"SELECT * FROM stock_prices ORDER BY id DESC LIMIT 20;\"",
+		"select-search": "wrangler d1 execute stockly --local --command=\"SELECT * FROM search_cache ORDER BY id DESC;\"",
+		"prod:select-prices": "wrangler d1 execute stockly --remote --command=\"SELECT * FROM stock_prices ORDER BY id DESC LIMIT 20;\"",
+		"prod:select-search": "wrangler d1 execute stockly --remote --command=\"SELECT * FROM search_cache ORDER BY id DESC;\""
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.8.19",

@@ -1,24 +1,78 @@
-import { env, createExecutionContext, waitOnExecutionContext, SELF } from 'cloudflare:test';
-import { describe, it, expect } from 'vitest';
-import worker from '../src/index';
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// For now, you'll need to do something like this to get a correctly-typed
-// `Request` to pass to `worker.fetch()`.
-const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
+vi.mock("../src/api/get-stock", () => ({
+  getStock: vi.fn(),
+}));
 
-describe('Hello World worker', () => {
-	it('responds with Hello World! (unit style)', async () => {
-		const request = new IncomingRequest('http://example.com');
-		// Create an empty context to pass to `worker.fetch()`.
-		const ctx = createExecutionContext();
-		const response = await worker.fetch(request, env, ctx);
-		// Wait for all `Promise`s passed to `ctx.waitUntil()` to settle before running test assertions
-		await waitOnExecutionContext(ctx);
-		expect(await response.text()).toMatchInlineSnapshot(`"Hello World!"`);
-	});
+vi.mock("../src/api/search-stock", () => ({
+  searchStock: vi.fn(),
+}));
 
-	it('responds with Hello World! (integration style)', async () => {
-		const response = await SELF.fetch('https://example.com');
-		expect(await response.text()).toMatchInlineSnapshot(`"Hello World!"`);
-	});
+import worker from "../src/index";
+import { getStock } from "../src/api/get-stock";
+import { searchStock } from "../src/api/search-stock";
+
+const makeRequest = (path: string) =>
+  new Request(`https://example.com${path}`, { method: "GET" });
+
+describe("worker router", () => {
+  beforeEach(() => {
+    vi.mocked(getStock).mockReset();
+    vi.mocked(searchStock).mockReset();
+  });
+
+  it("returns the health check", async () => {
+    const response = await worker.fetch(makeRequest("/v1/api/health"));
+    await expect(response.json()).resolves.toEqual({ status: "ok" });
+  });
+
+  it("delegates /get-stock requests", async () => {
+    const mockedResponse = new Response("stock-response");
+    vi.mocked(getStock).mockResolvedValue(mockedResponse);
+
+    const response = await worker.fetch(
+      makeRequest("/v1/api/get-stock?symbol=MSFT")
+    );
+
+    expect(getStock).toHaveBeenCalledTimes(1);
+    const calledUrl = vi.mocked(getStock).mock.calls[0][0];
+    expect(calledUrl).toBeInstanceOf(URL);
+    expect(calledUrl.toString()).toBe(
+      "https://example.com/v1/api/get-stock?symbol=MSFT"
+    );
+    expect(response).toBe(mockedResponse);
+  });
+
+  it("delegates /search-stock requests", async () => {
+    const mockedResponse = new Response("search-response");
+    vi.mocked(searchStock).mockResolvedValue(mockedResponse);
+
+    const response = await worker.fetch(
+      makeRequest("/v1/api/search-stock?query=MSFT")
+    );
+
+    expect(searchStock).toHaveBeenCalled();
+    expect(response).toBe(mockedResponse);
+  });
+
+  it("returns 404 for unknown routes", async () => {
+    const response = await worker.fetch(makeRequest("/v1/api/unknown"));
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "Not Found" });
+  });
+
+  it("responds to CORS preflight requests", async () => {
+    const request = new Request("https://example.com/v1/api/get-stock", {
+      method: "OPTIONS",
+    });
+
+    const response = await worker.fetch(request);
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
+    expect(response.headers.get("Access-Control-Allow-Methods")).toContain(
+      "GET"
+    );
+  });
 });
