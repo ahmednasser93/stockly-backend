@@ -81,6 +81,32 @@
         display: grid;
         gap: 1rem;
       }
+      .auth-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 999;
+        backdrop-filter: blur(4px);
+      }
+      .auth-card {
+        background: #fff;
+        border-radius: 8px;
+        padding: 2rem;
+        width: min(360px, 90%);
+        box-shadow: 0 20px 40px rgba(15, 23, 42, 0.25);
+      }
+      .auth-card h2 {
+        margin-top: 0;
+      }
+      .auth-error {
+        color: #dc2626;
+        min-height: 1.25rem;
+        margin-top: 0.5rem;
+        font-size: 0.95rem;
+      }
       @media (min-width: 640px) {
         .inline-inputs {
           grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -89,48 +115,117 @@
     </style>
   </head>
   <body>
-    <h1>Stockly API Explorer</h1>
-    <p>
-      This page lists every available endpoint in the worker along with a testing
-      harness so you can send sample requests with one click. Adjust the base URL
-      if you deployed the worker to a custom domain.
-    </p>
+    <div id="authOverlay" class="auth-overlay">
+      <form id="authForm" class="auth-card">
+        <h2>Stockly Docs Login</h2>
+        <label for="usernameInput">Username</label>
+        <input id="usernameInput" name="username" required autocomplete="username" />
+        <label for="passwordInput">Password</label>
+        <input
+          id="passwordInput"
+          type="password"
+          name="password"
+          required
+          autocomplete="current-password"
+        />
+        <button type="submit">Unlock</button>
+        <div id="authError" class="auth-error"></div>
+      </form>
+    </div>
+    <div id="protectedContent" hidden>
+      <h1>Stockly API Explorer</h1>
+      <p>
+        This page lists every available endpoint in the worker along with a testing
+        harness so you can send sample requests with one click. Adjust the base URL
+        if you deployed the worker to a custom domain.
+      </p>
 
-    <h2>Endpoints</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Method</th>
-          <th>Path</th>
-          <th>Description</th>
-          <th>Sample Query</th>
-        </tr>
-      </thead>
-      <tbody id="endpoint-table"></tbody>
-    </table>
+      <h2>Endpoints</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Method</th>
+            <th>Path</th>
+            <th>Description</th>
+            <th>Sample Query</th>
+          </tr>
+        </thead>
+        <tbody id="endpoint-table"></tbody>
+      </table>
 
-    <section class="tester">
-      <h2>Interactive Tester</h2>
-      <label for="baseUrlSelect">Base URL</label>
-      <select id="baseUrlSelect">
-        <option value="https://stockly-api.ahmednasser1993.workers.dev">
-          Production (Workers.dev)
-        </option>
-        <option value="http://localhost:8787">Local Wrangler Dev</option>
-      </select>
+      <section class="tester">
+        <h2>Interactive Tester</h2>
+        <label for="baseUrlSelect">Base URL</label>
+        <select id="baseUrlSelect">
+          <option value="https://stockly-api.ahmednasser1993.workers.dev">
+            Production (Workers.dev)
+          </option>
+          <option value="http://localhost:8787">Local Wrangler Dev</option>
+        </select>
 
-      <label for="endpointSelect">Endpoint</label>
-      <select id="endpointSelect"></select>
+        <label for="endpointSelect">Endpoint</label>
+        <select id="endpointSelect"></select>
 
-      <div class="inline-inputs" id="paramFields"></div>
-      <button id="sendButton">Send Test Request</button>
+        <div class="inline-inputs" id="paramFields"></div>
+        <button id="sendButton">Send Test Request</button>
 
-      <label for="output">Response</label>
-      <pre id="output">Ready to test…</pre>
-    </section>
+        <label for="output">Response</label>
+        <pre id="output">Ready to test…</pre>
+      </section>
+    </div>
 
     <script>
+      const overlay = document.getElementById("authOverlay");
+      const protectedContent = document.getElementById("protectedContent");
+      const authForm = document.getElementById("authForm");
+      const authError = document.getElementById("authError");
+
+      const showContent = () => {
+        overlay.style.display = "none";
+        protectedContent.hidden = false;
+      };
+
+      const verifyToken = async (token) => {
+        try {
+          const response = await fetch("auth-check", {
+            headers: {
+              Authorization: `Basic ${token}`,
+            },
+          });
+          if (response.ok) {
+            sessionStorage.setItem("docsBasicToken", token);
+            showContent();
+            return true;
+          }
+        } catch (err) {
+          console.error("Auth validation failed", err);
+        }
+        return false;
+      };
+
+      const storedToken = sessionStorage.getItem("docsBasicToken");
+      if (storedToken) {
+        verifyToken(storedToken);
+      }
+
+      authForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        authError.textContent = "";
+        const formData = new FormData(authForm);
+        const username = formData.get("username");
+        const password = formData.get("password");
+        if (typeof username !== "string" || typeof password !== "string") {
+          authError.textContent = "Please enter credentials.";
+          return;
+        }
+        const token = btoa(`${username}:${password}`);
+        const ok = await verifyToken(token);
+        if (!ok) {
+          authError.textContent = "Invalid credentials.";
+        }
+      });
+
       const endpoints = [
         {
           name: "Health Check",
@@ -163,6 +258,19 @@
             query: {
               label: "Partial Symbol or Name",
               value: "AP",
+            },
+          },
+        },
+        {
+          name: "Get Multiple Stocks",
+          method: "GET",
+          path: "/v1/api/get-stocks",
+          description: "Fetches multiple symbols in one request (30s cache per symbol)",
+          sampleQuery: "?symbols=AMZN,AAPL,TSLA",
+          params: {
+            symbols: {
+              label: "Comma separated symbols",
+              value: "AMZN,AAPL,TSLA",
             },
           },
         },

@@ -8,9 +8,14 @@ vi.mock("../src/api/search-stock", () => ({
   searchStock: vi.fn(),
 }));
 
+vi.mock("../src/api/get-stocks", () => ({
+  getStocks: vi.fn(),
+}));
+
 import worker from "../src/index";
 import { getStock } from "../src/api/get-stock";
 import { searchStock } from "../src/api/search-stock";
+import { getStocks } from "../src/api/get-stocks";
 
 const makeRequest = (path: string) =>
   new Request(`https://example.com${path}`, { method: "GET" });
@@ -19,6 +24,7 @@ describe("worker router", () => {
   beforeEach(() => {
     vi.mocked(getStock).mockReset();
     vi.mocked(searchStock).mockReset();
+    vi.mocked(getStocks).mockReset();
   });
 
   it("returns the health check", async () => {
@@ -52,6 +58,18 @@ describe("worker router", () => {
     );
 
     expect(searchStock).toHaveBeenCalled();
+    expect(response).toBe(mockedResponse);
+  });
+
+  it("delegates /get-stocks requests", async () => {
+    const mockedResponse = new Response("multi-response");
+    vi.mocked(getStocks).mockResolvedValue(mockedResponse);
+
+    const response = await worker.fetch(
+      makeRequest("/v1/api/get-stocks?symbols=MSFT,AMZN")
+    );
+
+    expect(getStocks).toHaveBeenCalledTimes(1);
     expect(response).toBe(mockedResponse);
   });
 

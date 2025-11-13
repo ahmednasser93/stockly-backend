@@ -8,17 +8,25 @@ export function setCache(key: string, data: any, ttlSeconds: number) {
 }
 
 export function getCache(key: string) {
-  const entry = cache.get(key);
+  const entry = getCacheEntry(key);
   if (!entry) return null;
-
-  if (Date.now() > entry.expiresAt) {
-    cache.delete(key);
-    return null;
-  }
-
+  if (entry.expired) return null;
   return entry.data;
 }
 
 export function clearCache() {
   cache.clear();
+}
+
+export function getCacheEntry(key: string): { data: any; expired: boolean } | null {
+  const entry = cache.get(key);
+  if (!entry) return null;
+
+  const expired = Date.now() > entry.expiresAt;
+  if (expired) {
+    cache.delete(key);
+    return { data: entry.data, expired: true };
+  }
+
+  return { data: entry.data, expired: false };
 }
