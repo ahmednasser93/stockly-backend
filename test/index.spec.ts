@@ -37,14 +37,14 @@ describe("worker router", () => {
     vi.mocked(getStock).mockResolvedValue(mockedResponse);
 
     const response = await worker.fetch(
-      makeRequest("/v1/api/get-stock?symbol=MSFT")
+      makeRequest("/v1/api/get-stock?symbol=MSFT"),
     );
 
     expect(getStock).toHaveBeenCalledTimes(1);
     const calledUrl = vi.mocked(getStock).mock.calls[0][0];
     expect(calledUrl).toBeInstanceOf(URL);
     expect(calledUrl.toString()).toBe(
-      "https://example.com/v1/api/get-stock?symbol=MSFT"
+      "https://example.com/v1/api/get-stock?symbol=MSFT",
     );
     expect(response).toBe(mockedResponse);
   });
@@ -54,7 +54,7 @@ describe("worker router", () => {
     vi.mocked(searchStock).mockResolvedValue(mockedResponse);
 
     const response = await worker.fetch(
-      makeRequest("/v1/api/search-stock?query=MSFT")
+      makeRequest("/v1/api/search-stock?query=MSFT"),
     );
 
     expect(searchStock).toHaveBeenCalled();
@@ -66,7 +66,7 @@ describe("worker router", () => {
     vi.mocked(getStocks).mockResolvedValue(mockedResponse);
 
     const response = await worker.fetch(
-      makeRequest("/v1/api/get-stocks?symbols=MSFT,AMZN")
+      makeRequest("/v1/api/get-stocks?symbols=MSFT,AMZN"),
     );
 
     expect(getStocks).toHaveBeenCalledTimes(1);
@@ -90,7 +90,7 @@ describe("worker router", () => {
     expect(response.status).toBe(204);
     expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
     expect(response.headers.get("Access-Control-Allow-Methods")).toContain(
-      "GET"
+      "GET",
     );
   });
 });

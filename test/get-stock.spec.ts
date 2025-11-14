@@ -57,7 +57,7 @@ describe("getStock handler", () => {
     const response = await getStock(createUrl({ symbol: "AAPL" }), createEnv());
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `${API_URL}/quote?symbol=AAPL&apikey=${API_KEY}`
+      `${API_URL}/quote?symbol=AAPL&apikey=${API_KEY}`,
     );
     await expect(response.json()).resolves.toEqual(quote);
     expect(getCache("quote:AAPL")).toEqual(quote);

@@ -4,6 +4,7 @@
 	"private": true,
 	"scripts": {
 		"deploy": "wrangler deploy",
+		"build": "wrangler deploy --dry-run",
 		"dev": "npm run db:migrate:local && wrangler dev --local --persist-to .wrangler/state",
 		"start": "wrangler dev --local --persist-to .wrangler/state",
 		"test": "vitest run",

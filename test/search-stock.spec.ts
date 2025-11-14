@@ -120,7 +120,7 @@ describe("searchStock handler", () => {
     const response = await searchStock(createUrl({ query: "AA" }), env);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `${API_URL}/search-symbol?query=AA&limit=5&apikey=${API_KEY}`
+      `${API_URL}/search-symbol?query=AA&limit=5&apikey=${API_KEY}`,
     );
     expect(spies.insertRun).toHaveBeenCalled();
     const insertArgs = getInsertArgs();
