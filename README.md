@@ -1,7 +1,7 @@
 ```markdown
 # Stockly API Worker
 
-Cloudflare Workers backend for Stockly. Provides cached quotes, multi-symbol batching, search with persistent caching, and a password-protected API explorer served from the same worker.
+Cloudflare Workers backend for Stockly. Provides cached quotes, multi-symbol batching, search with persistent caching, and a password-protected API explorer (served locally via `npm run doc`).
 
 ---
 
@@ -14,7 +14,6 @@ src/
     get-stock.ts       // single symbol quote handler + D1 inserts
     get-stocks.ts      // multi-symbol batching w/ cache + DB fallbacks
     search-stock.ts    // symbol search w/ memory + D1 cache (20m)
-    docs.ts            // serves docs/ via Basic Auth
     health.ts          // /v1/api/health
   index.ts             // router + CORS + asset binding
   util.ts              // API keys + json() helper
@@ -37,10 +36,10 @@ wrangler.jsonc         // Worker config + D1 + assets binding
 npm install
 npm run dev            # applies local D1 migrations + wrangler dev --local
 # Worker: http://127.0.0.1:8787
-# Docs:   http://127.0.0.1:8787/docs (Basic Auth: stockly/dashboard unless overridden)
+# Docs:   npm run doc  → http://localhost:4173 (Basic Auth: stockly/dashboard unless overridden)
 ```
 
-Preview docs without Worker:
+Preview docs (local-only):
 
 ```bash
 DOCS_USER=myuser DOCS_PASS=mypass npm run doc
@@ -69,21 +68,7 @@ npm run deploy
 wrangler d1 migrations apply stockly --remote   # run on first deploy or schema changes
 ```
 
-Docs live at `https://stockly-api.ahmednasser1993.workers.dev/docs/` behind HTTP Basic Auth.
-
----
-
-## Updating Safely
-
-1. `git pull && npm install`
-2. Implement changes (src/docs/migrations/tests).
-3. Run verification:
-   ```bash
-   npm test
-   npm run db:migrate:local
-   ```
-4. Deploy: `npm run deploy`
-5. Apply remote migrations if new: `wrangler d1 migrations apply stockly --remote`
+Docs are not published with the Worker; run `npm run doc` locally when needed.
 
 ---
 

@@ -41,7 +41,7 @@ const createEnv = (rows: DbRows = {}) => {
   });
 
   return {
-    env: { stockly: { prepare } as any, DOCS_ASSETS: { fetch: vi.fn() } as any } as Env,
+    env: { stockly: { prepare } as any } as Env,
     spies: { prepare, insertRun },
   };
 };

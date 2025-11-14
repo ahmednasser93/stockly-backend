@@ -10,10 +10,6 @@
 	"observability": {
 		"enabled": true
 	},
-	"assets": {
-		"directory": "./docs",
-		"binding": "DOCS_ASSETS"
-	},
 	"d1_databases": [
 		{
 			"binding": "stockly",

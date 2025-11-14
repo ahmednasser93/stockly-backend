@@ -18,7 +18,6 @@ const createEnv = (): Env => {
   const prepare = vi.fn().mockReturnValue({ bind });
   return {
     stockly: { prepare } as any,
-    DOCS_ASSETS: { fetch: vi.fn() } as any,
   };
 };
 

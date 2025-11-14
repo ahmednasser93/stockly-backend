@@ -45,7 +45,7 @@ const createEnv = (options?: {
   });
 
   return {
-    env: { stockly: { prepare } as any, DOCS_ASSETS: { fetch: vi.fn() } as any } as Env,
+    env: { stockly: { prepare } as any } as Env,
     spies: { prepare, selectFirst, insertRun },
     getInsertArgs: () => insertArgs,
   };
