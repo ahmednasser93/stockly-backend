@@ -4,7 +4,7 @@ export const API_URL = "https://financialmodelingprep.com/stable";
 export const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
 };
 
 export const json = (data: unknown, status = 200): Response => {

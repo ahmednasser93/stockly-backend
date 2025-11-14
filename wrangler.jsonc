@@ -17,7 +17,26 @@
 			"database_id": "d234268d-d8f1-49d2-9643-6a1d5bf0a589",
 			"remote": true
 		}
-	]
+	],
+	/**
+	 * KV Namespace for Alerts State
+	 * Run: wrangler kv namespace create "alertsKv"
+	 * Then replace YOUR_KV_NAMESPACE_ID with the ID from the output
+	 */
+	"kv_namespaces": [
+		{
+			"binding": "alertsKv",
+			"id": "544d9ef44da84d1bb7292ff3f741cedd"
+		}
+	],
+	/**
+	 * Cron Triggers for Price Alerts Evaluation
+	 * Schedule: Every 5 minutes
+	 * Adjust as needed: every 15 min, hourly, etc.
+	 */
+	"triggers": {
+		"crons": ["*/5 * * * *"]
+	}
 	/**
 	 * Smart Placement
 	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

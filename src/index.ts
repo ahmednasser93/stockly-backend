@@ -3,9 +3,17 @@ import { getStock } from "./api/get-stock";
 import { getStocks } from "./api/get-stocks";
 import { searchStock } from "./api/search-stock";
 import { healthCheck } from "./api/health";
+import { handleAlertsRequest } from "./api/alerts";
+import { registerPushToken, getPushToken } from "./api/push-token";
+import { getPreferences, updatePreferences } from "./api/preferences";
+import { getRecentNotifications, getFailedNotifications, retryNotification } from "./api/admin";
+import { getAllDevices, sendTestNotification, deleteDevice } from "./api/devices";
+import { runAlertCron } from "./cron/alerts-cron";
 
 export interface Env {
   stockly: D1Database;
+  alertsKv?: KVNamespace;
+  FCM_SERVICE_ACCOUNT?: string; // Google Cloud Service Account JSON as string
 }
 
 export default {
@@ -39,6 +47,65 @@ export default {
       return await searchStock(url, env);
     }
 
+    if (pathname.startsWith("/v1/api/alerts")) {
+      return await handleAlertsRequest(request, env);
+    }
+
+    if (pathname === "/v1/api/push-token") {
+      return await registerPushToken(request, env);
+    }
+
+    if (pathname.startsWith("/v1/api/push-token/")) {
+      const userId = pathname.split("/v1/api/push-token/")[1];
+      return await getPushToken(userId, env);
+    }
+
+    if (pathname === "/v1/api/preferences" && request.method === "PUT") {
+      return await updatePreferences(request, env);
+    }
+
+    if (pathname.startsWith("/v1/api/preferences/")) {
+      const userId = pathname.split("/v1/api/preferences/")[1];
+      return await getPreferences(userId, env);
+    }
+
+    if (pathname === "/v1/api/notifications/recent") {
+      return await getRecentNotifications(env);
+    }
+
+    if (pathname === "/v1/api/notifications/failed") {
+      return await getFailedNotifications(env);
+    }
+
+    if (pathname.startsWith("/v1/api/notifications/retry/")) {
+      if (request.method !== "POST") {
+        return json({ error: "Method not allowed" }, 405);
+      }
+      const logId = pathname.split("/v1/api/notifications/retry/")[1];
+      return await retryNotification(logId, env);
+    }
+
+    if (pathname === "/v1/api/devices") {
+      return await getAllDevices(env);
+    }
+
+    if (pathname.startsWith("/v1/api/devices/")) {
+      const pathAfterDevices = pathname.split("/v1/api/devices/")[1];
+      
+      if (pathAfterDevices.endsWith("/test")) {
+        // POST /v1/api/devices/:userId/test
+        const userId = pathAfterDevices.replace("/test", "");
+        return await sendTestNotification(userId, request, env);
+      } else if (request.method === "DELETE") {
+        // DELETE /v1/api/devices/:userId
+        const userId = pathAfterDevices;
+        return await deleteDevice(userId, env);
+      }
+    }
+
     return json({ error: "Not Found" }, 404);
+  },
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(runAlertCron(env));
   },
 };
