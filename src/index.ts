@@ -10,15 +10,18 @@ import { getSettings, updateSettings } from "./api/settings";
 import { getRecentNotifications, getFailedNotifications, retryNotification } from "./api/admin";
 import { getAllDevices, sendTestNotification, deleteDevice } from "./api/devices";
 import { runAlertCron } from "./cron/alerts-cron";
+import { getHistorical } from "./api/get-historical";
+import { getOpenApiSpec } from "./api/openapi";
 
 export interface Env {
   stockly: D1Database;
   alertsKv?: KVNamespace;
   FCM_SERVICE_ACCOUNT?: string; // Google Cloud Service Account JSON as string
+  FMP_API_KEY?: string; // Financial Modeling Prep API key (optional, falls back to hardcoded in util.ts)
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const pathname = url.pathname;
 
@@ -32,12 +35,16 @@ export default {
       });
     }
 
+    if (pathname === "/openapi.json") {
+      return await getOpenApiSpec();
+    }
+
     if (pathname === "/v1/api/health") {
       return healthCheck();
     }
 
     if (pathname === "/v1/api/get-stock") {
-      return await getStock(url, env);
+      return await getStock(url, env, ctx);
     }
 
     if (pathname === "/v1/api/get-stocks") {
@@ -46,6 +53,10 @@ export default {
 
     if (pathname === "/v1/api/search-stock") {
       return await searchStock(url, env);
+    }
+
+    if (pathname === "/v1/api/get-historical") {
+      return await getHistorical(url, env);
     }
 
     if (pathname.startsWith("/v1/api/alerts")) {

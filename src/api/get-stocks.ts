@@ -74,8 +74,11 @@ async function getLatestFromDb(
 
 async function fetchProfileFromApi(symbol: string): Promise<any> {
   // Fetch company profile which includes image and other details
-  // Try multiple profile endpoint variations
+  // IMPORTANT: Use query parameter ?symbol= not path parameter /profile/SYMBOL
   const profileEndpoints = [
+    // Correct format: /stable/profile?symbol=SYMBOL (with query param)
+    `${API_URL}/profile?symbol=${symbol}&apikey=${API_KEY}`,
+    // Try path-based format as fallback
     `${API_URL}/profile/${symbol}?apikey=${API_KEY}`,
     `${API_URL}/company/profile/${symbol}?apikey=${API_KEY}`,
   ];
@@ -169,9 +172,13 @@ async function fetchQuotesBatchFromApi(symbols: string[]): Promise<any[]> {
       if (!quote) return null;
       
       // Merge quote with profile data
+      // Prioritize description: profile description > quote description
+      const profileDesc = profile?.description || null;
       return {
         ...quote,
         ...(profile || {}),
+        // Ensure description is preserved (profile first, then quote)
+        description: profileDesc || quote?.description || null,
       };
     })
     .filter((quote): quote is any => quote !== null);

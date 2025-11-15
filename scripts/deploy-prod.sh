@@ -36,8 +36,14 @@ wrangler d1 execute stockly --remote --file=./migrations/004_create_user_push_to
 echo "Migration 5/6: 005_create_notification_preferences.sql"
 wrangler d1 execute stockly --remote --file=./migrations/005_create_notification_preferences.sql || echo "⚠️  Migration 5 already applied or failed"
 
-echo "Migration 6/6: 006_create_notifications_log.sql"
+echo "Migration 6/8: 006_create_notifications_log.sql"
 wrangler d1 execute stockly --remote --file=./migrations/006_create_notifications_log.sql || echo "⚠️  Migration 6 already applied or failed"
+
+echo "Migration 7/8: 007_create_user_settings.sql"
+wrangler d1 execute stockly --remote --file=./migrations/007_create_user_settings.sql || echo "⚠️  Migration 7 already applied or failed"
+
+echo "Migration 8/8: 008_create_historical_prices.sql"
+wrangler d1 execute stockly --remote --file=./migrations/008_create_historical_prices.sql || echo "⚠️  Migration 8 already applied or failed"
 
 echo ""
 echo "✅ Database migrations complete"
