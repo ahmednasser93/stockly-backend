@@ -6,6 +6,7 @@ import { healthCheck } from "./api/health";
 import { handleAlertsRequest } from "./api/alerts";
 import { registerPushToken, getPushToken } from "./api/push-token";
 import { getPreferences, updatePreferences } from "./api/preferences";
+import { getSettings, updateSettings } from "./api/settings";
 import { getRecentNotifications, getFailedNotifications, retryNotification } from "./api/admin";
 import { getAllDevices, sendTestNotification, deleteDevice } from "./api/devices";
 import { runAlertCron } from "./cron/alerts-cron";
@@ -67,6 +68,15 @@ export default {
     if (pathname.startsWith("/v1/api/preferences/")) {
       const userId = pathname.split("/v1/api/preferences/")[1];
       return await getPreferences(userId, env);
+    }
+
+    if (pathname === "/v1/api/settings" && request.method === "PUT") {
+      return await updateSettings(request, env);
+    }
+
+    if (pathname.startsWith("/v1/api/settings/")) {
+      const userId = pathname.split("/v1/api/settings/")[1];
+      return await getSettings(userId, env);
     }
 
     if (pathname === "/v1/api/notifications/recent") {

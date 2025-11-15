@@ -72,7 +72,37 @@ async function getLatestFromDb(
   return row ? mapDbRow(row) : null;
 }
 
-async function fetchQuoteFromApi(symbol: string): Promise<QuoteRecord> {
+async function fetchProfileFromApi(symbol: string): Promise<any> {
+  // Fetch company profile which includes image and other details
+  // Try multiple profile endpoint variations
+  const profileEndpoints = [
+    `${API_URL}/profile/${symbol}?apikey=${API_KEY}`,
+    `${API_URL}/company/profile/${symbol}?apikey=${API_KEY}`,
+  ];
+  
+  for (const profileApi of profileEndpoints) {
+    try {
+      const profileRes = await fetch(profileApi);
+      if (profileRes.ok) {
+        const profileData = await profileRes.json();
+        const profile = Array.isArray(profileData) && profileData.length > 0 ? profileData[0] : profileData;
+        if (profile && (profile.image || profile.symbol)) {
+          return profile;
+        }
+      }
+    } catch (error) {
+      console.warn(`Failed to fetch profile from ${profileApi}:`, error);
+    }
+  }
+  
+  // If profile endpoints don't work, construct image URL from symbol pattern
+  // Based on user's example: https://images.financialmodelingprep.com/symbol/AMZN.png
+  return {
+    image: `https://images.financialmodelingprep.com/symbol/${symbol.toUpperCase()}.png`,
+  };
+}
+
+async function fetchQuoteFromApi(symbol: string): Promise<any> {
   const api = `${API_URL}/quote?symbol=${symbol}&apikey=${API_KEY}`;
   const res = await fetch(api);
   if (!res.ok) {
@@ -83,7 +113,68 @@ async function fetchQuoteFromApi(symbol: string): Promise<QuoteRecord> {
   if (!payload) {
     throw new Error(`Empty payload for ${symbol}`);
   }
-  return mapQuotePayload(symbol, payload);
+  
+  // Fetch profile data to get image and additional fields
+  const profile = await fetchProfileFromApi(symbol);
+  
+  // Merge quote data with profile data (profile fields take precedence)
+  return {
+    ...payload,
+    ...(profile || {}),
+  };
+}
+
+/**
+ * Fetch multiple quotes from external API in a single batch request
+ * Financial Modeling Prep API supports comma-separated symbols
+ * Returns full payload with all fields (image, changePercentage, etc.)
+ */
+async function fetchQuotesBatchFromApi(symbols: string[]): Promise<any[]> {
+  if (symbols.length === 0) return [];
+  if (symbols.length === 1) {
+    const quote = await fetchQuoteFromApi(symbols[0]);
+    return [quote];
+  }
+  
+  // Batch request with comma-separated symbols for quotes
+  const symbolsParam = symbols.join(',');
+  const quoteApi = `${API_URL}/quote?symbol=${symbolsParam}&apikey=${API_KEY}`;
+  const quoteRes = await fetch(quoteApi);
+  
+  if (!quoteRes.ok) {
+    throw new Error(`Failed to fetch batch for symbols: ${symbolsParam}`);
+  }
+  
+  const quoteData = await quoteRes.json();
+  const quoteResults = Array.isArray(quoteData) ? quoteData : [quoteData];
+  
+  // Build quotes map
+  const quotesMap = new Map<string, any>();
+  for (const payload of quoteResults) {
+    if (payload && payload.symbol) {
+      quotesMap.set(payload.symbol.toUpperCase(), payload);
+    }
+  }
+  
+  // Fetch profiles in parallel for all symbols
+  const profilePromises = symbols.map((symbol) => fetchProfileFromApi(symbol));
+  const profiles = await Promise.all(profilePromises);
+  
+  // Merge profiles with quotes (profile fields take precedence)
+  return symbols
+    .map((symbol, index) => {
+      const quote = quotesMap.get(symbol.toUpperCase());
+      const profile = profiles[index];
+      
+      if (!quote) return null;
+      
+      // Merge quote with profile data
+      return {
+        ...quote,
+        ...(profile || {}),
+      };
+    })
+    .filter((quote): quote is any => quote !== null);
 }
 
 async function insertQuote(env: Env, quote: QuoteRecord) {
@@ -122,7 +213,7 @@ export async function getStocks(url: URL, env: Env): Promise<Response> {
     return json({ error: "symbols required" }, 400);
   }
 
-  const resultBySymbol = new Map<string, QuoteRecord>();
+  const resultBySymbol = new Map<string, any>();
   const toRefresh: string[] = [];
 
   for (const symbol of symbols) {
@@ -130,14 +221,17 @@ export async function getStocks(url: URL, env: Env): Promise<Response> {
     const cacheEntry = getCacheEntry(cacheKey);
 
     if (cacheEntry && !cacheEntry.expired) {
+      // Use cached full payload
       resultBySymbol.set(symbol, cacheEntry.data);
       continue;
     }
 
+    // For database records, we still use limited QuoteRecord, but prefer API refresh
     const dbRecord = await getLatestFromDb(env, symbol);
     if (dbRecord && isFresh(dbRecord.timestamp)) {
-      setCache(cacheKey, dbRecord, CACHE_TTL_SECONDS);
-      resultBySymbol.set(symbol, dbRecord);
+      // If DB record is fresh but we need full data, mark for refresh
+      // For now, we'll refresh to get full payload with image and changePercentage
+      toRefresh.push(symbol);
       continue;
     }
 
@@ -146,27 +240,32 @@ export async function getStocks(url: URL, env: Env): Promise<Response> {
 
   if (toRefresh.length) {
     try {
-      const refreshed = await Promise.all(
-        toRefresh.map(async (symbol) => {
-          const quote = await fetchQuoteFromApi(symbol);
-          await insertQuote(env, quote);
-          setCache(`quote:${symbol}`, quote, CACHE_TTL_SECONDS);
-          return quote;
+      // Fetch all required quotes in a single batch request to external API
+      // This returns full payload with all fields (image, changePercentage, etc.)
+      const refreshed = await fetchQuotesBatchFromApi(toRefresh);
+      
+      // Insert price data into database (for quick lookups) and cache full payload
+      await Promise.all(
+        refreshed.map(async (quote) => {
+          // Extract limited fields for DB storage
+          const dbQuote: QuoteRecord = mapQuotePayload(quote.symbol, quote);
+          await insertQuote(env, dbQuote);
+          
+          // Cache the FULL payload with all fields
+          setCache(`quote:${quote.symbol}`, quote, CACHE_TTL_SECONDS);
+          resultBySymbol.set(quote.symbol, quote);
         })
       );
-
-      refreshed.forEach((quote) => {
-        resultBySymbol.set(quote.symbol, quote);
-      });
     } catch (error) {
       console.error("Failed to refresh quotes", error);
       return json({ error: "failed to fetch stocks" }, 500);
     }
   }
 
+  // Return full payloads with all fields
   const orderedResults = symbols
     .map((symbol) => resultBySymbol.get(symbol))
-    .filter((quote): quote is QuoteRecord => Boolean(quote));
+    .filter((quote): quote is any => Boolean(quote));
 
   return json(orderedResults);
 }
