@@ -33,7 +33,8 @@ src/
   api/
     alerts.ts          // alerts CRUD endpoint handler
     cache.ts           // TTL Map helpers (shared in-memory cache)
-    get-stock.ts       // single symbol quote handler + D1 inserts
+    config.ts          // admin config system with KV storage + simulation mode
+    get-stock.ts       // single symbol quote handler + D1 inserts + simulation fallback
     get-stocks.ts      // multi-symbol batching w/ cache + DB fallbacks
     search-stock.ts    // symbol search w/ memory + D1 cache (20m)
     health.ts          // /v1/api/health
@@ -173,6 +174,184 @@ The alerts system sends push notifications to mobile devices via Expo Push Notif
 - `POST /v1/api/push-token` - Register/update device push token
 - `GET /v1/api/push-token/:userId` - Retrieve user's push token
 - Tokens are stored in the `user_push_tokens` table
+
+---
+
+## Provider Failure Handling & Simulation
+
+### Automatic Fallback (Production)
+
+The API automatically handles provider failures by falling back to cached database data and notifying users:
+
+1. **Automatic Detection**: When the external provider (FMP API) fails or returns errors:
+   - HTTP errors (500, 503, etc.)
+   - Invalid data responses
+   - Network errors or timeouts
+   
+2. **Fallback Behavior**: The `get-stock` endpoint automatically:
+   - Retrieves the most recent cached price from D1 database
+   - Returns stale data with `stale: true` and `stale_reason: "provider_api_error"`, `"provider_invalid_data"`, `"provider_network_error"`, etc.
+   - Sends push notifications to all registered users (throttled to once per 5 minutes per symbol)
+   - Uses `ctx.waitUntil` for non-blocking notification delivery
+
+3. **User Notifications**: When a provider failure occurs:
+   - All registered users receive a push notification: "⚠️ Service Alert: Using Cached Data"
+   - Message: "We're experiencing issues with our data provider. Showing last saved price for {symbol}. We're working on restoring full service."
+   - Notifications are throttled to prevent spam (max once per 5 minutes per symbol)
+
+4. **Response Format**: When fallback occurs:
+   ```json
+   {
+     "stale": true,
+     "stale_reason": "provider_api_error",
+     "symbol": "AAPL",
+     "price": 150.5,
+     "dayLow": 149.0,
+     "dayHigh": 151.0,
+     "volume": 1000000,
+     "lastUpdatedAt": "2025-01-15T10:30:00.000Z",
+     "timestamp": 1736949000
+   }
+   ```
+
+### Provider Failure Simulation (Testing)
+
+The provider failure simulation feature allows testing fallback behavior without actual provider failures. When enabled, the API returns stale cached data from the database instead of calling external providers.
+
+### How Simulation Mode Works
+
+1. **Enable Simulation**: Use `POST /v1/api/simulate-provider-failure` to enable simulation mode
+2. **Simulation Behavior**: When simulation is active, the `get-stock` endpoint:
+   - Skips calling external providers
+   - Retrieves the most recent cached price from D1 database
+   - Returns stale data with simulation flags: `simulationActive: true`, `stale: true`, `stale_reason: "simulation_mode"`
+   - Does NOT send user notifications (simulation only)
+3. **Disable Simulation**: Use `POST /v1/api/disable-provider-failure` to restore normal provider calls
+
+**Note**: Simulation mode is separate from automatic fallback. In production, when providers actually fail, the system automatically falls back to DB and notifies users, regardless of the simulation flag.
+
+---
+
+## Widget Data Support
+
+The API supports home screen widgets by providing stock data that can be cached locally on mobile devices. Widgets consume the same `get-stock` and `get-stocks` endpoints as the main app.
+
+### Widget Data Format
+
+Widgets expect stock data in the following format (derived from `get-stock` responses):
+
+```json
+{
+  "stocks": {
+    "AAPL": {
+      "symbol": "AAPL",
+      "price": 191.50,
+      "updatedAt": "2025-01-15T10:54:00Z",
+      "change": 2.50,
+      "changePercent": 1.32,
+      "previousClose": 189.00,
+      "stale": false,
+      "stale_reason": null
+    }
+  },
+  "lastSyncedAt": "2025-01-15T10:54:00Z"
+}
+```
+
+### Widget Caching Behavior
+
+- **Mobile apps** cache widget data locally (AsyncStorage on Android, App Group UserDefaults on iOS)
+- **Widgets** read from local cache only (not directly from backend)
+- **Cache sync** happens when the main app fetches fresh data
+- **Stale data** is handled gracefully - widgets show cached prices when provider fails
+
+### Widget Polling Expectations
+
+- Widgets refresh every 15 minutes (minimum allowed by iOS/Android)
+- Main app should sync widget data whenever:
+  - Stock data is fetched via `get-stock` or `get-stocks`
+  - Stocks are added/removed from watchlist
+  - User manually refreshes in the app
+
+### Stale Data in Widgets
+
+- When provider fails, widgets show cached prices from database fallback
+- `stale: true` and `stale_reason` fields indicate data staleness
+- Widgets display timestamps so users know when data was last updated
+
+### Widget Cache File Structure
+
+The mobile app stores widget data in JSON format:
+
+```json
+{
+  "stocks": {
+    "<SYMBOL>": {
+      "symbol": "<SYMBOL>",
+      "price": <NUMBER>,
+      "updatedAt": "<ISO8601_TIMESTAMP>",
+      "change": <NUMBER | null>,
+      "changePercent": <NUMBER | null>,
+      "previousClose": <NUMBER | null>,
+      "stale": <BOOLEAN>,
+      "stale_reason": "<STRING | null>"
+    }
+  },
+  "lastSyncedAt": "<ISO8601_TIMESTAMP>"
+}
+```
+
+**Storage Keys:**
+- Android: `@stockly:widget-data` in AsyncStorage
+- iOS: `@stockly:widget-data` in App Group UserDefaults
+
+### Endpoints
+
+- `POST /v1/api/simulate-provider-failure` - Enable simulation mode
+- `POST /v1/api/disable-provider-failure` - Disable simulation mode
+- `GET /config/get` - Get current admin configuration
+- `POST /config/update` - Update admin configuration
+
+### Configuration
+
+The simulation flag is stored in the admin config under `featureFlags.simulateProviderFailure`. The config is persisted in KV storage (`alertsKv` namespace) under the key `admin:config`.
+
+### Response Format
+
+When simulation is active and data is available in the database:
+
+```json
+{
+  "simulationActive": true,
+  "stale": true,
+  "stale_reason": "simulation_mode",
+  "symbol": "AAPL",
+  "price": 150.5,
+  "dayLow": 149.0,
+  "dayHigh": 151.0,
+  "volume": 1000000,
+  "lastUpdatedAt": "2025-01-15T10:30:00.000Z",
+  "timestamp": 1736949000
+}
+```
+
+When simulation is active but no data exists in the database:
+
+```json
+{
+  "error": "no_price_available"
+}
+```
+
+### Use Cases
+
+- **Testing Fallback Logic**: Verify that mobile/web apps handle stale data correctly
+- **QA Testing**: Test UI components that display warning banners for stale data
+- **Resilience Testing**: Validate that the system gracefully handles provider failures
+
+### Mobile App Integration
+
+When the mobile app receives a response with `stale === true` and `simulationActive === true`, it displays a non-blocking inline warning banner: "Simulated fallback: showing last saved price."
 
 ---
 

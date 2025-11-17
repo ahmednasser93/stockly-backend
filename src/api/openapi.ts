@@ -41,6 +41,10 @@ export async function getOpenApiSpec(): Promise<Response> {
         description: "Price alert management endpoints",
       },
       {
+        name: "Admin",
+        description: "Admin configuration and testing endpoints",
+      },
+      {
         name: "Health",
         description: "Health check endpoint",
       },
@@ -109,6 +113,10 @@ export async function getOpenApiSpec(): Promise<Response> {
                       marketCap: { type: "integer", example: 4051084938480 },
                       exchange: { type: "string", example: "NASDAQ" },
                       image: { type: "string", nullable: true },
+                      simulationActive: { type: "boolean", nullable: true, description: "Indicates if provider failure simulation is active (testing mode)" },
+                      stale: { type: "boolean", nullable: true, description: "Indicates if data is stale (simulation or actual provider failure)" },
+                      stale_reason: { type: "string", nullable: true, description: "Reason for stale data: 'simulation_mode' (test), 'provider_api_error', 'provider_invalid_data', 'provider_network_error', etc." },
+                      lastUpdatedAt: { type: "string", nullable: true, format: "date-time", description: "ISO timestamp of when data was last updated" },
                     },
                   },
                 },
@@ -118,7 +126,7 @@ export async function getOpenApiSpec(): Promise<Response> {
               description: "Bad request - symbol parameter required",
             },
             "404": {
-              description: "Symbol not found",
+              description: "Symbol not found or no_price_available (when simulation is enabled but no DB data exists)",
             },
             "500": {
               description: "Server error",
@@ -282,6 +290,124 @@ export async function getOpenApiSpec(): Promise<Response> {
                   },
                   example: {
                     error: "failed to fetch historical prices",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/v1/api/simulate-provider-failure": {
+        post: {
+          summary: "Enable provider failure simulation",
+          description:
+            "Enables simulation mode that makes the API return stale cached data instead of calling external providers. Useful for testing fallback behavior.",
+          tags: ["Admin"],
+          responses: {
+            "200": {
+              description: "Simulation enabled successfully",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/AdminConfig",
+                  },
+                },
+              },
+            },
+            "500": {
+              description: "Server error",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/v1/api/disable-provider-failure": {
+        post: {
+          summary: "Disable provider failure simulation",
+          description:
+            "Disables simulation mode and restores normal provider calls.",
+          tags: ["Admin"],
+          responses: {
+            "200": {
+              description: "Simulation disabled successfully",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/AdminConfig",
+                  },
+                },
+              },
+            },
+            "500": {
+              description: "Server error",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/config/get": {
+        get: {
+          summary: "Get admin configuration",
+          description: "Retrieves the current admin configuration including feature flags.",
+          tags: ["Admin"],
+          responses: {
+            "200": {
+              description: "Successful response",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/AdminConfig",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/config/update": {
+        post: {
+          summary: "Update admin configuration",
+          description: "Updates admin configuration with provided values.",
+          tags: ["Admin"],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/AdminConfigUpdate",
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "Configuration updated successfully",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/AdminConfig",
+                  },
+                },
+              },
+            },
+            "500": {
+              description: "Server error",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
                   },
                 },
               },
@@ -594,6 +720,83 @@ export async function getOpenApiSpec(): Promise<Response> {
               type: "string",
               description: "Human-readable error message",
               example: "error message",
+            },
+          },
+        },
+        AdminConfig: {
+          type: "object",
+          required: ["pollingIntervalSec", "primaryProvider", "backupProvider", "alertThrottle", "featureFlags"],
+          properties: {
+            pollingIntervalSec: {
+              type: "integer",
+              description: "Price polling interval in seconds",
+              example: 30,
+            },
+            primaryProvider: {
+              type: "string",
+              description: "Primary quote provider",
+              example: "alpha-feed",
+            },
+            backupProvider: {
+              type: "string",
+              description: "Backup quote provider",
+              example: "beta-feed",
+            },
+            alertThrottle: {
+              type: "object",
+              required: ["maxAlerts", "windowSeconds"],
+              properties: {
+                maxAlerts: {
+                  type: "integer",
+                  example: 100,
+                },
+                windowSeconds: {
+                  type: "integer",
+                  example: 60,
+                },
+              },
+            },
+            featureFlags: {
+              type: "object",
+              required: ["alerting", "sandboxMode", "simulateProviderFailure"],
+              properties: {
+                alerting: {
+                  type: "boolean",
+                  example: true,
+                },
+                sandboxMode: {
+                  type: "boolean",
+                  example: false,
+                },
+                simulateProviderFailure: {
+                  type: "boolean",
+                  description: "When enabled, API returns stale cached data instead of calling external providers",
+                  example: false,
+                },
+              },
+            },
+          },
+        },
+        AdminConfigUpdate: {
+          type: "object",
+          properties: {
+            pollingIntervalSec: { type: "integer" },
+            primaryProvider: { type: "string" },
+            backupProvider: { type: "string" },
+            alertThrottle: {
+              type: "object",
+              properties: {
+                maxAlerts: { type: "integer" },
+                windowSeconds: { type: "integer" },
+              },
+            },
+            featureFlags: {
+              type: "object",
+              properties: {
+                alerting: { type: "boolean" },
+                sandboxMode: { type: "boolean" },
+                simulateProviderFailure: { type: "boolean" },
+              },
             },
           },
         },

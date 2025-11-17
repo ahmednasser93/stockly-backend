@@ -12,6 +12,12 @@ import { getAllDevices, sendTestNotification, deleteDevice } from "./api/devices
 import { runAlertCron } from "./cron/alerts-cron";
 import { getHistorical } from "./api/get-historical";
 import { getOpenApiSpec } from "./api/openapi";
+import {
+  getConfigEndpoint,
+  updateConfigEndpoint,
+  simulateProviderFailureEndpoint,
+  disableProviderFailureEndpoint,
+} from "./api/config";
 
 export interface Env {
   stockly: D1Database;
@@ -122,6 +128,24 @@ export default {
         const userId = pathAfterDevices;
         return await deleteDevice(userId, env);
       }
+    }
+
+    // Config endpoints
+    if (pathname === "/config/get" && request.method === "GET") {
+      return await getConfigEndpoint(env);
+    }
+
+    if (pathname === "/config/update" && request.method === "POST") {
+      return await updateConfigEndpoint(request, env);
+    }
+
+    // Provider failure simulation endpoints
+    if (pathname === "/v1/api/simulate-provider-failure" && request.method === "POST") {
+      return await simulateProviderFailureEndpoint(env);
+    }
+
+    if (pathname === "/v1/api/disable-provider-failure" && request.method === "POST") {
+      return await disableProviderFailureEndpoint(env);
     }
 
     return json({ error: "Not Found" }, 404);
