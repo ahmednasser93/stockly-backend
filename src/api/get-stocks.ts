@@ -1,8 +1,7 @@
 import { API_KEY, API_URL, json } from "../util";
 import type { Env } from "../index";
-import { getCacheEntry, setCache } from "./cache";
-
-const CACHE_TTL_SECONDS = 30;
+import { getCacheIfValid, setCache } from "./cache";
+import { getConfig } from "./config";
 
 type QuoteRecord = {
   symbol: string;
@@ -24,9 +23,9 @@ type DbRow = {
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
-const isFresh = (timestamp?: number | null) => {
+const isFresh = (timestamp?: number | null, pollingIntervalSec: number = 30) => {
   if (!timestamp) return false;
-  return nowSeconds() - timestamp <= CACHE_TTL_SECONDS;
+  return nowSeconds() - timestamp <= pollingIntervalSec;
 };
 
 const normalizeSymbol = (symbol: string) => symbol.trim().toUpperCase();
@@ -266,22 +265,27 @@ export async function getStocks(url: URL, env: Env): Promise<Response> {
     return json({ error: "symbols required" }, 400);
   }
 
+  // Get config to check polling interval
+  const config = await getConfig(env);
+  const pollingIntervalSec = config.pollingIntervalSec;
+
   const resultBySymbol = new Map<string, any>();
   const toRefresh: string[] = [];
 
   for (const symbol of symbols) {
     const cacheKey = `quote:${symbol}`;
-    const cacheEntry = getCacheEntry(cacheKey);
+    // Check cache with polling interval validation
+    const cachedEntry = getCacheIfValid(cacheKey, pollingIntervalSec);
 
-    if (cacheEntry && !cacheEntry.expired) {
-      // Use cached full payload
-      resultBySymbol.set(symbol, cacheEntry.data);
+    if (cachedEntry) {
+      // Cache is still valid (age < pollingIntervalSec), use cached data
+      resultBySymbol.set(symbol, cachedEntry.data);
       continue;
     }
 
-    // For database records, we still use limited QuoteRecord, but prefer API refresh
+    // For database records, check if fresh based on polling interval
     const dbRecord = await getLatestFromDb(env, symbol);
-    if (dbRecord && isFresh(dbRecord.timestamp)) {
+    if (dbRecord && isFresh(dbRecord.timestamp, pollingIntervalSec)) {
       // If DB record is fresh but we need full data, mark for refresh
       // For now, we'll refresh to get full payload with image and changePercentage
       toRefresh.push(symbol);
@@ -304,8 +308,8 @@ export async function getStocks(url: URL, env: Env): Promise<Response> {
           const dbQuote: QuoteRecord = mapQuotePayload(quote.symbol, quote);
           await insertQuote(env, dbQuote);
           
-          // Cache the FULL payload with all fields
-          setCache(`quote:${quote.symbol}`, quote, CACHE_TTL_SECONDS);
+          // Cache the FULL payload with all fields using polling interval from config
+          setCache(`quote:${quote.symbol}`, quote, pollingIntervalSec + 5);
           resultBySymbol.set(quote.symbol, quote);
         })
       );

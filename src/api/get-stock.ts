@@ -1,4 +1,4 @@
-import { getCache, setCache } from "./cache";
+import { getCacheIfValid, setCache } from "./cache";
 import type { Env } from "../index";
 import { API_KEY, API_URL, json } from "../util";
 import { fetchAndSaveHistoricalPrice } from "./historical-prices";
@@ -13,12 +13,32 @@ export async function getStock(url: URL, env: Env, ctx?: ExecutionContext): Prom
   const normalizedSymbol = symbol.toUpperCase();
   const cacheKey = `quote:${normalizedSymbol}`;
   
-  // Check cache first (normal flow)
-  const cached = getCache(cacheKey);
-  if (cached) return json(cached);
+  // Get config first to check polling interval
+  const config = await getConfig(env);
+  const pollingIntervalSec = config.pollingIntervalSec;
+  
+  // Check cache with polling interval validation
+  // This checks if cachedAt timestamp is still within the polling interval
+  const cachedEntry = getCacheIfValid(cacheKey, pollingIntervalSec);
+  if (cachedEntry) {
+    // Cache is still valid (age < pollingIntervalSec), return cached data
+    const ageSeconds = Math.floor((Date.now() - cachedEntry.cachedAt) / 1000);
+    console.log(`Cache hit for ${normalizedSymbol}: age=${ageSeconds}s < interval=${pollingIntervalSec}s`);
+    return json(cachedEntry.data);
+  }
+
+  // Cache is either missing or too old (age >= pollingIntervalSec)
+  // Need to fetch fresh data from provider
+  // Check if cache exists at all (even if expired) for logging
+  const existingCacheEntry = getCacheIfValid(cacheKey, Infinity);
+  if (existingCacheEntry) {
+    const ageSeconds = Math.floor((Date.now() - existingCacheEntry.cachedAt) / 1000);
+    console.log(`Cache expired for ${normalizedSymbol}: age=${ageSeconds}s >= interval=${pollingIntervalSec}s, fetching fresh data`);
+  } else {
+    console.log(`No cache for ${normalizedSymbol}, fetching fresh data`);
+  }
 
   // Check if provider failure simulation is enabled
-  const config = await getConfig(env);
   if (config.featureFlags.simulateProviderFailure) {
     // Simulation mode: return stale data from DB without calling provider
     try {
@@ -207,7 +227,9 @@ export async function getStock(url: URL, env: Env, ctx?: ExecutionContext): Prom
       description: finalDescription,
     };
 
-    setCache(cacheKey, parsed, 30);
+    // Use pollingIntervalSec from config for cache TTL
+    // Set TTL to be slightly longer than polling interval to avoid edge cases
+    setCache(cacheKey, parsed, pollingIntervalSec + 5);
 
     await env.stockly
       .prepare(
