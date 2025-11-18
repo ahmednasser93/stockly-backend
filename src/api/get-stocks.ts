@@ -72,25 +72,56 @@ async function getLatestFromDb(
   return row ? mapDbRow(row) : null;
 }
 
-async function fetchProfileFromApi(symbol: string): Promise<any> {
-  // Fetch company profile which includes image and other details
+async function fetchProfileFromApi(symbol: string, quote?: any): Promise<{ profile: any; description: string | null }> {
+  // Fetch company profile which includes image, description, and additional fields
+  // Try multiple endpoint versions and paths
+  let profile = null;
+  let profileDescription = null;
+  
+  // Try all possible FMP profile endpoints
   // IMPORTANT: Use query parameter ?symbol= not path parameter /profile/SYMBOL
   const profileEndpoints = [
     // Correct format: /stable/profile?symbol=SYMBOL (with query param)
     `${API_URL}/profile?symbol=${symbol}&apikey=${API_KEY}`,
-    // Try path-based format as fallback
+    // Try path-based format as fallback (some endpoints use this)
     `${API_URL}/profile/${symbol}?apikey=${API_KEY}`,
     `${API_URL}/company/profile/${symbol}?apikey=${API_KEY}`,
+    // Try v3 API as last resort (requires legacy subscription)
+    `https://financialmodelingprep.com/api/v3/profile/${symbol}?apikey=${API_KEY}`,
   ];
   
   for (const profileApi of profileEndpoints) {
     try {
-      const profileRes = await fetch(profileApi);
+      const profileRes = await fetch(profileApi, {
+        headers: {
+          'Accept': 'application/json',
+        },
+      });
+      
       if (profileRes.ok) {
         const profileData = await profileRes.json();
-        const profile = Array.isArray(profileData) && profileData.length > 0 ? profileData[0] : profileData;
-        if (profile && (profile.image || profile.symbol)) {
-          return profile;
+        
+        if (Array.isArray(profileData) && profileData.length === 0) {
+          continue;
+        }
+        
+        const fetchedProfile = Array.isArray(profileData) && profileData.length > 0 ? profileData[0] : profileData;
+        
+        // Check for error messages
+        if (fetchedProfile && fetchedProfile['Error Message']) {
+          continue;
+        }
+        
+        if (fetchedProfile && (fetchedProfile.symbol || fetchedProfile.Symbol)) {
+          profile = fetchedProfile;
+          // Capture description from profile if available (try multiple field names)
+          const desc = fetchedProfile.description || fetchedProfile.Description || fetchedProfile.descriptionText;
+          if (desc) {
+            profileDescription = desc;
+            break;
+          }
+          // If we got a valid profile, use it even without description
+          break;
         }
       }
     } catch (error) {
@@ -98,10 +129,46 @@ async function fetchProfileFromApi(symbol: string): Promise<any> {
     }
   }
   
+  // Capture description from quote before merging
+  const quoteDescription = quote?.description || null;
+  
   // If profile endpoints don't work, construct image URL from symbol pattern
   // Based on user's example: https://images.financialmodelingprep.com/symbol/AMZN.png
+  if (!profile || !profile.image) {
+    profile = {
+      ...profile,
+      image: `https://images.financialmodelingprep.com/symbol/${symbol.toUpperCase()}.png`,
+    };
+  }
+
+  // Try to get description from Wikipedia as fallback if FMP doesn't provide it
+  let wikipediaDescription = null;
+  if (!profileDescription && !quoteDescription) {
+    try {
+      // Get company name from quote or profile
+      const companyName = quote?.name || quote?.companyName || profile?.name || profile?.companyName || symbol;
+      
+      // Try to fetch from Wikipedia API
+      const wikiSearchUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(companyName)}`;
+      const wikiRes = await fetch(wikiSearchUrl);
+      
+      if (wikiRes.ok) {
+        const wikiData = await wikiRes.json() as { extract?: string };
+        if (wikiData.extract) {
+          wikipediaDescription = wikiData.extract;
+        }
+      }
+    } catch (wikiError) {
+      console.warn(`Failed to fetch from Wikipedia:`, wikiError);
+    }
+  }
+
+  // Determine final description: profile description > quote description > wikipedia
+  const finalDescription = profileDescription || quoteDescription || profile?.description || wikipediaDescription || null;
+  
   return {
-    image: `https://images.financialmodelingprep.com/symbol/${symbol.toUpperCase()}.png`,
+    profile: profile || { image: `https://images.financialmodelingprep.com/symbol/${symbol.toUpperCase()}.png` },
+    description: finalDescription,
   };
 }
 
@@ -117,14 +184,23 @@ async function fetchQuoteFromApi(symbol: string): Promise<any> {
     throw new Error(`Empty payload for ${symbol}`);
   }
   
-  // Fetch profile data to get image and additional fields
-  const profile = await fetchProfileFromApi(symbol);
+  // Fetch profile data to get image, description, and additional fields
+  const { profile, description } = await fetchProfileFromApi(symbol, payload);
   
-  // Merge quote data with profile data (profile fields take precedence)
-  return {
+  // Merge quote with profile (profile fields take precedence)
+  // Explicitly preserve description, name, and ensure image is set
+  const parsed = {
     ...payload,
     ...(profile || {}),
+    // Explicitly set description to ensure it's not lost during merge
+    description: description,
+    // Ensure name is set from companyName if name is missing
+    name: payload.name || payload.companyName || profile?.name || profile?.companyName || symbol,
+    // Ensure image is always set
+    image: profile?.image || `https://images.financialmodelingprep.com/symbol/${symbol.toUpperCase()}.png`,
   };
+  
+  return parsed;
 }
 
 /**
@@ -134,54 +210,24 @@ async function fetchQuoteFromApi(symbol: string): Promise<any> {
  */
 async function fetchQuotesBatchFromApi(symbols: string[]): Promise<any[]> {
   if (symbols.length === 0) return [];
-  if (symbols.length === 1) {
-    const quote = await fetchQuoteFromApi(symbols[0]);
-    return [quote];
-  }
   
-  // Batch request with comma-separated symbols for quotes
-  const symbolsParam = symbols.join(',');
-  const quoteApi = `${API_URL}/quote?symbol=${symbolsParam}&apikey=${API_KEY}`;
-  const quoteRes = await fetch(quoteApi);
+  // Financial Modeling Prep /stable/quote endpoint doesn't support batch requests with comma-separated symbols
+  // It returns empty arrays. So we need to fetch each symbol individually in parallel
+  const quotePromises = symbols.map((symbol) => fetchQuoteFromApi(symbol));
+  const quoteResults = await Promise.allSettled(quotePromises);
   
-  if (!quoteRes.ok) {
-    throw new Error(`Failed to fetch batch for symbols: ${symbolsParam}`);
-  }
-  
-  const quoteData = await quoteRes.json();
-  const quoteResults = Array.isArray(quoteData) ? quoteData : [quoteData];
-  
-  // Build quotes map
-  const quotesMap = new Map<string, any>();
-  for (const payload of quoteResults) {
-    if (payload && payload.symbol) {
-      quotesMap.set(payload.symbol.toUpperCase(), payload);
+  // Filter out failed requests and return successful quotes
+  const results: any[] = [];
+  for (let i = 0; i < quoteResults.length; i++) {
+    const result = quoteResults[i];
+    if (result.status === 'fulfilled') {
+      results.push(result.value);
+    } else {
+      console.warn(`Failed to fetch quote for ${symbols[i]}:`, result.reason);
     }
   }
   
-  // Fetch profiles in parallel for all symbols
-  const profilePromises = symbols.map((symbol) => fetchProfileFromApi(symbol));
-  const profiles = await Promise.all(profilePromises);
-  
-  // Merge profiles with quotes (profile fields take precedence)
-  return symbols
-    .map((symbol, index) => {
-      const quote = quotesMap.get(symbol.toUpperCase());
-      const profile = profiles[index];
-      
-      if (!quote) return null;
-      
-      // Merge quote with profile data
-      // Prioritize description: profile description > quote description
-      const profileDesc = profile?.description || null;
-      return {
-        ...quote,
-        ...(profile || {}),
-        // Ensure description is preserved (profile first, then quote)
-        description: profileDesc || quote?.description || null,
-      };
-    })
-    .filter((quote): quote is any => quote !== null);
+  return results;
 }
 
 async function insertQuote(env: Env, quote: QuoteRecord) {
