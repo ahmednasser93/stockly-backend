@@ -342,26 +342,23 @@ async function handleProviderFailure(
  */
 async function notifyUsersOfProviderFailure(symbol: string, env: Env): Promise<void> {
   try {
-    // Throttle notifications using KV - only send once per 5 minutes per symbol
-    if (env.alertsKv) {
-      const throttleKey = `provider_failure:${symbol}:notification_sent`;
-      const lastSent = await env.alertsKv.get(throttleKey);
-      const now = Math.floor(Date.now() / 1000);
-      const THROTTLE_WINDOW_SECONDS = 300; // 5 minutes
-
-      if (lastSent) {
-        const lastSentTime = parseInt(lastSent, 10);
-        const timeSinceLastSent = now - lastSentTime;
-        
-        if (timeSinceLastSent < THROTTLE_WINDOW_SECONDS) {
-          console.log(`Provider failure notification for ${symbol} throttled. Last sent ${timeSinceLastSent}s ago.`);
-          return; // Skip notification - too soon since last one
-        }
-      }
-
-      // Mark notification as sent
-      await env.alertsKv.put(throttleKey, now.toString(), { expirationTtl: THROTTLE_WINDOW_SECONDS });
+    // Throttle notifications using in-memory cache (no KV read/write)
+    const throttleKey = `provider_failure:${symbol}:notification_sent`;
+    
+    // Import throttle cache functions (dynamic import to avoid circular deps)
+    const { isThrottled, markThrottled } = await import("./throttle-cache");
+    
+    if (isThrottled(throttleKey)) {
+      console.log(`Provider failure notification for ${symbol} throttled (in-memory cache).`);
+      return; // Skip notification - too soon since last one
     }
+
+    // Mark as throttled in cache (no KV write)
+    markThrottled(throttleKey);
+    
+    // Optional: Write to KV for persistence across worker restarts (batched or infrequent)
+    // Only write to KV if needed for cross-instance coordination
+    // For now, we skip KV writes to reduce operations
 
     // Get all registered push tokens
     const rows = await env.stockly

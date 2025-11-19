@@ -1,10 +1,15 @@
 import { API_KEY, API_URL } from "../util";
 import type { Env } from "../index";
 import { listActiveAlerts } from "../alerts/storage";
-import { readAlertState, writeAlertState } from "../alerts/state";
 import { evaluateAlerts } from "../alerts/evaluate-alerts";
-import type { AlertRecord, AlertStateSnapshot } from "../alerts/types";
+import type { AlertRecord } from "../alerts/types";
 import { sendFCMNotification } from "../notifications/fcm-sender";
+import { getConfig } from "../api/config";
+import {
+  loadAllStatesFromKV,
+  updateStateInCache,
+  flushPendingWritesToKV,
+} from "../alerts/state-cache";
 
 async function fetchQuote(symbol: string): Promise<number | null> {
   const endpoint = `${API_URL}/quote?symbol=${symbol}&apikey=${API_KEY}`;
@@ -35,16 +40,7 @@ async function fetchPrices(symbols: string[]): Promise<Record<string, number>> {
   return priceBySymbol;
 }
 
-async function loadState(kv: KVNamespace, alerts: AlertRecord[]): Promise<Record<string, AlertStateSnapshot>> {
-  const state: Record<string, AlertStateSnapshot> = {};
-  for (const alert of alerts) {
-    const snapshot = await readAlertState(kv, alert.id);
-    if (snapshot) {
-      state[alert.id] = snapshot;
-    }
-  }
-  return state;
-}
+// Removed loadState - now using cache-based loadAllStatesFromKV
 
 export async function runAlertCron(env: Env): Promise<void> {
   if (!env.alertsKv) {
@@ -64,7 +60,11 @@ export async function runAlertCron(env: Env): Promise<void> {
     return;
   }
 
-  const stateById = await loadState(env.alertsKv, alerts);
+  // Load states from cache (or KV if cache is empty/expired)
+  const alertIds = alerts.map(a => a.id);
+  const stateById = await loadAllStatesFromKV(env.alertsKv, alertIds);
+  
+  // Evaluate alerts using cached states
   const result = evaluateAlerts({
     alerts,
     priceBySymbol,
@@ -72,10 +72,18 @@ export async function runAlertCron(env: Env): Promise<void> {
     timestamp: Date.now(),
   });
 
-  const writes = Object.entries(result.stateUpdates).map(([id, snapshot]) =>
-    writeAlertState(env.alertsKv!, id, snapshot)
-  );
-  await Promise.all(writes);
+  // Update states in memory cache (queued for batched KV write)
+  // This does NOT write to KV immediately - writes are batched
+  for (const [id, snapshot] of Object.entries(result.stateUpdates)) {
+    updateStateInCache(id, snapshot);
+  }
+  
+  // Get config to check KV write interval
+  const config = await getConfig(env);
+  const kvWriteIntervalSec = config.kvWriteIntervalSec || 3600; // Default: 1 hour
+  
+  // Check if we should flush pending writes to KV (based on configured interval)
+  await flushPendingWritesToKV(env.alertsKv, kvWriteIntervalSec);
 
   // Send Expo Push Notifications for triggered alerts
   for (const notification of result.notifications) {

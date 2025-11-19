@@ -30,6 +30,7 @@ vi.mock("../src/alerts/state", () => ({
 }));
 import { API_KEY, API_URL } from "../src/util";
 import { clearCache, setCache } from "../src/api/cache";
+import { clearConfigCache } from "../src/api/config";
 import {
   validateStockQuoteResponse,
   validateStockQuotesResponse,
@@ -182,10 +183,15 @@ describe("API Integration - Get Stock", () => {
 describe("API Integration - Get Stocks", () => {
   beforeEach(() => {
     clearCache();
+    clearConfigCache();
     vi.restoreAllMocks();
   });
 
   it("successfully fetches multiple stocks with all required fields", async () => {
+    // Clear caches to ensure fresh fetch
+    clearCache();
+    clearConfigCache();
+    
     const mockQuotes = [
       {
         symbol: "AAPL",
@@ -213,15 +219,32 @@ describe("API Integration - Get Stocks", () => {
       },
     ];
 
+    // Mock fetch - need to handle multiple quote calls (one per symbol) and profile calls
+    let quoteCallCount = 0;
     vi.spyOn(globalThis as any, "fetch")
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockQuotes,
-      } as Response)
-      .mockResolvedValue({
-        ok: true,
-        json: async () => [{ description: "Test" }],
-      } as Response);
+      .mockImplementation((url: string) => {
+        if (url.includes("/quote?")) {
+          // Each symbol gets its own quote call - return the appropriate quote
+          const symbol = url.match(/symbol=([^&]+)/)?.[1];
+          const quote = mockQuotes.find(q => q.symbol === symbol);
+          quoteCallCount++;
+          return Promise.resolve({
+            ok: true,
+            json: async () => quote ? [quote] : [],
+          } as Response);
+        }
+        // Profile endpoint or Wikipedia - return empty or minimal data
+        if (url.includes("wikipedia.org")) {
+          return Promise.resolve({
+            ok: false,
+          } as Response);
+        }
+        // Profile endpoint - return empty array (profile fetching will skip)
+        return Promise.resolve({
+          ok: true,
+          json: async () => [],
+        } as Response);
+      });
 
     const env = createEnv();
     const response = await getStocks(createUrl("/v1/api/get-stocks", { symbols: "AAPL,MSFT" }), env);

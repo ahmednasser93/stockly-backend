@@ -4,6 +4,7 @@ import {
   updateConfig,
   simulateProviderFailureEndpoint,
   disableProviderFailureEndpoint,
+  clearConfigCache,
 } from "../src/api/config";
 import type { Env } from "../src/index";
 
@@ -29,10 +30,14 @@ describe("Config System", () => {
 
   beforeEach(() => {
     env = createEnv();
+    // Clear config cache before each test to ensure fresh state
+    clearConfigCache();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    // Clear config cache after each test as well
+    clearConfigCache();
   });
 
   describe("getConfig", () => {

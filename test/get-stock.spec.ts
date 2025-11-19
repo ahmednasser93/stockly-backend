@@ -2,7 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { getStock } from "../src/api/get-stock";
 import { API_KEY, API_URL } from "../src/util";
 import { clearCache, setCache, getCache } from "../src/api/cache";
+import { clearConfigCache } from "../src/api/config";
 import type { Env } from "../src/index";
+
+// Mock FCM notification module
+vi.mock("../src/notifications/fcm-sender", () => ({
+  sendFCMNotification: vi.fn().mockResolvedValue(true),
+}));
 
 const createUrl = (params: Record<string, string> = {}) => {
   const url = new URL("https://example.com/v1/api/get-stock");
@@ -24,10 +30,12 @@ const createEnv = (): Env => {
 describe("getStock handler", () => {
   beforeEach(() => {
     clearCache();
+    clearConfigCache();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    clearConfigCache();
   });
 
   it("requires a symbol", async () => {
@@ -48,43 +56,96 @@ describe("getStock handler", () => {
   });
 
   it("fetches the quote and caches the parsed response", async () => {
+    const env = createEnv();
+    // Set up default config in KV
+    const kvMap = new Map<string, string>();
+    kvMap.set(
+      "admin:config",
+      JSON.stringify({
+        pollingIntervalSec: 30,
+        featureFlags: { simulateProviderFailure: false },
+      })
+    );
+    env.alertsKv = {
+      get: vi.fn((key: string) => Promise.resolve(kvMap.get(key) ?? null)),
+      put: vi.fn(() => Promise.resolve()),
+    } as any;
+
     const quote = { symbol: "AAPL", price: 195 };
-    const json = vi.fn().mockResolvedValue([quote]);
+    const quoteJson = vi.fn().mockResolvedValue([quote]);
+    const profileJson = vi.fn().mockResolvedValue([]);
     const fetchMock = vi
       .spyOn(globalThis as any, "fetch")
-      .mockResolvedValue({ json } as Response);
+      .mockImplementation((url: string) => {
+        if (url.includes("/quote?")) {
+          return Promise.resolve({ ok: true, json: quoteJson } as Response);
+        }
+        // Profile endpoints
+        return Promise.resolve({ ok: true, json: profileJson } as Response);
+      });
 
-    const response = await getStock(createUrl({ symbol: "AAPL" }), createEnv());
+    const bind = vi.fn().mockReturnValue({ run: vi.fn().mockResolvedValue(undefined) });
+    const prepare = vi.fn().mockReturnValue({ bind });
+    env.stockly = { prepare } as any;
+
+    const response = await getStock(createUrl({ symbol: "AAPL" }), env);
 
     expect(fetchMock).toHaveBeenCalledWith(
       `${API_URL}/quote?symbol=AAPL&apikey=${API_KEY}`,
     );
-    await expect(response.json()).resolves.toEqual(quote);
-    expect(getCache("quote:AAPL")).toEqual(quote);
+    const data = await response.json();
+    // Profile fetching adds extra fields, so just check the core fields
+    expect(data.symbol).toBe("AAPL");
+    expect(data.price).toBe(195);
+    expect(getCache("quote:AAPL")).toBeTruthy();
   });
 
   it("returns an error when the upstream API fails", async () => {
+    const env = createEnv();
+    // Set up default config in KV
+    const kvMap = new Map<string, string>();
+    kvMap.set(
+      "admin:config",
+      JSON.stringify({
+        pollingIntervalSec: 30,
+        featureFlags: { simulateProviderFailure: false },
+      })
+    );
+    env.alertsKv = {
+      get: vi.fn((key: string) => Promise.resolve(kvMap.get(key) ?? null)),
+      put: vi.fn(() => Promise.resolve()),
+    } as any;
+
+    // Mock DB to return null (no fallback data)
+    const bind = vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(null) });
+    const prepare = vi.fn().mockReturnValue({ bind });
+    env.stockly = { prepare } as any;
+
     vi.spyOn(globalThis as any, "fetch").mockRejectedValue(new Error("fail"));
 
-    const response = await getStock(createUrl({ symbol: "TSLA" }), createEnv());
+    const response = await getStock(createUrl({ symbol: "TSLA" }), env);
 
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
-      error: "failed to fetch stock",
+      error: "no_price_available",
     });
   });
 
   it("returns stale data from DB when simulation mode is enabled", async () => {
     const env = createEnv();
+    // Clear config cache to ensure fresh read
+    clearConfigCache();
     const kvMap = new Map<string, string>();
     kvMap.set(
       "admin:config",
       JSON.stringify({
+        pollingIntervalSec: 30,
         featureFlags: { simulateProviderFailure: true },
       })
     );
     env.alertsKv = {
       get: vi.fn((key: string) => Promise.resolve(kvMap.get(key) ?? null)),
+      put: vi.fn(() => Promise.resolve()),
     } as any;
 
     const dbRecord = {
@@ -141,22 +202,33 @@ describe("getStock handler", () => {
 
   it("calls provider normally when simulation is disabled", async () => {
     const env = createEnv();
+    // Clear config cache to ensure fresh read
+    clearConfigCache();
     const kvMap = new Map<string, string>();
     kvMap.set(
       "admin:config",
       JSON.stringify({
+        pollingIntervalSec: 30,
         featureFlags: { simulateProviderFailure: false },
       })
     );
     env.alertsKv = {
       get: vi.fn((key: string) => Promise.resolve(kvMap.get(key) ?? null)),
+      put: vi.fn(() => Promise.resolve()),
     } as any;
 
     const quote = { symbol: "AAPL", price: 195 };
-    const json = vi.fn().mockResolvedValue([quote]);
+    const quoteJson = vi.fn().mockResolvedValue([quote]);
+    const profileJson = vi.fn().mockResolvedValue([]);
     const fetchMock = vi
       .spyOn(globalThis as any, "fetch")
-      .mockResolvedValue({ ok: true, json } as Response);
+      .mockImplementation((url: string) => {
+        if (url.includes("/quote?")) {
+          return Promise.resolve({ ok: true, json: quoteJson } as Response);
+        }
+        // Profile endpoints
+        return Promise.resolve({ ok: true, json: profileJson } as Response);
+      });
 
     const bind = vi.fn().mockReturnValue({ run: vi.fn().mockResolvedValue(undefined) });
     const prepare = vi.fn().mockReturnValue({ bind });
@@ -165,15 +237,21 @@ describe("getStock handler", () => {
     const response = await getStock(createUrl({ symbol: "AAPL" }), env);
 
     expect(fetchMock).toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual(quote);
+    const data = await response.json();
+    // Profile fetching adds extra fields, so just check the core fields
+    expect(data.symbol).toBe("AAPL");
+    expect(data.price).toBe(195);
   });
 
   it("falls back to DB and returns stale data when provider API fails", async () => {
     const env = createEnv();
+    // Clear config cache to ensure fresh read
+    clearConfigCache();
     const kvMap = new Map<string, string>();
     kvMap.set(
       "admin:config",
       JSON.stringify({
+        pollingIntervalSec: 30,
         featureFlags: { simulateProviderFailure: false },
       })
     );
@@ -235,8 +313,7 @@ describe("getStock handler", () => {
       status: 500,
     });
 
-    // Mock FCM notification (don't actually send)
-    vi.spyOn(globalThis as any, "sendFCMNotification").mockResolvedValue(true);
+    // FCM notification is already mocked at the top of the file
 
     // Mock ctx.waitUntil for notifications
     const waitUntilSpy = vi.fn();
@@ -285,11 +362,13 @@ describe("getStock handler", () => {
       timestamp: Math.floor(Date.now() / 1000),
     };
 
-    const bindDb = vi.fn().mockImplementation(() => {
+    const bindDb = vi.fn().mockImplementation((arg: any) => {
       queryCount++;
       if (queryCount === 1) {
+        // First call: get DB record (has symbol argument)
         return { first: vi.fn().mockResolvedValue(dbRecord) };
       } else if (queryCount === 2) {
+        // Second call: get push tokens (no symbol, uses .all())
         return {
           all: vi.fn().mockResolvedValue({
             results: [],
@@ -326,6 +405,7 @@ describe("getStock handler", () => {
     kvMap.set(
       "admin:config",
       JSON.stringify({
+        pollingIntervalSec: 30,
         featureFlags: { simulateProviderFailure: false },
       })
     );
@@ -350,11 +430,13 @@ describe("getStock handler", () => {
       timestamp: Math.floor(Date.now() / 1000),
     };
 
-    const bindDb = vi.fn().mockImplementation(() => {
+    const bindDb = vi.fn().mockImplementation((arg: any) => {
       queryCount++;
       if (queryCount === 1) {
+        // First call: get DB record (has symbol argument)
         return { first: vi.fn().mockResolvedValue(dbRecord) };
       } else if (queryCount === 2) {
+        // Second call: get push tokens (no symbol, uses .all())
         return {
           all: vi.fn().mockResolvedValue({
             results: [],

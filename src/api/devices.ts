@@ -6,12 +6,14 @@ export interface Device {
   userId: string;
   pushToken: string;
   deviceInfo: string | null;
+  alertCount: number;
+  activeAlertCount: number;
   createdAt: string;
   updatedAt: string;
 }
 
 /**
- * Get all registered devices
+ * Get all registered devices with alert counts
  * GET /v1/api/devices
  */
 export async function getAllDevices(env: Env): Promise<Response> {
@@ -30,13 +32,32 @@ export async function getAllDevices(env: Env): Promise<Response> {
         updated_at: string;
       }>();
 
-    const devices: Device[] = (rows.results || []).map((row) => ({
-      userId: row.user_id,
-      pushToken: row.push_token,
-      deviceInfo: row.device_info,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
+    // For each device, count alerts that use its push token
+    const devices: Device[] = await Promise.all(
+      (rows.results || []).map(async (row) => {
+        // Count total alerts for this push token
+        const totalAlertsResult = await env.stockly
+          .prepare(`SELECT COUNT(*) as count FROM alerts WHERE target = ?`)
+          .bind(row.push_token)
+          .first<{ count: number }>();
+
+        // Count active alerts for this push token
+        const activeAlertsResult = await env.stockly
+          .prepare(`SELECT COUNT(*) as count FROM alerts WHERE target = ? AND status = 'active'`)
+          .bind(row.push_token)
+          .first<{ count: number }>();
+
+        return {
+          userId: row.user_id,
+          pushToken: row.push_token,
+          deviceInfo: row.device_info,
+          alertCount: totalAlertsResult?.count || 0,
+          activeAlertCount: activeAlertsResult?.count || 0,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        };
+      })
+    );
 
     return json({ devices });
   } catch (error) {

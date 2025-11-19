@@ -725,12 +725,17 @@ export async function getOpenApiSpec(): Promise<Response> {
         },
         AdminConfig: {
           type: "object",
-          required: ["pollingIntervalSec", "primaryProvider", "backupProvider", "alertThrottle", "featureFlags"],
+          required: ["pollingIntervalSec", "kvWriteIntervalSec", "primaryProvider", "backupProvider", "alertThrottle", "featureFlags"],
           properties: {
             pollingIntervalSec: {
               type: "integer",
               description: "Price polling interval in seconds",
               example: 30,
+            },
+            kvWriteIntervalSec: {
+              type: "integer",
+              description: "KV write interval in seconds (how often alert states are flushed to KV)",
+              example: 3600,
             },
             primaryProvider: {
               type: "string",
@@ -781,6 +786,7 @@ export async function getOpenApiSpec(): Promise<Response> {
           type: "object",
           properties: {
             pollingIntervalSec: { type: "integer" },
+            kvWriteIntervalSec: { type: "integer", description: "KV write interval in seconds (how often alert states are flushed to KV)" },
             primaryProvider: { type: "string" },
             backupProvider: { type: "string" },
             alertThrottle: {
