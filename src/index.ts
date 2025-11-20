@@ -1,6 +1,9 @@
 import { json, CORS_HEADERS } from "./util";
 import { getStock } from "./api/get-stock";
 import { getStocks } from "./api/get-stocks";
+import { getStockDetailsRoute } from "./api/get-stock-details";
+import { getNews } from "./api/get-news";
+import { getStockNews } from "./api/get-stock-news";
 import { searchStock } from "./api/search-stock";
 import { healthCheck } from "./api/health";
 import { handleAlertsRequest } from "./api/alerts";
@@ -31,13 +34,31 @@ export default {
     const url = new URL(request.url);
     const pathname = url.pathname;
 
+    // Handle CORS preflight requests
     if (request.method === "OPTIONS") {
+      // Get the requested headers from the browser (comma-separated list)
+      const requestedHeaders = request.headers.get("Access-Control-Request-Headers");
+      
+      // Build response headers with defaults
+      const headers: HeadersInit = {
+        ...CORS_HEADERS,
+      };
+      
+      // Echo back the requested headers if provided (browsers can be strict about header matching)
+      // Some browsers require an exact match or superset of requested headers
+      if (requestedHeaders) {
+        // Merge requested headers with our default allowed headers
+        // This ensures we allow everything the browser is requesting
+        const defaultHeadersList = CORS_HEADERS["Access-Control-Allow-Headers"].split(", ").map(h => h.trim());
+        const requestedHeadersList = requestedHeaders.split(",").map(h => h.trim());
+        // Combine and deduplicate, keeping order (requested first, then defaults)
+        const allHeadersSet = new Set([...requestedHeadersList, ...defaultHeadersList]);
+        headers["Access-Control-Allow-Headers"] = Array.from(allHeadersSet).join(", ");
+      }
+      
       return new Response(null, {
         status: 204,
-        headers: {
-          ...CORS_HEADERS,
-          "Access-Control-Max-Age": "86400",
-        },
+        headers,
       });
     }
 
@@ -55,6 +76,18 @@ export default {
 
     if (pathname === "/v1/api/get-stocks") {
       return await getStocks(url, env);
+    }
+
+    if (pathname === "/v1/api/get-stock-details") {
+      return await getStockDetailsRoute(url, env, ctx);
+    }
+
+    if (pathname === "/v1/api/get-news") {
+      return await getNews(url, env);
+    }
+
+    if (pathname === "/v1/api/get-stock-news") {
+      return await getStockNews(url, env);
     }
 
     if (pathname === "/v1/api/search-stock") {

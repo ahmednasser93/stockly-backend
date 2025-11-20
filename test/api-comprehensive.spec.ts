@@ -9,6 +9,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { healthCheck } from "../src/api/health";
 import { getStock } from "../src/api/get-stock";
 import { getStocks } from "../src/api/get-stocks";
+import { getStockDetailsRoute } from "../src/api/get-stock-details";
+import { getStockNews } from "../src/api/get-stock-news";
 import { searchStock } from "../src/api/search-stock";
 import { getHistorical } from "../src/api/get-historical";
 import { handleAlertsRequest } from "../src/api/alerts";
@@ -947,6 +949,8 @@ describe("API - OpenAPI", () => {
     expect(data.paths["/v1/api/health"]).toBeDefined();
     expect(data.paths["/v1/api/get-stock"]).toBeDefined();
     expect(data.paths["/v1/api/get-stocks"]).toBeDefined();
+    expect(data.paths["/v1/api/get-stock-details"]).toBeDefined();
+    expect(data.paths["/v1/api/get-stock-news"]).toBeDefined();
   });
 });
 
