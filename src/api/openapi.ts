@@ -488,7 +488,7 @@ export async function getOpenApiSpec(): Promise<Response> {
         get: {
           summary: "Get historical price data",
           description:
-            "Retrieves historical price data for a stock symbol over a specified number of days. Data is fetched from the D1 database which is populated by the get-stock endpoint.",
+            "Retrieves historical price data for a stock symbol. Supports date range filtering via 'from' and 'to' parameters, or backward-compatible 'days' parameter. Data is fetched from the D1 database which is populated by the get-stock endpoint. If database is empty, automatically fetches from FMP API.",
           tags: ["Historical Prices"],
           parameters: [
             {
@@ -502,10 +502,34 @@ export async function getOpenApiSpec(): Promise<Response> {
               example: "AMZN",
             },
             {
+              name: "from",
+              in: "query",
+              required: false,
+              description: "Start date in YYYY-MM-DD format (inclusive). If provided with 'to', overrides 'days' parameter.",
+              schema: {
+                type: "string",
+                format: "date",
+                pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+              },
+              example: "2025-01-01",
+            },
+            {
+              name: "to",
+              in: "query",
+              required: false,
+              description: "End date in YYYY-MM-DD format (inclusive). Defaults to today if 'from' is provided without 'to'.",
+              schema: {
+                type: "string",
+                format: "date",
+                pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+              },
+              example: "2025-01-31",
+            },
+            {
               name: "days",
               in: "query",
               required: false,
-              description: "Number of days to look back (default: 180, max: 3650)",
+              description: "Number of days to look back from today (default: 180, max: 3650). Ignored if 'from' parameter is provided.",
               schema: {
                 type: "integer",
                 minimum: 1,
@@ -523,14 +547,28 @@ export async function getOpenApiSpec(): Promise<Response> {
                   schema: {
                     $ref: "#/components/schemas/HistoricalPricesResponse",
                   },
-                  example: {
-                    symbol: "AMZN",
-                    days: 180,
-                    data: [
-                      { date: "2025-01-01", price: 120.55, volume: 12345678 },
-                      { date: "2025-01-02", price: 121.20, volume: 14567890 },
-                      { date: "2025-01-03", price: 119.85, volume: 11234567 },
-                    ],
+                  examples: {
+                    withDays: {
+                      value: {
+                        symbol: "AMZN",
+                        days: 180,
+                        data: [
+                          { date: "2025-01-01", price: 120.55, volume: 12345678, open: 120.00, high: 121.50, low: 119.80, close: 120.55 },
+                          { date: "2025-01-02", price: 121.20, volume: 14567890, open: 120.55, high: 122.00, low: 120.20, close: 121.20 },
+                        ],
+                      },
+                    },
+                    withDateRange: {
+                      value: {
+                        symbol: "AMZN",
+                        from: "2025-01-01",
+                        to: "2025-01-31",
+                        data: [
+                          { date: "2025-01-01", price: 120.55, volume: 12345678, open: 120.00, high: 121.50, low: 119.80, close: 120.55 },
+                          { date: "2025-01-02", price: 121.20, volume: 14567890, open: 120.55, high: 122.00, low: 120.20, close: 121.20 },
+                        ],
+                      },
+                    },
                   },
                 },
               },
@@ -551,6 +589,21 @@ export async function getOpenApiSpec(): Promise<Response> {
                     invalidDays: {
                       value: {
                         error: "days parameter must be a positive number between 1 and 3650",
+                      },
+                    },
+                    invalidFromDate: {
+                      value: {
+                        error: "Invalid 'from' date format (expected YYYY-MM-DD)",
+                      },
+                    },
+                    invalidToDate: {
+                      value: {
+                        error: "Invalid 'to' date format (expected YYYY-MM-DD)",
+                      },
+                    },
+                    invalidDateRange: {
+                      value: {
+                        error: "'from' date must be before or equal to 'to' date",
                       },
                     },
                   },
@@ -833,7 +886,7 @@ export async function getOpenApiSpec(): Promise<Response> {
       schemas: {
         HistoricalPricesResponse: {
           type: "object",
-          required: ["symbol", "days", "data"],
+          required: ["symbol", "data"],
           properties: {
             symbol: {
               type: "string",
@@ -842,13 +895,28 @@ export async function getOpenApiSpec(): Promise<Response> {
             },
             days: {
               type: "integer",
-              description: "Number of days requested",
+              nullable: true,
+              description: "Number of days requested (only present if 'days' parameter was used)",
               example: 180,
+            },
+            from: {
+              type: "string",
+              format: "date",
+              nullable: true,
+              description: "Start date in YYYY-MM-DD format (only present if 'from' parameter was used)",
+              example: "2025-01-01",
+            },
+            to: {
+              type: "string",
+              format: "date",
+              nullable: true,
+              description: "End date in YYYY-MM-DD format (only present if date range parameters were used)",
+              example: "2025-01-31",
             },
             data: {
               type: "array",
               description:
-                "Array of historical price records, ordered by date (ascending)",
+                "Array of historical price records, ordered by date (ascending). Empty array if no data available.",
               items: {
                 $ref: "#/components/schemas/HistoricalPriceRecord",
               },
@@ -868,7 +936,14 @@ export async function getOpenApiSpec(): Promise<Response> {
             price: {
               type: "number",
               format: "double",
-              description: "Closing price for the date",
+              description: "Closing price for the date (alias: same as 'close')",
+              example: 120.55,
+            },
+            close: {
+              type: "number",
+              format: "double",
+              nullable: true,
+              description: "Closing price for the date (same as 'price', kept for clarity)",
               example: 120.55,
             },
             volume: {
@@ -876,6 +951,27 @@ export async function getOpenApiSpec(): Promise<Response> {
               nullable: true,
               description: "Trading volume for the date (may be null if unavailable)",
               example: 12345678,
+            },
+            open: {
+              type: "number",
+              format: "double",
+              nullable: true,
+              description: "Opening price for the date (null if OHLC data unavailable)",
+              example: 119.50,
+            },
+            high: {
+              type: "number",
+              format: "double",
+              nullable: true,
+              description: "Highest price for the date (null if OHLC data unavailable)",
+              example: 121.00,
+            },
+            low: {
+              type: "number",
+              format: "double",
+              nullable: true,
+              description: "Lowest price for the date (null if OHLC data unavailable)",
+              example: 119.00,
             },
           },
         },

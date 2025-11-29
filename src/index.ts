@@ -14,6 +14,7 @@ import { getRecentNotifications, getFailedNotifications, retryNotification } fro
 import { getAllDevices, sendTestNotification, deleteDevice } from "./api/devices";
 import { runAlertCron } from "./cron/alerts-cron";
 import { getHistorical } from "./api/get-historical";
+import { getHistoricalIntraday } from "./api/get-historical-intraday";
 import { getOpenApiSpec } from "./api/openapi";
 import {
   getConfigEndpoint,
@@ -38,12 +39,12 @@ export default {
     if (request.method === "OPTIONS") {
       // Get the requested headers from the browser (comma-separated list)
       const requestedHeaders = request.headers.get("Access-Control-Request-Headers");
-      
+
       // Build response headers with defaults
       const headers: HeadersInit = {
         ...CORS_HEADERS,
       };
-      
+
       // Echo back the requested headers if provided (browsers can be strict about header matching)
       // Some browsers require an exact match or superset of requested headers
       if (requestedHeaders) {
@@ -55,7 +56,7 @@ export default {
         const allHeadersSet = new Set([...requestedHeadersList, ...defaultHeadersList]);
         headers["Access-Control-Allow-Headers"] = Array.from(allHeadersSet).join(", ");
       }
-      
+
       return new Response(null, {
         status: 204,
         headers,
@@ -95,7 +96,11 @@ export default {
     }
 
     if (pathname === "/v1/api/get-historical") {
-      return await getHistorical(url, env);
+      return await getHistorical(url, env, ctx);
+    }
+
+    if (pathname === "/v1/api/get-historical-intraday") {
+      return await getHistoricalIntraday(url, env);
     }
 
     if (pathname.startsWith("/v1/api/alerts")) {
@@ -151,7 +156,7 @@ export default {
 
     if (pathname.startsWith("/v1/api/devices/")) {
       const pathAfterDevices = pathname.split("/v1/api/devices/")[1];
-      
+
       if (pathAfterDevices.endsWith("/test")) {
         // POST /v1/api/devices/:userId/test
         const userId = pathAfterDevices.replace("/test", "");
