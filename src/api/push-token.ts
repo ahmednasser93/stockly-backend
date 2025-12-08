@@ -11,9 +11,12 @@ interface PushTokenPayload {
  * Register or update a user's Expo push token
  * POST /v1/api/push-token
  */
+import type { Logger } from "../logging/logger";
+
 export async function registerPushToken(
   request: Request,
-  env: Env
+  env: Env,
+  logger: Logger
 ): Promise<Response> {
   if (request.method !== "POST") {
     return json({ error: "Method not allowed" }, 405);
@@ -114,7 +117,8 @@ export async function registerPushToken(
  */
 export async function getPushToken(
   userId: string,
-  env: Env
+  env: Env,
+  logger: Logger
 ): Promise<Response> {
   if (!userId) {
     return json({ error: "userId is required" }, 400);

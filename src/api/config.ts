@@ -155,7 +155,9 @@ export function clearConfigCache(): void {
 /**
  * Get config endpoint handler
  */
-export async function getConfigEndpoint(env: Env): Promise<Response> {
+import type { Logger } from "../logging/logger";
+
+export async function getConfigEndpoint(env: Env, logger: Logger): Promise<Response> {
   const config = await getConfig(env);
   return json(config);
 }
@@ -165,7 +167,8 @@ export async function getConfigEndpoint(env: Env): Promise<Response> {
  */
 export async function updateConfigEndpoint(
   request: Request,
-  env: Env
+  env: Env,
+  logger: Logger
 ): Promise<Response> {
   try {
     const body = await request.json();
@@ -181,7 +184,8 @@ export async function updateConfigEndpoint(
  * Simulate provider failure - enable simulation mode
  */
 export async function simulateProviderFailureEndpoint(
-  env: Env
+  env: Env,
+  logger?: Logger
 ): Promise<Response> {
   const config = await updateConfig(env, {
     featureFlags: {
@@ -195,7 +199,8 @@ export async function simulateProviderFailureEndpoint(
  * Disable provider failure simulation
  */
 export async function disableProviderFailureEndpoint(
-  env: Env
+  env: Env,
+  logger?: Logger
 ): Promise<Response> {
   const config = await updateConfig(env, {
     featureFlags: {

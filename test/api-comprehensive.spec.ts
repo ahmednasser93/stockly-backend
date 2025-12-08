@@ -9,6 +9,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { healthCheck } from "../src/api/health";
 import { getStock } from "../src/api/get-stock";
 import { getStocks } from "../src/api/get-stocks";
+import { getStockDetailsRoute } from "../src/api/get-stock-details";
+import { getStockNews } from "../src/api/get-stock-news";
 import { searchStock } from "../src/api/search-stock";
 import { getHistorical } from "../src/api/get-historical";
 import { handleAlertsRequest } from "../src/api/alerts";
@@ -23,6 +25,7 @@ import { clearCache } from "../src/api/cache";
 import { clearConfigCache } from "../src/api/config";
 import * as alertsStorage from "../src/alerts/storage";
 import type { Env } from "../src/index";
+import { createMockLogger } from "./test-utils";
 
 vi.mock("../src/alerts/storage", () => ({
   listAlerts: vi.fn(),
@@ -120,7 +123,7 @@ describe("API - Get Single Stock", () => {
       } as Response);
 
     const env = createEnv();
-    const response = await getStock(createUrl("/v1/api/get-stock", { symbol: "AAPL" }), env);
+    const response = await getStock(createUrl("/v1/api/get-stock", { symbol: "AAPL" }), env, undefined, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -134,7 +137,7 @@ describe("API - Get Single Stock", () => {
 
   it("GET /v1/api/get-stock returns 400 when symbol is missing", async () => {
     const env = createEnv();
-    const response = await getStock(createUrl("/v1/api/get-stock"), env);
+    const response = await getStock(createUrl("/v1/api/get-stock"), env, undefined, createMockLogger());
     expect(response.status).toBe(400);
     const data = await response.json();
     expect(data.error).toContain("symbol");
@@ -180,7 +183,7 @@ describe("API - Get Multiple Stocks", () => {
     });
 
     const env = createEnv();
-    const response = await getStocks(createUrl("/v1/api/get-stocks", { symbols: "AAPL,MSFT" }), env);
+    const response = await getStocks(createUrl("/v1/api/get-stocks", { symbols: "AAPL,MSFT" }), env, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -196,7 +199,7 @@ describe("API - Get Multiple Stocks", () => {
 
   it("GET /v1/api/get-stocks returns 400 when symbols parameter is missing", async () => {
     const env = createEnv();
-    const response = await getStocks(createUrl("/v1/api/get-stocks"), env);
+    const response = await getStocks(createUrl("/v1/api/get-stocks"), env, createMockLogger());
     expect(response.status).toBe(400);
     const data = await response.json();
     expect(data.error).toContain("symbols");
@@ -216,7 +219,7 @@ describe("API - Search Stocks", () => {
     } as Response);
 
     const env = createEnv();
-    const response = await searchStock(createUrl("/v1/api/search-stock", { query: "AP" }), env);
+    const response = await searchStock(createUrl("/v1/api/search-stock", { query: "AP" }), env, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -233,7 +236,7 @@ describe("API - Search Stocks", () => {
 
   it("GET /v1/api/search-stock returns empty array when query is missing", async () => {
     const env = createEnv();
-    const response = await searchStock(createUrl("/v1/api/search-stock"), env);
+    const response = await searchStock(createUrl("/v1/api/search-stock"), env, createMockLogger());
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(Array.isArray(data)).toBe(true);
@@ -260,7 +263,7 @@ describe("API - Get Historical", () => {
     });
     env.stockly.prepare = vi.fn().mockReturnValue({ bind });
 
-    const response = await getHistorical(createUrl("/v1/api/get-historical", { symbol: "AAPL", days: "180" }), env);
+    const response = await getHistorical(createUrl("/v1/api/get-historical", { symbol: "AAPL", days: "180" }), env, undefined, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -271,7 +274,7 @@ describe("API - Get Historical", () => {
 
   it("GET /v1/api/get-historical returns 400 when symbol is missing", async () => {
     const env = createEnv();
-    const response = await getHistorical(createUrl("/v1/api/get-historical"), env);
+    const response = await getHistorical(createUrl("/v1/api/get-historical"), env, undefined, createMockLogger());
     expect(response.status).toBe(400);
   });
 });
@@ -306,7 +309,7 @@ describe("API - Alerts", () => {
 
     const request = new Request("https://example.com/v1/api/alerts", { method: "GET" });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env);
+    const response = await handleAlertsRequest(request, env, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -341,7 +344,7 @@ describe("API - Alerts", () => {
       body: JSON.stringify(createRequest),
     });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env);
+    const response = await handleAlertsRequest(request, env, createMockLogger());
     
     expect(response.status).toBe(201);
     const data = await response.json();
@@ -368,7 +371,7 @@ describe("API - Alerts", () => {
 
     const request = new Request("https://example.com/v1/api/alerts/alert-123", { method: "GET" });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env);
+    const response = await handleAlertsRequest(request, env, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -400,7 +403,7 @@ describe("API - Alerts", () => {
       body: JSON.stringify(updateRequest),
     });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env);
+    const response = await handleAlertsRequest(request, env, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -414,7 +417,7 @@ describe("API - Alerts", () => {
       method: "DELETE",
     });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env);
+    const response = await handleAlertsRequest(request, env, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -819,24 +822,39 @@ describe("API - Notifications", () => {
 
 describe("API - Devices", () => {
   it("GET /v1/api/devices returns all devices", async () => {
-    const mockDevices = {
-      results: [
-        {
-          user_id: "user-123",
-          push_token: "fcm-token-123",
-          device_info: "iPhone 14 Pro",
-          created_at: "2025-01-01T00:00:00Z",
-          updated_at: "2025-01-01T00:00:00Z",
-        },
-      ],
-    };
+    const mockDevices = [
+      {
+        user_id: "user-123",
+        push_token: "fcm-token-123",
+        device_info: "iPhone 14 Pro",
+        created_at: "2025-01-01T00:00:00Z",
+        updated_at: "2025-01-01T00:00:00Z",
+      },
+    ];
 
     const env = createEnv();
-    env.stockly.prepare = vi.fn().mockReturnValue({
-      all: vi.fn().mockResolvedValue(mockDevices),
+    
+    // Mock prepare to return different statements based on query
+    const alertCountStmt = {
+      bind: vi.fn().mockReturnThis(),
+      first: vi.fn().mockResolvedValue({ count: 0 }),
+    };
+    
+    env.stockly.prepare = vi.fn().mockImplementation((query: string) => {
+      if (query.includes("user_push_tokens")) {
+        return {
+          all: vi.fn().mockResolvedValue({ results: mockDevices }),
+        };
+      } else if (query.includes("alerts") && query.includes("COUNT")) {
+        return alertCountStmt;
+      }
+      return {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue({ count: 0 }),
+      };
     });
 
-    const response = await getAllDevices(env);
+    const response = await getAllDevices(env, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -947,6 +965,8 @@ describe("API - OpenAPI", () => {
     expect(data.paths["/v1/api/health"]).toBeDefined();
     expect(data.paths["/v1/api/get-stock"]).toBeDefined();
     expect(data.paths["/v1/api/get-stocks"]).toBeDefined();
+    expect(data.paths["/v1/api/get-stock-details"]).toBeDefined();
+    // Note: /v1/api/get-stock-news exists but is not yet documented in OpenAPI spec
   });
 });
 

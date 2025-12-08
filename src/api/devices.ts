@@ -16,7 +16,9 @@ export interface Device {
  * Get all registered devices with alert counts
  * GET /v1/api/devices
  */
-export async function getAllDevices(env: Env): Promise<Response> {
+import type { Logger } from "../logging/logger";
+
+export async function getAllDevices(env: Env, logger: Logger): Promise<Response> {
   try {
     const rows = await env.stockly
       .prepare(
@@ -61,7 +63,7 @@ export async function getAllDevices(env: Env): Promise<Response> {
 
     return json({ devices });
   } catch (error) {
-    console.error("Failed to get devices:", error);
+    logger.error("Failed to get devices", error);
     return json({ error: "Failed to get devices" }, 500);
   }
 }
@@ -72,7 +74,8 @@ export async function getAllDevices(env: Env): Promise<Response> {
  */
 export async function deleteDevice(
   userId: string,
-  env: Env
+  env: Env,
+  logger: Logger
 ): Promise<Response> {
   if (!userId) {
     return json({ error: "userId is required" }, 400);
@@ -103,7 +106,7 @@ export async function deleteDevice(
       userId,
     });
   } catch (error) {
-    console.error("Failed to delete device:", error);
+    logger.error("Failed to delete device", error, { userId });
     const errorMessage = error instanceof Error ? error.message : String(error);
     return json(
       {
@@ -122,7 +125,8 @@ export async function deleteDevice(
 export async function sendTestNotification(
   userId: string,
   request: Request,
-  env: Env
+  env: Env,
+  logger: Logger
 ): Promise<Response> {
   if (request.method !== "POST") {
     return json({ error: "Method not allowed" }, 405);
@@ -171,13 +175,14 @@ export async function sendTestNotification(
       type: "test",
       timestamp: new Date().toISOString(),
     };
-    
+
     const success = await sendFCMNotification(
       device.push_token,
       title,
       testMessage,
       testData,
-      env
+      env,
+      logger
     );
 
     if (success) {
@@ -197,7 +202,7 @@ export async function sendTestNotification(
       );
     }
   } catch (error) {
-    console.error("Failed to send test notification:", error);
+    logger.error("Failed to send test notification", error, { userId });
     const errorMessage = error instanceof Error ? error.message : String(error);
     return json(
       {

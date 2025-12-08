@@ -4,8 +4,14 @@ import { API_KEY, API_URL, json } from "../util";
 import { fetchAndSaveHistoricalPrice } from "./historical-prices";
 import { getConfig } from "./config";
 import { sendFCMNotification } from "../notifications/fcm-sender";
+import type { Logger } from "../logging/logger";
 
-export async function getStock(url: URL, env: Env, ctx?: ExecutionContext): Promise<Response> {
+export async function getStock(
+  url: URL,
+  env: Env,
+  ctx: ExecutionContext | undefined,
+  logger: Logger
+): Promise<Response> {
   const symbol = url.searchParams.get("symbol");
 
   if (!symbol) return json({ error: "symbol required" }, 400);
@@ -23,7 +29,11 @@ export async function getStock(url: URL, env: Env, ctx?: ExecutionContext): Prom
   if (cachedEntry) {
     // Cache is still valid (age < pollingIntervalSec), return cached data
     const ageSeconds = Math.floor((Date.now() - cachedEntry.cachedAt) / 1000);
-    console.log(`Cache hit for ${normalizedSymbol}: age=${ageSeconds}s < interval=${pollingIntervalSec}s`);
+    logger.info(`Cache hit for ${normalizedSymbol}`, {
+      ageSeconds,
+      pollingIntervalSec,
+      cacheStatus: "HIT",
+    });
     return json(cachedEntry.data);
   }
 
@@ -33,9 +43,13 @@ export async function getStock(url: URL, env: Env, ctx?: ExecutionContext): Prom
   const existingCacheEntry = getCacheIfValid(cacheKey, Infinity);
   if (existingCacheEntry) {
     const ageSeconds = Math.floor((Date.now() - existingCacheEntry.cachedAt) / 1000);
-    console.log(`Cache expired for ${normalizedSymbol}: age=${ageSeconds}s >= interval=${pollingIntervalSec}s, fetching fresh data`);
+    logger.info(`Cache expired for ${normalizedSymbol}`, {
+      ageSeconds,
+      pollingIntervalSec,
+      cacheStatus: "EXPIRED",
+    });
   } else {
-    console.log(`No cache for ${normalizedSymbol}, fetching fresh data`);
+    logger.info(`No cache for ${normalizedSymbol}`, { cacheStatus: "MISS" });
   }
 
   // Check if provider failure simulation is enabled
@@ -81,7 +95,7 @@ export async function getStock(url: URL, env: Env, ctx?: ExecutionContext): Prom
         return json({ error: "no_price_available" }, 404);
       }
     } catch (dbError) {
-      console.error("Failed to fetch from DB during simulation:", dbError);
+      logger.error("Failed to fetch from DB during simulation", dbError);
       return json({ error: "no_price_available" }, 500);
     }
   }
@@ -90,12 +104,25 @@ export async function getStock(url: URL, env: Env, ctx?: ExecutionContext): Prom
   try {
     // Fetch quote data
     const quoteApi = `${API_URL}/quote?symbol=${symbol}&apikey=${API_KEY}`;
+    const quoteStartTime = Date.now();
     const quoteRes = await fetch(quoteApi);
+    const quoteLatencyMs = Date.now() - quoteStartTime;
+    
+    logger.logApiCall(`FMP API: GET /quote`, {
+      apiProvider: "FMP",
+      endpoint: "/quote",
+      method: "GET",
+      statusCode: quoteRes.status,
+      latencyMs: quoteLatencyMs,
+    });
     
     if (!quoteRes.ok) {
       // Provider failed - fallback to DB and notify users
-      console.warn(`Provider API failed for ${symbol}: HTTP ${quoteRes.status}`);
-      return await handleProviderFailure(normalizedSymbol, env, ctx, "provider_api_error");
+      logger.warn(`Provider API failed for ${symbol}`, {
+        statusCode: quoteRes.status,
+        apiProvider: "FMP",
+      });
+      return await handleProviderFailure(normalizedSymbol, env, ctx, "provider_api_error", logger);
     }
     
     const quoteData = await quoteRes.json();
@@ -103,8 +130,10 @@ export async function getStock(url: URL, env: Env, ctx?: ExecutionContext): Prom
 
     if (!quote || (quote && typeof quote === 'object' && ('Error Message' in quote || 'error' in quote))) {
       // Provider returned error or invalid data - fallback to DB
-      console.warn(`Provider API returned invalid data for ${symbol}`);
-      return await handleProviderFailure(normalizedSymbol, env, ctx, "provider_invalid_data");
+      logger.warn(`Provider API returned invalid data for ${symbol}`, {
+        apiProvider: "FMP",
+      });
+      return await handleProviderFailure(normalizedSymbol, env, ctx, "provider_invalid_data", logger);
     }
 
     // Fetch profile data to get image, description, and additional fields
@@ -126,20 +155,33 @@ export async function getStock(url: URL, env: Env, ctx?: ExecutionContext): Prom
     
     for (const profileApi of profileEndpoints) {
       try {
+        const profileStartTime = Date.now();
         const profileRes = await fetch(profileApi, {
           headers: {
             'Accept': 'application/json',
           },
         });
+        const profileLatencyMs = Date.now() - profileStartTime;
+        
+        logger.logApiCall(`FMP API: GET /profile`, {
+          apiProvider: "FMP",
+          endpoint: "/profile",
+          method: "GET",
+          statusCode: profileRes.status,
+          latencyMs: profileLatencyMs,
+        });
         
         if (profileRes.ok) {
           const profileData = await profileRes.json();
           // Log what we get from profile endpoint for debugging
-          console.log(`Profile API ${profileApi} response type:`, Array.isArray(profileData) ? 'array' : typeof profileData);
-          console.log(`Profile API ${profileApi} response length:`, Array.isArray(profileData) ? profileData.length : 'N/A');
+          logger.debug(`Profile API response`, {
+            endpoint: profileApi,
+            responseType: Array.isArray(profileData) ? 'array' : typeof profileData,
+            responseLength: Array.isArray(profileData) ? profileData.length : 'N/A',
+          });
           
           if (Array.isArray(profileData) && profileData.length === 0) {
-            console.log(`Profile API ${profileApi} returned empty array`);
+            logger.debug(`Profile API returned empty array`, { endpoint: profileApi });
             continue;
           }
           
@@ -147,7 +189,10 @@ export async function getStock(url: URL, env: Env, ctx?: ExecutionContext): Prom
           
           // Check for error messages
           if (fetchedProfile && fetchedProfile['Error Message']) {
-            console.warn(`Profile API ${profileApi} returned error:`, fetchedProfile['Error Message']);
+            logger.warn(`Profile API returned error`, {
+              endpoint: profileApi,
+              errorMessage: fetchedProfile['Error Message'],
+            });
             continue;
           }
           
@@ -157,21 +202,36 @@ export async function getStock(url: URL, env: Env, ctx?: ExecutionContext): Prom
             const desc = fetchedProfile.description || fetchedProfile.Description || fetchedProfile.descriptionText;
             if (desc) {
               profileDescription = desc;
-              console.log(`Found description from profile: ${desc.substring(0, 100)}...`);
+              logger.debug(`Found description from profile`, {
+                descriptionLength: desc.length,
+              });
               break;
             } else {
-              console.log(`Profile fetched but no description field. Profile keys:`, Object.keys(fetchedProfile).slice(0, 20));
+              logger.debug(`Profile fetched but no description field`, {
+                profileKeys: Object.keys(fetchedProfile).slice(0, 20),
+              });
             }
             // If we got a valid profile, use it even without description
             break;
           } else {
-            console.log(`Profile endpoint returned invalid data structure:`, typeof fetchedProfile);
+            logger.debug(`Profile endpoint returned invalid data structure`, {
+              endpoint: profileApi,
+              dataType: typeof fetchedProfile,
+            });
           }
         } else {
-          console.warn(`Profile API ${profileApi} returned status:`, profileRes.status, await profileRes.text().catch(() => ''));
+          const errorText = await profileRes.text().catch(() => '');
+          logger.warn(`Profile API returned non-ok status`, {
+            endpoint: profileApi,
+            statusCode: profileRes.status,
+            errorText: errorText.substring(0, 200),
+          });
         }
       } catch (profileError) {
-        console.warn(`Failed to fetch profile from ${profileApi}:`, profileError);
+        logger.warn(`Failed to fetch profile`, {
+          endpoint: profileApi,
+          error: profileError instanceof Error ? profileError.message : String(profileError),
+        });
       }
     }
     
@@ -202,11 +262,15 @@ export async function getStock(url: URL, env: Env, ctx?: ExecutionContext): Prom
           const wikiData = await wikiRes.json();
           if (wikiData.extract) {
             wikipediaDescription = wikiData.extract;
-            console.log(`Found description from Wikipedia: ${wikipediaDescription.substring(0, 100)}...`);
+            logger.debug(`Found description from Wikipedia`, {
+              descriptionLength: wikipediaDescription.length,
+            });
           }
         }
       } catch (wikiError) {
-        console.warn(`Failed to fetch from Wikipedia:`, wikiError);
+        logger.warn(`Failed to fetch from Wikipedia`, {
+          error: wikiError instanceof Error ? wikiError.message : String(wikiError),
+        });
       }
     }
 
@@ -215,10 +279,16 @@ export async function getStock(url: URL, env: Env, ctx?: ExecutionContext): Prom
     const finalDescription = profileDescription || quoteDescription || profile?.description || wikipediaDescription || null;
     
     // Log final description for debugging
-    console.log(`Final description: ${finalDescription ? finalDescription.substring(0, 100) + '...' : 'null'}`);
-    console.log(`Quote has description:`, !!quoteDescription);
-    console.log(`Profile has description:`, !!profileDescription);
-    console.log(`Profile object has description:`, !!(profile?.description));
+    logger.debug(`Final description resolved`, {
+      hasDescription: !!finalDescription,
+      descriptionLength: finalDescription?.length || 0,
+      source: finalDescription ? (
+        profileDescription ? "profile" :
+        quoteDescription ? "quote" :
+        profile?.description ? "profile_object" :
+        wikipediaDescription ? "wikipedia" : "none"
+      ) : "none",
+    });
     
     const parsed = {
       ...quote,
@@ -253,7 +323,7 @@ export async function getStock(url: URL, env: Env, ctx?: ExecutionContext): Prom
 
     return json(parsed);
   } catch (err) {
-    console.error("ERROR in getStock:", err);
+    logger.error("ERROR in getStock", err, { symbol: normalizedSymbol });
     
     // Provider failure (network error, timeout, etc.) - fallback to DB
     if (err instanceof Error && (
@@ -262,15 +332,18 @@ export async function getStock(url: URL, env: Env, ctx?: ExecutionContext): Prom
       err.message.includes('timeout') ||
       err.message.includes('Failed to fetch')
     )) {
-      console.warn(`Provider fetch error for ${normalizedSymbol}:`, err.message);
-      return await handleProviderFailure(normalizedSymbol, env, ctx, "provider_network_error");
+      logger.warn(`Provider fetch error for ${normalizedSymbol}`, {
+        error: err.message,
+        apiProvider: "FMP",
+      });
+      return await handleProviderFailure(normalizedSymbol, env, ctx, "provider_network_error", logger);
     }
     
     // Unknown error - try fallback but return error if DB also fails
     try {
-      return await handleProviderFailure(normalizedSymbol, env, ctx, "provider_unknown_error");
+      return await handleProviderFailure(normalizedSymbol, env, ctx, "provider_unknown_error", logger);
     } catch (fallbackErr) {
-      console.error("Both provider and DB fallback failed:", fallbackErr);
+      logger.error("Both provider and DB fallback failed", fallbackErr);
       return json({ error: "failed to fetch stock" }, 500);
     }
   }
@@ -282,8 +355,9 @@ export async function getStock(url: URL, env: Env, ctx?: ExecutionContext): Prom
 async function handleProviderFailure(
   symbol: string,
   env: Env,
-  ctx?: ExecutionContext,
-  failureReason: string = "provider_failure"
+  ctx: ExecutionContext | undefined,
+  failureReason: string,
+  logger: Logger
 ): Promise<Response> {
   try {
     // Try to get last cached price from DB
@@ -308,7 +382,7 @@ async function handleProviderFailure(
     if (dbRecord) {
       // Send notifications to all registered users in background
       if (ctx) {
-        ctx.waitUntil(notifyUsersOfProviderFailure(symbol, env));
+        ctx.waitUntil(notifyUsersOfProviderFailure(symbol, env, logger));
       }
 
       // Return stale data with provider failure flags
@@ -330,7 +404,7 @@ async function handleProviderFailure(
       return json({ error: "no_price_available" }, 404);
     }
   } catch (dbError) {
-    console.error("Failed to fetch from DB during provider failure:", dbError);
+    logger.error("Failed to fetch from DB during provider failure", dbError);
     return json({ error: "no_price_available" }, 500);
   }
 }
@@ -340,7 +414,11 @@ async function handleProviderFailure(
  * Runs in background using ctx.waitUntil
  * Uses KV to throttle notifications (max once per 5 minutes per symbol)
  */
-async function notifyUsersOfProviderFailure(symbol: string, env: Env): Promise<void> {
+async function notifyUsersOfProviderFailure(
+  symbol: string,
+  env: Env,
+  logger: Logger
+): Promise<void> {
   try {
     // Throttle notifications using in-memory cache (no KV read/write)
     const throttleKey = `provider_failure:${symbol}:notification_sent`;
@@ -349,7 +427,9 @@ async function notifyUsersOfProviderFailure(symbol: string, env: Env): Promise<v
     const { isThrottled, markThrottled } = await import("./throttle-cache");
     
     if (isThrottled(throttleKey)) {
-      console.log(`Provider failure notification for ${symbol} throttled (in-memory cache).`);
+      logger.debug(`Provider failure notification for ${symbol} throttled`, {
+        throttleKey,
+      });
       return; // Skip notification - too soon since last one
     }
 
@@ -373,12 +453,15 @@ async function notifyUsersOfProviderFailure(symbol: string, env: Env): Promise<v
       }>();
 
     if (!rows || !rows.results || rows.results.length === 0) {
-      console.log("No registered users to notify about provider failure");
+      logger.info("No registered users to notify about provider failure");
       return;
     }
 
     const users = rows.results;
-    console.log(`Sending provider failure notifications to ${users.length} users for ${symbol}`);
+    logger.info(`Sending provider failure notifications`, {
+      userCount: users.length,
+      symbol,
+    });
 
     // Send notifications to all users in parallel (non-blocking)
     const notificationPromises = users.map(async (user) => {
@@ -392,20 +475,30 @@ async function notifyUsersOfProviderFailure(symbol: string, env: Env): Promise<v
             symbol: symbol,
             stale: "true",
           },
-          env
+          env,
+          logger
         );
-        console.log(`✅ Provider failure notification sent to user ${user.user_id}`);
+        logger.info(`Provider failure notification sent`, {
+          userId: user.user_id,
+          symbol,
+        });
       } catch (err) {
-        console.error(`❌ Failed to send provider failure notification to user ${user.user_id}:`, err);
+        logger.error(`Failed to send provider failure notification`, err, {
+          userId: user.user_id,
+          symbol,
+        });
         // Don't throw - continue with other users
       }
     });
 
     // Wait for all notifications to complete (or fail silently)
     await Promise.allSettled(notificationPromises);
-    console.log(`Completed sending provider failure notifications to ${users.length} users`);
+    logger.info(`Completed sending provider failure notifications`, {
+      userCount: users.length,
+      symbol,
+    });
   } catch (error) {
-    console.error("Failed to send provider failure notifications:", error);
+    logger.error("Failed to send provider failure notifications", error, { symbol });
     // Don't throw - notification failure shouldn't block the response
   }
 }

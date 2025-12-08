@@ -11,9 +11,12 @@ export interface NotificationPreferences {
   updatedAt: string;
 }
 
+import type { Logger } from "../logging/logger";
+
 export async function getPreferences(
   userId: string,
-  env: Env
+  env: Env,
+  logger: Logger
 ): Promise<Response> {
   if (!userId) {
     return json({ error: "userId is required" }, 400);
@@ -70,7 +73,8 @@ export async function getPreferences(
 
 export async function updatePreferences(
   request: Request,
-  env: Env
+  env: Env,
+  logger: Logger
 ): Promise<Response> {
   try {
     const payload = await request.json();

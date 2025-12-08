@@ -208,11 +208,287 @@ export async function getOpenApiSpec(): Promise<Response> {
           },
         },
       },
+      "/v1/api/get-news": {
+        get: {
+          summary: "Get stock news (single or multiple symbols)",
+          description: "Fetches latest news articles for one or multiple stock symbols from FMP API. Supports both single symbol and comma-separated multiple symbols. Results are cached based on polling interval configuration.",
+          tags: ["Stock Quotes"],
+          parameters: [
+            {
+              name: "symbol",
+              in: "query",
+              required: false,
+              description: "Stock ticker symbol (e.g., AAPL). Use this for single symbol.",
+              schema: {
+                type: "string",
+              },
+              example: "AAPL",
+            },
+            {
+              name: "symbols",
+              in: "query",
+              required: false,
+              description: "Comma-separated list of stock ticker symbols (e.g., AAPL,MSFT,GOOGL). Use this for multiple symbols. Maximum 10 symbols.",
+              schema: {
+                type: "string",
+              },
+              example: "AAPL,MSFT",
+            },
+            {
+              name: "from",
+              in: "query",
+              required: false,
+              description: "Start date for news filtering (YYYY-MM-DD format)",
+              schema: {
+                type: "string",
+                format: "date",
+              },
+              example: "2025-01-01",
+            },
+            {
+              name: "to",
+              in: "query",
+              required: false,
+              description: "End date for news filtering (YYYY-MM-DD format)",
+              schema: {
+                type: "string",
+                format: "date",
+              },
+              example: "2025-01-31",
+            },
+            {
+              name: "page",
+              in: "query",
+              required: false,
+              description: "Page number (0-based). Default: 0",
+              schema: {
+                type: "integer",
+                minimum: 0,
+                default: 0,
+              },
+              example: 0,
+            },
+            {
+              name: "limit",
+              in: "query",
+              required: false,
+              description: "Number of results per page (1-250). Default: 20. Maximum: 250",
+              schema: {
+                type: "integer",
+                minimum: 1,
+                maximum: 250,
+                default: 20,
+              },
+              example: 20,
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Successful response with news articles",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/StockNewsResponse",
+                  },
+                  example: {
+                    symbols: ["AAPL"],
+                    news: [
+                      {
+                        title: "Apple Announces New Product",
+                        text: "Apple has announced a new product line...",
+                        url: "https://example.com/news",
+                        publishedDate: "2024-01-20T10:00:00Z",
+                        image: "https://example.com/image.jpg",
+                        site: "TechCrunch",
+                        type: "news",
+                      },
+                    ],
+                    pagination: {
+                      page: 0,
+                      limit: 20,
+                      total: 100,
+                      hasMore: true,
+                    },
+                    cached: false,
+                  },
+                },
+              },
+            },
+            "400": {
+              description: "Bad request - symbol or symbols parameter required, invalid format, or too many symbols",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                  examples: {
+                    missingSymbol: {
+                      value: {
+                        error: "symbol or symbols parameter required",
+                      },
+                    },
+                    tooManySymbols: {
+                      value: {
+                        error: "maximum 10 symbols allowed",
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "500": {
+              description: "Server error",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/v1/api/get-stock-details": {
+        get: {
+          summary: "Get comprehensive stock details",
+          description: "Fetches comprehensive stock information including profile, quote, historical chart data, financials, news, and more. Aggregates data from multiple FMP endpoints into a unified response.",
+          tags: ["Stock Quotes"],
+          parameters: [
+            {
+              name: "symbol",
+              in: "query",
+              required: true,
+              description: "Stock ticker symbol (e.g., AAPL, AMZN)",
+              schema: {
+                type: "string",
+                maxLength: 10,
+              },
+              example: "AMZN",
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Successful response with comprehensive stock details",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/StockDetails",
+                  },
+                  example: {
+                    symbol: "AMZN",
+                    profile: {
+                      companyName: "Amazon.com Inc.",
+                      industry: "E-Commerce",
+                      sector: "Consumer Cyclical",
+                      description: "Amazon.com Inc. is a multinational technology company...",
+                      website: "https://www.amazon.com",
+                      image: "https://images.financialmodelingprep.com/symbol/AMZN.png",
+                    },
+                    quote: {
+                      price: 150.25,
+                      change: 2.5,
+                      changesPercentage: 1.69,
+                      dayHigh: 152.0,
+                      dayLow: 148.5,
+                      open: 149.0,
+                      previousClose: 147.75,
+                      volume: 50000000,
+                      marketCap: 1500000000000,
+                    },
+                    chart: {
+                      "1D": [{ date: "2024-01-20", price: 150.25, volume: 50000000 }],
+                      "1W": [{ date: "2024-01-15", price: 148.0, volume: 48000000 }],
+                      "1M": [],
+                      "3M": [],
+                      "1Y": [],
+                      "ALL": [],
+                    },
+                    financials: {
+                      income: [
+                        {
+                          date: "2024-01-01",
+                          revenue: 1000000000,
+                          netIncome: 200000000,
+                          eps: 5.5,
+                        },
+                      ],
+                      keyMetrics: [
+                        {
+                          date: "2024-01-01",
+                          peRatio: 25,
+                          priceToBook: 5,
+                        },
+                      ],
+                      ratios: [
+                        {
+                          date: "2024-01-01",
+                          currentRatio: 2.5,
+                          debtToEquity: 1.2,
+                        },
+                      ],
+                    },
+                    news: [
+                      {
+                        title: "Amazon Announces New Service",
+                        text: "Amazon has announced a new service...",
+                        url: "https://example.com/news",
+                        publishedDate: "2024-01-20",
+                        image: "https://example.com/image.jpg",
+                      },
+                    ],
+                    peers: [],
+                    partial: false,
+                    cached: false,
+                    refreshedAt: 1705780800000,
+                  },
+                },
+              },
+            },
+            "400": {
+              description: "Bad request - symbol parameter required or invalid format",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                  examples: {
+                    missingSymbol: {
+                      value: {
+                        error: "symbol required",
+                      },
+                    },
+                    invalidFormat: {
+                      value: {
+                        error: "invalid symbol format",
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "500": {
+              description: "Server error - failed to fetch stock details",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                  example: {
+                    error: "Failed to fetch stock details",
+                    symbol: "AMZN",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
       "/v1/api/get-historical": {
         get: {
           summary: "Get historical price data",
           description:
-            "Retrieves historical price data for a stock symbol over a specified number of days. Data is fetched from the D1 database which is populated by the get-stock endpoint.",
+            "Retrieves historical price data for a stock symbol. Supports date range filtering via 'from' and 'to' parameters, or backward-compatible 'days' parameter. Data is fetched from the D1 database which is populated by the get-stock endpoint. If database is empty, automatically fetches from FMP API.",
           tags: ["Historical Prices"],
           parameters: [
             {
@@ -226,10 +502,34 @@ export async function getOpenApiSpec(): Promise<Response> {
               example: "AMZN",
             },
             {
+              name: "from",
+              in: "query",
+              required: false,
+              description: "Start date in YYYY-MM-DD format (inclusive). If provided with 'to', overrides 'days' parameter.",
+              schema: {
+                type: "string",
+                format: "date",
+                pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+              },
+              example: "2025-01-01",
+            },
+            {
+              name: "to",
+              in: "query",
+              required: false,
+              description: "End date in YYYY-MM-DD format (inclusive). Defaults to today if 'from' is provided without 'to'.",
+              schema: {
+                type: "string",
+                format: "date",
+                pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+              },
+              example: "2025-01-31",
+            },
+            {
               name: "days",
               in: "query",
               required: false,
-              description: "Number of days to look back (default: 180, max: 3650)",
+              description: "Number of days to look back from today (default: 180, max: 3650). Ignored if 'from' parameter is provided.",
               schema: {
                 type: "integer",
                 minimum: 1,
@@ -247,14 +547,28 @@ export async function getOpenApiSpec(): Promise<Response> {
                   schema: {
                     $ref: "#/components/schemas/HistoricalPricesResponse",
                   },
-                  example: {
-                    symbol: "AMZN",
-                    days: 180,
-                    data: [
-                      { date: "2025-01-01", price: 120.55, volume: 12345678 },
-                      { date: "2025-01-02", price: 121.20, volume: 14567890 },
-                      { date: "2025-01-03", price: 119.85, volume: 11234567 },
-                    ],
+                  examples: {
+                    withDays: {
+                      value: {
+                        symbol: "AMZN",
+                        days: 180,
+                        data: [
+                          { date: "2025-01-01", price: 120.55, volume: 12345678, open: 120.00, high: 121.50, low: 119.80, close: 120.55 },
+                          { date: "2025-01-02", price: 121.20, volume: 14567890, open: 120.55, high: 122.00, low: 120.20, close: 121.20 },
+                        ],
+                      },
+                    },
+                    withDateRange: {
+                      value: {
+                        symbol: "AMZN",
+                        from: "2025-01-01",
+                        to: "2025-01-31",
+                        data: [
+                          { date: "2025-01-01", price: 120.55, volume: 12345678, open: 120.00, high: 121.50, low: 119.80, close: 120.55 },
+                          { date: "2025-01-02", price: 121.20, volume: 14567890, open: 120.55, high: 122.00, low: 120.20, close: 121.20 },
+                        ],
+                      },
+                    },
                   },
                 },
               },
@@ -275,6 +589,21 @@ export async function getOpenApiSpec(): Promise<Response> {
                     invalidDays: {
                       value: {
                         error: "days parameter must be a positive number between 1 and 3650",
+                      },
+                    },
+                    invalidFromDate: {
+                      value: {
+                        error: "Invalid 'from' date format (expected YYYY-MM-DD)",
+                      },
+                    },
+                    invalidToDate: {
+                      value: {
+                        error: "Invalid 'to' date format (expected YYYY-MM-DD)",
+                      },
+                    },
+                    invalidDateRange: {
+                      value: {
+                        error: "'from' date must be before or equal to 'to' date",
                       },
                     },
                   },
@@ -557,7 +886,7 @@ export async function getOpenApiSpec(): Promise<Response> {
       schemas: {
         HistoricalPricesResponse: {
           type: "object",
-          required: ["symbol", "days", "data"],
+          required: ["symbol", "data"],
           properties: {
             symbol: {
               type: "string",
@@ -566,13 +895,28 @@ export async function getOpenApiSpec(): Promise<Response> {
             },
             days: {
               type: "integer",
-              description: "Number of days requested",
+              nullable: true,
+              description: "Number of days requested (only present if 'days' parameter was used)",
               example: 180,
+            },
+            from: {
+              type: "string",
+              format: "date",
+              nullable: true,
+              description: "Start date in YYYY-MM-DD format (only present if 'from' parameter was used)",
+              example: "2025-01-01",
+            },
+            to: {
+              type: "string",
+              format: "date",
+              nullable: true,
+              description: "End date in YYYY-MM-DD format (only present if date range parameters were used)",
+              example: "2025-01-31",
             },
             data: {
               type: "array",
               description:
-                "Array of historical price records, ordered by date (ascending)",
+                "Array of historical price records, ordered by date (ascending). Empty array if no data available.",
               items: {
                 $ref: "#/components/schemas/HistoricalPriceRecord",
               },
@@ -592,7 +936,14 @@ export async function getOpenApiSpec(): Promise<Response> {
             price: {
               type: "number",
               format: "double",
-              description: "Closing price for the date",
+              description: "Closing price for the date (alias: same as 'close')",
+              example: 120.55,
+            },
+            close: {
+              type: "number",
+              format: "double",
+              nullable: true,
+              description: "Closing price for the date (same as 'price', kept for clarity)",
               example: 120.55,
             },
             volume: {
@@ -601,6 +952,269 @@ export async function getOpenApiSpec(): Promise<Response> {
               description: "Trading volume for the date (may be null if unavailable)",
               example: 12345678,
             },
+            open: {
+              type: "number",
+              format: "double",
+              nullable: true,
+              description: "Opening price for the date (null if OHLC data unavailable)",
+              example: 119.50,
+            },
+            high: {
+              type: "number",
+              format: "double",
+              nullable: true,
+              description: "Highest price for the date (null if OHLC data unavailable)",
+              example: 121.00,
+            },
+            low: {
+              type: "number",
+              format: "double",
+              nullable: true,
+              description: "Lowest price for the date (null if OHLC data unavailable)",
+              example: 119.00,
+            },
+          },
+        },
+        StockDetails: {
+          type: "object",
+          required: ["symbol", "profile", "quote", "chart", "financials", "news", "peers"],
+          properties: {
+            symbol: {
+              type: "string",
+              description: "Stock ticker symbol",
+              example: "AMZN",
+            },
+            profile: {
+              type: "object",
+              required: ["companyName", "industry", "sector", "description", "website", "image"],
+              properties: {
+                companyName: { type: "string", example: "Amazon.com Inc." },
+                industry: { type: "string", example: "E-Commerce" },
+                sector: { type: "string", example: "Consumer Cyclical" },
+                description: { type: "string", example: "Amazon.com Inc. is a multinational technology company..." },
+                website: { type: "string", example: "https://www.amazon.com" },
+                image: { type: "string", example: "https://images.financialmodelingprep.com/symbol/AMZN.png" },
+              },
+            },
+            quote: {
+              type: "object",
+              required: ["price", "change", "changesPercentage", "dayHigh", "dayLow", "open", "previousClose", "volume", "marketCap"],
+              properties: {
+                price: { type: "number", example: 150.25 },
+                change: { type: "number", example: 2.5 },
+                changesPercentage: { type: "number", example: 1.69 },
+                dayHigh: { type: "number", example: 152.0 },
+                dayLow: { type: "number", example: 148.5 },
+                open: { type: "number", example: 149.0 },
+                previousClose: { type: "number", example: 147.75 },
+                volume: { type: "integer", example: 50000000 },
+                marketCap: { type: "integer", example: 1500000000000 },
+              },
+            },
+            chart: {
+              type: "object",
+              required: ["1D", "1W", "1M", "3M", "1Y", "ALL"],
+              properties: {
+                "1D": {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/ChartDataPoint" },
+                },
+                "1W": {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/ChartDataPoint" },
+                },
+                "1M": {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/ChartDataPoint" },
+                },
+                "3M": {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/ChartDataPoint" },
+                },
+                "1Y": {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/ChartDataPoint" },
+                },
+                "ALL": {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/ChartDataPoint" },
+                },
+              },
+            },
+            financials: {
+              type: "object",
+              required: ["income", "keyMetrics", "ratios"],
+              properties: {
+                income: {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/IncomeStatement" },
+                },
+                keyMetrics: {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/KeyMetric" },
+                },
+                ratios: {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/FinancialRatio" },
+                },
+              },
+            },
+            news: {
+              type: "array",
+              items: { $ref: "#/components/schemas/StockNews" },
+            },
+            peers: {
+              type: "array",
+              items: { $ref: "#/components/schemas/StockPeer" },
+            },
+            partial: {
+              type: "boolean",
+              description: "true if some data failed to fetch",
+              example: false,
+            },
+            cached: {
+              type: "boolean",
+              description: "true if served from cache",
+              example: false,
+            },
+            refreshedAt: {
+              type: "integer",
+              description: "timestamp when data was fetched",
+              example: 1705780800000,
+            },
+          },
+        },
+        ChartDataPoint: {
+          type: "object",
+          required: ["date", "price"],
+          properties: {
+            date: { type: "string", format: "date", example: "2024-01-20" },
+            price: { type: "number", example: 150.25 },
+            volume: { type: "integer", nullable: true, example: 50000000 },
+          },
+        },
+        IncomeStatement: {
+          type: "object",
+          required: ["date"],
+          properties: {
+            date: { type: "string", example: "2024-01-01" },
+            revenue: { type: "number", nullable: true, example: 1000000 },
+            netIncome: { type: "number", nullable: true, example: 200000 },
+            eps: { type: "number", nullable: true, example: 5.5 },
+          },
+        },
+        KeyMetric: {
+          type: "object",
+          required: ["date"],
+          properties: {
+            date: { type: "string", example: "2024-01-01" },
+            peRatio: { type: "number", nullable: true, example: 25 },
+            priceToBook: { type: "number", nullable: true, example: 5 },
+          },
+        },
+        FinancialRatio: {
+          type: "object",
+          required: ["date"],
+          properties: {
+            date: { type: "string", example: "2024-01-01" },
+            currentRatio: { type: "number", nullable: true, example: 2.5 },
+            debtToEquity: { type: "number", nullable: true, example: 1.2 },
+          },
+        },
+        StockNews: {
+          type: "object",
+          required: ["title", "text", "url", "publishedDate"],
+          properties: {
+            title: { type: "string", example: "Amazon Announces New Service" },
+            text: { type: "string", example: "Amazon has announced a new service..." },
+            url: { type: "string", example: "https://example.com/news" },
+            publishedDate: { type: "string", example: "2024-01-20" },
+            image: { type: "string", nullable: true, example: "https://example.com/image.jpg" },
+          },
+        },
+        StockPeer: {
+          type: "object",
+          required: ["symbol", "name"],
+          properties: {
+            symbol: { type: "string", example: "AAPL" },
+            name: { type: "string", example: "Apple Inc." },
+            price: { type: "number", nullable: true, example: 150.25 },
+          },
+        },
+        StockNewsResponse: {
+          type: "object",
+          required: ["symbols", "news", "pagination"],
+          properties: {
+            symbols: {
+              type: "array",
+              items: { type: "string" },
+              description: "Array of stock ticker symbols requested",
+              example: ["AAPL"],
+            },
+            news: {
+              type: "array",
+              description: "Array of news articles (combined from all requested symbols)",
+              items: { $ref: "#/components/schemas/StockNews" },
+            },
+            pagination: {
+              type: "object",
+              required: ["page", "limit", "total"],
+              properties: {
+                page: {
+                  type: "integer",
+                  description: "Current page number (0-based)",
+                  example: 0,
+                },
+                limit: {
+                  type: "integer",
+                  description: "Number of results per page",
+                  example: 20,
+                },
+                total: {
+                  type: "integer",
+                  description: "Total number of news articles returned in this response",
+                  example: 20,
+                },
+                hasMore: {
+                  type: "boolean",
+                  description: "Whether there are more pages available (estimated)",
+                  example: true,
+                },
+              },
+            },
+            cached: {
+              type: "boolean",
+              description: "Whether the response was served from cache",
+              example: false,
+            },
+            partial: {
+              type: "boolean",
+              description: "true if API fetch failed but empty array returned gracefully",
+              example: false,
+            },
+            error: {
+              type: "string",
+              nullable: true,
+              description: "Error message if fetch failed (still returns 200 status)",
+            },
+            stale_reason: {
+              type: "string",
+              nullable: true,
+              description: "Reason for stale data: 'simulation_mode', 'provider_api_error', 'provider_network_error', etc.",
+            },
+          },
+        },
+        StockNewsItem: {
+          type: "object",
+          required: ["title", "text", "url", "publishedDate"],
+          properties: {
+            title: { type: "string", example: "Apple Announces New Product" },
+            text: { type: "string", example: "Apple has announced a new product line..." },
+            url: { type: "string", example: "https://example.com/news" },
+            publishedDate: { type: "string", example: "2024-01-20T10:00:00Z" },
+            image: { type: "string", nullable: true, example: "https://example.com/image.jpg" },
+            site: { type: "string", example: "TechCrunch", description: "News source/site name" },
+            type: { type: "string", example: "news", description: "Type of content" },
           },
         },
         Alert: {

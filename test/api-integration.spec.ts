@@ -15,6 +15,7 @@ import { searchStock } from "../src/api/search-stock";
 import { getHistorical } from "../src/api/get-historical";
 import { handleAlertsRequest } from "../src/api/alerts";
 import { healthCheck } from "../src/api/health";
+import { createMockLogger } from "./test-utils";
 import * as alertsStorage from "../src/alerts/storage";
 
 vi.mock("../src/alerts/storage", () => ({
@@ -127,7 +128,7 @@ describe("API Integration - Get Stock", () => {
       } as Response);
 
     const env = createEnv();
-    const response = await getStock(createUrl("/v1/api/get-stock", { symbol: "AAPL" }), env);
+    const response = await getStock(createUrl("/v1/api/get-stock", { symbol: "AAPL" }), env, undefined, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -140,7 +141,7 @@ describe("API Integration - Get Stock", () => {
 
   it("returns error when symbol is missing", async () => {
     const env = createEnv();
-    const response = await getStock(createUrl("/v1/api/get-stock"), env);
+    const response = await getStock(createUrl("/v1/api/get-stock"), env, undefined, createMockLogger());
     
     expect(response.status).toBe(400);
     const data = await response.json();
@@ -166,7 +167,7 @@ describe("API Integration - Get Stock", () => {
     const fetchSpy = vi.spyOn(globalThis as any, "fetch");
 
     const env = createEnv();
-    const response = await getStock(createUrl("/v1/api/get-stock", { symbol: "MSFT" }), env);
+    const response = await getStock(createUrl("/v1/api/get-stock", { symbol: "MSFT" }), env, undefined, createMockLogger());
     
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(response.status).toBe(200);
@@ -413,7 +414,7 @@ describe("API Integration - Alerts", () => {
 
     const request = new Request("https://example.com/v1/api/alerts", { method: "GET" });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env);
+    const response = await handleAlertsRequest(request, env, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -448,7 +449,7 @@ describe("API Integration - Alerts", () => {
       body: JSON.stringify(createRequest),
     });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env);
+    const response = await handleAlertsRequest(request, env, createMockLogger());
     
     expect(response.status).toBe(201);
     const data = await response.json();
@@ -483,7 +484,7 @@ describe("API Integration - Alerts", () => {
       body: JSON.stringify(updateRequest),
     });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env);
+    const response = await handleAlertsRequest(request, env, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -498,7 +499,7 @@ describe("API Integration - Alerts", () => {
       method: "DELETE",
     });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env);
+    const response = await handleAlertsRequest(request, env, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -510,7 +511,7 @@ describe("API Integration - Alerts", () => {
 
     const request = new Request("https://example.com/v1/api/alerts/non-existent", { method: "GET" });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env);
+    const response = await handleAlertsRequest(request, env, createMockLogger());
     
     expect(response.status).toBe(404);
     const data = await response.json();

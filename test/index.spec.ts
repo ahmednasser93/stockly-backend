@@ -16,19 +16,47 @@ import worker from "../src/index";
 import { getStock } from "../src/api/get-stock";
 import { searchStock } from "../src/api/search-stock";
 import { getStocks } from "../src/api/get-stocks";
+import type { Env } from "../src/index";
 
 const makeRequest = (path: string) =>
   new Request(`https://example.com${path}`, { method: "GET" });
 
+const createMockEnv = (): Env => ({
+  stockly: {
+    prepare: vi.fn().mockReturnValue({
+      bind: vi.fn().mockReturnValue({
+        first: vi.fn().mockResolvedValue(null),
+        all: vi.fn().mockResolvedValue({ results: [] }),
+        run: vi.fn().mockResolvedValue(undefined),
+      }),
+      all: vi.fn().mockResolvedValue({ results: [] }),
+      first: vi.fn().mockResolvedValue(null),
+      run: vi.fn().mockResolvedValue(undefined),
+    }),
+  } as unknown as D1Database,
+  alertsKv: undefined,
+});
+
+const createMockCtx = (): ExecutionContext => ({
+  waitUntil: vi.fn(),
+  passThroughOnException: vi.fn(),
+  props: {},
+} as unknown as ExecutionContext);
+
 describe("worker router", () => {
+  let mockEnv: Env;
+  let mockCtx: ExecutionContext;
+
   beforeEach(() => {
+    mockEnv = createMockEnv();
+    mockCtx = createMockCtx();
     vi.mocked(getStock).mockReset();
     vi.mocked(searchStock).mockReset();
     vi.mocked(getStocks).mockReset();
   });
 
   it("returns the health check", async () => {
-    const response = await worker.fetch(makeRequest("/v1/api/health"));
+    const response = await worker.fetch(makeRequest("/v1/api/health"), mockEnv, mockCtx);
     await expect(response.json()).resolves.toEqual({ status: "ok" });
   });
 
@@ -38,6 +66,8 @@ describe("worker router", () => {
 
     const response = await worker.fetch(
       makeRequest("/v1/api/get-stock?symbol=MSFT"),
+      mockEnv,
+      mockCtx
     );
 
     expect(getStock).toHaveBeenCalledTimes(1);
@@ -55,6 +85,8 @@ describe("worker router", () => {
 
     const response = await worker.fetch(
       makeRequest("/v1/api/search-stock?query=MSFT"),
+      mockEnv,
+      mockCtx
     );
 
     expect(searchStock).toHaveBeenCalled();
@@ -67,6 +99,8 @@ describe("worker router", () => {
 
     const response = await worker.fetch(
       makeRequest("/v1/api/get-stocks?symbols=MSFT,AMZN"),
+      mockEnv,
+      mockCtx
     );
 
     expect(getStocks).toHaveBeenCalledTimes(1);
@@ -74,7 +108,7 @@ describe("worker router", () => {
   });
 
   it("returns 404 for unknown routes", async () => {
-    const response = await worker.fetch(makeRequest("/v1/api/unknown"));
+    const response = await worker.fetch(makeRequest("/v1/api/unknown"), mockEnv, mockCtx);
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({ error: "Not Found" });
@@ -85,7 +119,7 @@ describe("worker router", () => {
       method: "OPTIONS",
     });
 
-    const response = await worker.fetch(request);
+    const response = await worker.fetch(request, mockEnv, mockCtx);
 
     expect(response.status).toBe(204);
     expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");

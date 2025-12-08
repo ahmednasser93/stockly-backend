@@ -3,6 +3,7 @@ import { searchStock } from "../src/api/search-stock";
 import { clearCache, setCache } from "../src/api/cache";
 import { API_KEY, API_URL } from "../src/util";
 import type { Env } from "../src/index";
+import { createMockLogger } from "./test-utils";
 
 const createUrl = (params: Record<string, string> = {}) => {
   const url = new URL("https://example.com/v1/api/search-stock");
@@ -65,7 +66,7 @@ describe("searchStock handler", () => {
 
   it("returns empty results when query is invalid", async () => {
     const { env } = createEnv();
-    const response = await searchStock(createUrl({ query: "a" }), env);
+    const response = await searchStock(createUrl({ query: "a" }), env, createMockLogger());
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual([]);
@@ -77,7 +78,7 @@ describe("searchStock handler", () => {
     const fetchSpy = vi.spyOn(globalThis as any, "fetch");
 
     const { env } = createEnv();
-    const response = await searchStock(createUrl({ query: "MS" }), env);
+    const response = await searchStock(createUrl({ query: "MS" }), env, createMockLogger());
 
     expect(fetchSpy).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual(cached);
@@ -90,7 +91,7 @@ describe("searchStock handler", () => {
     });
     const fetchSpy = vi.spyOn(globalThis as any, "fetch");
 
-    const response = await searchStock(createUrl({ query: "AA" }), env);
+    const response = await searchStock(createUrl({ query: "AA" }), env, createMockLogger());
 
     expect(spies.selectFirst).toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -111,16 +112,20 @@ describe("searchStock handler", () => {
     const json = vi.fn().mockResolvedValue(apiResponse);
     const fetchMock = vi
       .spyOn(globalThis as any, "fetch")
-      .mockResolvedValue({ json } as Response);
+      .mockResolvedValue({ ok: true, json } as Response);
 
     const { env, spies, getInsertArgs } = createEnv({
       selectRow: null,
     });
 
-    const response = await searchStock(createUrl({ query: "AA" }), env);
+    const response = await searchStock(createUrl({ query: "AA" }), env, createMockLogger());
 
+    // The API now calls both search-name and search-symbol endpoints with limit=20
     expect(fetchMock).toHaveBeenCalledWith(
-      `${API_URL}/search-symbol?query=AA&limit=5&apikey=${API_KEY}`,
+      `${API_URL}/search-name?query=AA&limit=20&apikey=${API_KEY}`,
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_URL}/search-symbol?query=AA&limit=20&apikey=${API_KEY}`,
     );
     expect(spies.insertRun).toHaveBeenCalled();
     const insertArgs = getInsertArgs();
@@ -150,21 +155,25 @@ describe("searchStock handler", () => {
       .spyOn(globalThis as any, "fetch")
       .mockResolvedValue({ json } as Response);
 
-    await searchStock(createUrl({ query: "OL" }), env);
+    await searchStock(createUrl({ query: "OL" }), env, createMockLogger());
 
     expect(spies.selectFirst).toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalled();
   });
 
-  it("returns a 500 when upstream request fails", async () => {
-    vi.spyOn(globalThis as any, "fetch").mockRejectedValue(new Error("fail"));
-    const { env } = createEnv();
-
-    const response = await searchStock(createUrl({ query: "MSFT" }), env);
-
-    expect(response.status).toBe(500);
-    await expect(response.json()).resolves.toEqual({
-      error: "failed to search",
+  it("returns empty array when upstream request fails gracefully", async () => {
+    // Mock fetch to fail (return null) - the implementation catches this gracefully
+    const { env } = createEnv({
+      selectRow: null,
     });
+    
+    // Mock fetch to reject, which will be caught by .catch(() => null)
+    vi.spyOn(globalThis as any, "fetch").mockRejectedValue(new Error("Network error"));
+
+    const response = await searchStock(createUrl({ query: "MSFT" }), env, createMockLogger());
+
+    // The API gracefully handles fetch failures by returning empty array (200)
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual([]);
   });
 });

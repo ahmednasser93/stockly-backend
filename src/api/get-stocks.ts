@@ -246,7 +246,9 @@ async function insertQuote(env: Env, quote: QuoteRecord) {
     .run();
 }
 
-export async function getStocks(url: URL, env: Env): Promise<Response> {
+import type { Logger } from "../logging/logger";
+
+export async function getStocks(url: URL, env: Env, logger: Logger): Promise<Response> {
   const symbolsParam = url.searchParams.get("symbols");
   if (!symbolsParam) {
     return json({ error: "symbols required" }, 400);

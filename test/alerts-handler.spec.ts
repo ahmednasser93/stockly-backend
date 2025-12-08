@@ -8,6 +8,7 @@ import {
   deleteAlert,
 } from "../src/alerts/storage";
 import { deleteAlertState } from "../src/alerts/state";
+import { createMockLogger } from "./test-utils";
 
 vi.mock("../src/alerts/storage", () => ({
   listAlerts: vi.fn(),
@@ -41,7 +42,7 @@ describe("alerts handler", () => {
 
   it("lists alerts", async () => {
     vi.mocked(listAlerts).mockResolvedValue([{ id: "1" } as any]);
-    const response = await handleAlertsRequest(createRequest({ method: "GET" }), env as any);
+    const response = await handleAlertsRequest(createRequest({ method: "GET" }), env as any, createMockLogger());
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ alerts: [{ id: "1" }] });
   });
@@ -59,7 +60,8 @@ describe("alerts handler", () => {
 
     const response = await handleAlertsRequest(
       createRequest({ method: "POST", body: JSON.stringify(body) }),
-      env as any
+      env as any,
+      createMockLogger()
     );
 
     expect(response.status).toBe(201);
@@ -71,7 +73,8 @@ describe("alerts handler", () => {
     vi.mocked(getAlert).mockResolvedValue(null);
     const response = await handleAlertsRequest(
       createRequest({ method: "GET", path: "/v1/api/alerts/missing" }),
-      env as any
+      env as any,
+      createMockLogger()
     );
     expect(response.status).toBe(404);
   });
@@ -85,7 +88,8 @@ describe("alerts handler", () => {
         path: "/v1/api/alerts/3",
         body: JSON.stringify({ status: "paused" }),
       }),
-      env as any
+      env as any,
+      createMockLogger()
     );
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual(updated);
@@ -95,7 +99,8 @@ describe("alerts handler", () => {
     vi.mocked(deleteAlert).mockResolvedValue(true);
     const response = await handleAlertsRequest(
       createRequest({ method: "DELETE", path: "/v1/api/alerts/123" }),
-      env as any
+      env as any,
+      createMockLogger()
     );
     expect(response.status).toBe(200);
     expect(deleteAlertState).toHaveBeenCalledWith(env.alertsKv, "123");

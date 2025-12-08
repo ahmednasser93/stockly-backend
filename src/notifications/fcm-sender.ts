@@ -6,6 +6,7 @@
  */
 
 import type { Env } from "../index";
+import type { Logger } from "../logging/logger";
 
 const FCM_API_BASE = "https://fcm.googleapis.com/v1/projects";
 
@@ -205,7 +206,8 @@ export async function sendFCMNotificationWithLogs(
   title: string,
   body: string,
   data: Record<string, unknown>,
-  env: Env
+  env: Env,
+  logger: Logger
 ): Promise<{
   success: boolean;
   logs: string[];
@@ -357,6 +359,21 @@ export async function sendFCMNotificationWithLogs(
         logs.push(`  Is Permanent: ${errorInfo.isPermanent ? "Yes" : "No"}`);
         logs.push(`  Should Cleanup Token: ${errorInfo.shouldCleanupToken ? "Yes" : "No"}`);
 
+        // Log FCM error using structured logging
+        logger.logFCMError("FCM push notification failed", {
+          fcmErrorCode: String(errorData.error.code),
+          fcmErrorType: errorInfo.type,
+          isPermanent: errorInfo.isPermanent,
+          shouldCleanupToken: errorInfo.shouldCleanupToken,
+          requestPayload: {
+            token: fcmToken.substring(0, 30) + "...",
+            title,
+            body,
+            dataKeys: Object.keys(data),
+          },
+          errorMessage: errorData.error.message,
+        });
+
         if (errorInfo.isPermanent) {
           const totalDuration = Date.now() - startTime;
           logs.push(`[${new Date().toISOString()}] 🚫 Permanent error - stopping retries after ${totalDuration}ms`);
@@ -451,9 +468,10 @@ export async function sendFCMNotification(
   title: string,
   body: string,
   data: Record<string, unknown>,
-  env: Env
+  env: Env,
+  logger: Logger
 ): Promise<boolean> {
-  const result = await sendFCMNotificationWithLogs(fcmToken, title, body, data, env);
+  const result = await sendFCMNotificationWithLogs(fcmToken, title, body, data, env, logger);
   return result.success;
 }
 

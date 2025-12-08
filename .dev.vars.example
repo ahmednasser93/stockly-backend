@@ -1,0 +1,14 @@
+# Example .dev.vars file for local development
+# Copy this file to .dev.vars and fill in your actual values
+# .dev.vars is gitignored and will not be committed
+
+# Grafana Loki Configuration
+# Get these values from your Grafana Cloud account
+LOKI_URL=https://logs-prod-035.grafana.net
+LOKI_USERNAME=1420483
+LOKI_PASSWORD=your_grafana_cloud_api_token_here
+
+# Other environment variables (if needed)
+# FCM_SERVICE_ACCOUNT={"type":"service_account",...}
+# FMP_API_KEY=your_api_key_here
+

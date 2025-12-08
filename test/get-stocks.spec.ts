@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { getStocks } from "../src/api/get-stocks";
 import { clearCache, setCache } from "../src/api/cache";
 import type { Env } from "../src/index";
+import { createMockLogger } from "./test-utils";
 
 const createUrl = (symbols: string | null) => {
   const url = new URL("https://example.com/v1/api/get-stocks");
@@ -60,7 +61,7 @@ describe("getStocks handler", () => {
 
   it("requires symbols param", async () => {
     const { env } = createEnv();
-    const response = await getStocks(createUrl(null), env);
+    const response = await getStocks(createUrl(null), env, createMockLogger());
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "symbols required" });
@@ -72,7 +73,7 @@ describe("getStocks handler", () => {
     const fetchSpy = vi.spyOn(globalThis as any, "fetch");
     const { env } = createEnv();
 
-    const response = await getStocks(createUrl("amzn"), env);
+    const response = await getStocks(createUrl("amzn"), env, createMockLogger());
 
     expect(fetchSpy).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual([cached]);
@@ -112,7 +113,7 @@ describe("getStocks handler", () => {
       return Promise.resolve({ ok: false, status: 404 } as Response);
     });
 
-    const response = await getStocks(createUrl("aapl"), env);
+    const response = await getStocks(createUrl("aapl"), env, createMockLogger());
     const data = await response.json();
 
     // We refresh to get full data (image, name, description, etc.)
@@ -161,7 +162,7 @@ describe("getStocks handler", () => {
       return Promise.resolve({ ok: false, status: 404 } as Response);
     });
 
-    const response = await getStocks(createUrl("tsla"), env);
+    const response = await getStocks(createUrl("tsla"), env, createMockLogger());
     const data = await response.json();
 
     expect(spies.insertRun).toHaveBeenCalled();
@@ -176,7 +177,7 @@ describe("getStocks handler", () => {
     const { env } = createEnv();
     vi.spyOn(globalThis as any, "fetch").mockRejectedValue(new Error("boom"));
 
-    const response = await getStocks(createUrl("msft"), env);
+    const response = await getStocks(createUrl("msft"), env, createMockLogger());
 
     // Promise.allSettled handles failures gracefully, returns empty array
     expect(response.status).toBe(200);
@@ -224,7 +225,7 @@ describe("getStocks handler", () => {
       return Promise.resolve({ ok: false, status: 404 } as Response);
     });
 
-    const response = await getStocks(createUrl("AAPL"), env);
+    const response = await getStocks(createUrl("AAPL"), env, createMockLogger());
     const data = await response.json();
 
     expect(response.status).toBe(200);
@@ -304,7 +305,7 @@ describe("getStocks handler", () => {
       return Promise.resolve({ ok: false, status: 404 } as Response);
     });
 
-    const response = await getStocks(createUrl("AAPL,MSFT"), env);
+    const response = await getStocks(createUrl("AAPL,MSFT"), env, createMockLogger());
     const data = await response.json();
 
     expect(response.status).toBe(200);
@@ -367,7 +368,7 @@ describe("getStocks handler", () => {
       return Promise.resolve({ ok: false, status: 404 } as Response);
     });
 
-    const response = await getStocks(createUrl("TSLA"), env);
+    const response = await getStocks(createUrl("TSLA"), env, createMockLogger());
     const data = await response.json();
 
     expect(data[0].name).toBe("Tesla, Inc.");
@@ -399,7 +400,7 @@ describe("getStocks handler", () => {
       return Promise.resolve({ ok: false, status: 404 } as Response);
     });
 
-    const response = await getStocks(createUrl("GOOGL"), env);
+    const response = await getStocks(createUrl("GOOGL"), env, createMockLogger());
     const data = await response.json();
 
     expect(data[0].image).toBe("https://images.financialmodelingprep.com/symbol/GOOGL.png");
@@ -444,7 +445,7 @@ describe("getStocks handler", () => {
       return Promise.resolve({ ok: false, status: 404 } as Response);
     });
 
-    const response = await getStocks(createUrl("AAPL,INVALID"), env);
+    const response = await getStocks(createUrl("AAPL,INVALID"), env, createMockLogger());
     const data = await response.json();
 
     // Should return only AAPL, not INVALID

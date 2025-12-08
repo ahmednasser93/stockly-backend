@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { getAllDevices, sendTestNotification } from "../src/api/devices";
 import type { Env } from "../src/index";
+import { createMockLogger } from "./test-utils";
 
 describe("Devices API", () => {
   let mockEnv: Env;
@@ -50,13 +51,31 @@ describe("Devices API", () => {
         },
       ];
 
-      const mockStmt = {
+      // Mock the main query (SELECT user_id, push_token, device_info FROM user_push_tokens)
+      const mainQueryStmt = {
         all: vi.fn().mockResolvedValue({ results: mockDevices }),
       };
 
-      mockDb.prepare.mockReturnValue(mockStmt);
+      // Mock the alert count queries (called for each device)
+      const alertCountStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue({ count: 5 }),
+      };
 
-      const response = await getAllDevices(mockEnv);
+      // Mock prepare to return different statements based on query
+      mockDb.prepare.mockImplementation((query: string) => {
+        if (query.includes("user_push_tokens")) {
+          return mainQueryStmt;
+        } else if (query.includes("alerts") && query.includes("COUNT")) {
+          return alertCountStmt;
+        }
+        return {
+          bind: vi.fn().mockReturnThis(),
+          first: vi.fn().mockResolvedValue({ count: 0 }),
+        };
+      });
+
+      const response = await getAllDevices(mockEnv, createMockLogger());
       const data = await response.json();
 
       expect(mockDb.prepare).toHaveBeenCalledWith(
@@ -66,6 +85,8 @@ describe("Devices API", () => {
       expect(data.devices[0].userId).toBe("user-1");
       expect(data.devices[0].pushToken).toBe("dXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX");
       expect(data.devices[0].deviceInfo).toBe("Android Device");
+      expect(data.devices[0].alertCount).toBe(5);
+      expect(data.devices[0].activeAlertCount).toBe(5);
       expect(data.devices[1].deviceInfo).toBeNull();
     });
 
@@ -76,20 +97,20 @@ describe("Devices API", () => {
 
       mockDb.prepare.mockReturnValue(mockStmt);
 
-      const response = await getAllDevices(mockEnv);
+      const response = await getAllDevices(mockEnv, createMockLogger());
       const data = await response.json();
 
       expect(data.devices).toEqual([]);
     });
 
     it("should handle database errors", async () => {
-      const mockStmt = {
-        all: vi.fn().mockRejectedValue(new Error("Database error")),
-      };
+      mockDb.prepare.mockImplementation(() => {
+        return {
+          all: vi.fn().mockRejectedValue(new Error("Database error")),
+        };
+      });
 
-      mockDb.prepare.mockReturnValue(mockStmt);
-
-      const response = await getAllDevices(mockEnv);
+      const response = await getAllDevices(mockEnv, createMockLogger());
       const data = await response.json();
 
       expect(response.status).toBe(500);
@@ -112,17 +133,23 @@ describe("Devices API", () => {
 
       mockDb.prepare.mockReturnValue(mockStmt);
 
-      // Mock fetch for FCM API
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ name: "projects/test-project/messages/0:1234567890" }),
-      });
+      // Mock fetch for Google OAuth token endpoint and FCM API
+      global.fetch = vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ access_token: "mock-google-access-token" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ name: "projects/test-project/messages/0:1234567890" }),
+        });
 
       // Mock crypto.subtle for JWT signing
+      const mockCryptoKey = {} as CryptoKey;
       global.crypto = {
         subtle: {
-          importKey: vi.fn().mockResolvedValue({}),
-          sign: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
+          importKey: vi.fn().mockResolvedValue(mockCryptoKey),
+          sign: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3, 4, 5])),
         } as unknown as SubtleCrypto,
         getRandomValues: vi.fn(),
       } as Crypto;
@@ -132,7 +159,7 @@ describe("Devices API", () => {
         body: JSON.stringify({ message: "Custom test message" }),
       });
 
-      const response = await sendTestNotification("user-1", request, mockEnv);
+      const response = await sendTestNotification("user-1", request, mockEnv, createMockLogger());
       const data = await response.json();
 
       expect(mockDb.prepare).toHaveBeenCalledWith(
@@ -157,17 +184,23 @@ describe("Devices API", () => {
 
       mockDb.prepare.mockReturnValue(mockStmt);
 
-      // Mock fetch for FCM API
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ name: "projects/test-project/messages/0:1234567890" }),
-      });
+      // Mock fetch for Google OAuth token endpoint and FCM API
+      global.fetch = vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ access_token: "mock-google-access-token" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ name: "projects/test-project/messages/0:1234567890" }),
+        });
 
       // Mock crypto.subtle for JWT signing
+      const mockCryptoKey = {} as CryptoKey;
       global.crypto = {
         subtle: {
-          importKey: vi.fn().mockResolvedValue({}),
-          sign: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
+          importKey: vi.fn().mockResolvedValue(mockCryptoKey),
+          sign: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3, 4, 5])),
         } as unknown as SubtleCrypto,
         getRandomValues: vi.fn(),
       } as Crypto;
@@ -176,7 +209,7 @@ describe("Devices API", () => {
         method: "POST",
       });
 
-      const response = await sendTestNotification("user-1", request, mockEnv);
+      const response = await sendTestNotification("user-1", request, mockEnv, createMockLogger());
       const data = await response.json();
 
       expect(data.success).toBe(true);
@@ -194,7 +227,7 @@ describe("Devices API", () => {
         method: "POST",
       });
 
-      const response = await sendTestNotification("user-1", request, mockEnv);
+      const response = await sendTestNotification("user-1", request, mockEnv, createMockLogger());
       const data = await response.json();
 
       expect(response.status).toBe(404);
@@ -206,7 +239,7 @@ describe("Devices API", () => {
         method: "POST",
       });
 
-      const response = await sendTestNotification("", request, mockEnv);
+      const response = await sendTestNotification("", request, mockEnv, createMockLogger());
       const data = await response.json();
 
       expect(response.status).toBe(400);
@@ -218,7 +251,7 @@ describe("Devices API", () => {
         method: "GET",
       });
 
-      const response = await sendTestNotification("user-1", request, mockEnv);
+      const response = await sendTestNotification("user-1", request, mockEnv, createMockLogger());
       const data = await response.json();
 
       expect(response.status).toBe(405);
@@ -265,7 +298,7 @@ describe("Devices API", () => {
         method: "POST",
       });
 
-      const response = await sendTestNotification("user-1", request, mockEnv);
+      const response = await sendTestNotification("user-1", request, mockEnv, createMockLogger());
       const data = await response.json();
 
       expect(response.status).toBe(500);

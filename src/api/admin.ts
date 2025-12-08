@@ -19,7 +19,9 @@ export interface NotificationLog {
 /**
  * Get recent notification logs (last 100 notifications)
  */
-export async function getRecentNotifications(env: Env): Promise<Response> {
+import type { Logger } from "../logging/logger";
+
+export async function getRecentNotifications(env: Env, logger: Logger): Promise<Response> {
   try {
     const results = await env.stockly
       .prepare(
@@ -66,7 +68,7 @@ export async function getRecentNotifications(env: Env): Promise<Response> {
 /**
  * Get failed notification logs
  */
-export async function getFailedNotifications(env: Env): Promise<Response> {
+export async function getFailedNotifications(env: Env, logger: Logger): Promise<Response> {
   try {
     const results = await env.stockly
       .prepare(
@@ -193,7 +195,7 @@ export async function getFilteredNotifications(
  * Retry sending a failed notification
  * POST /v1/api/notifications/retry/:logId
  */
-export async function retryNotification(logId: string, env: Env): Promise<Response> {
+export async function retryNotification(logId: string, env: Env, logger: Logger): Promise<Response> {
   try {
     // Get the notification log entry
     const logResult = await env.stockly

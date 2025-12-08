@@ -11,9 +11,12 @@ export interface UserSettings {
  * GET /v1/api/settings/:userId
  * Retrieve user settings
  */
+import type { Logger } from "../logging/logger";
+
 export async function getSettings(
   userId: string,
-  env: Env
+  env: Env,
+  logger: Logger
 ): Promise<Response> {
   if (!userId) {
     return json({ error: "userId is required" }, 400);
@@ -60,7 +63,8 @@ export async function getSettings(
  */
 export async function updateSettings(
   request: Request,
-  env: Env
+  env: Env,
+  logger: Logger
 ): Promise<Response> {
   try {
     const payload = await request.json();

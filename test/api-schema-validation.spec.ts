@@ -48,6 +48,7 @@ vi.mock("../src/alerts/state", () => ({
 import { API_KEY, API_URL } from "../src/util";
 import { clearCache } from "../src/api/cache";
 import type { Env } from "../src/index";
+import { createMockLogger } from "./test-utils";
 
 // ============================================================================
 // TEST HELPERS
@@ -125,7 +126,7 @@ describe("API Schema Validation - Get Stock", () => {
       } as Response);
 
     const env = createEnv();
-    const response = await getStock(createUrl("/v1/api/get-stock", { symbol: "AAPL" }), env);
+    const response = await getStock(createUrl("/v1/api/get-stock", { symbol: "AAPL" }), env, undefined, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -137,7 +138,7 @@ describe("API Schema Validation - Get Stock", () => {
 
   it("getStock returns valid ErrorResponse schema on error", async () => {
     const env = createEnv();
-    const response = await getStock(createUrl("/v1/api/get-stock"), env);
+    const response = await getStock(createUrl("/v1/api/get-stock"), env, undefined, createMockLogger());
     
     expect(response.status).toBe(400);
     const data = await response.json();
@@ -174,7 +175,7 @@ describe("API Schema Validation - Get Stocks", () => {
       } as Response);
 
     const env = createEnv();
-    const response = await getStocks(createUrl("/v1/api/get-stocks", { symbols: "AAPL,MSFT" }), env);
+    const response = await getStocks(createUrl("/v1/api/get-stocks", { symbols: "AAPL,MSFT" }), env, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -188,7 +189,7 @@ describe("API Schema Validation - Get Stocks", () => {
 
   it("getStocks returns valid ErrorResponse schema on error", async () => {
     const env = createEnv();
-    const response = await getStocks(createUrl("/v1/api/get-stocks"), env);
+    const response = await getStocks(createUrl("/v1/api/get-stocks"), env, createMockLogger());
     
     expect(response.status).toBe(400);
     const data = await response.json();
@@ -218,7 +219,7 @@ describe("API Schema Validation - Search Stock", () => {
     } as Response);
 
     const env = createEnv();
-    const response = await searchStock(createUrl("/v1/api/search-stock", { query: "AP" }), env);
+    const response = await searchStock(createUrl("/v1/api/search-stock", { query: "AP" }), env, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -253,7 +254,7 @@ describe("API Schema Validation - Get Historical", () => {
     });
     env.stockly.prepare = vi.fn().mockReturnValue({ bind });
 
-    const response = await getHistorical(createUrl("/v1/api/get-historical", { symbol: "AAPL", days: "180" }), env);
+    const response = await getHistorical(createUrl("/v1/api/get-historical", { symbol: "AAPL", days: "180" }), env, undefined, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -266,7 +267,7 @@ describe("API Schema Validation - Get Historical", () => {
 
   it("getHistorical returns valid ErrorResponse schema on error", async () => {
     const env = createEnv();
-    const response = await getHistorical(createUrl("/v1/api/get-historical"), env);
+    const response = await getHistorical(createUrl("/v1/api/get-historical"), env, undefined, createMockLogger());
     
     expect(response.status).toBe(400);
     const data = await response.json();
@@ -303,7 +304,7 @@ describe("API Schema Validation - Alerts", () => {
 
     const request = new Request("https://example.com/v1/api/alerts", { method: "GET" });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env);
+    const response = await handleAlertsRequest(request, env, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -348,7 +349,7 @@ describe("API Schema Validation - Alerts", () => {
       body: JSON.stringify(createRequest),
     });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env);
+    const response = await handleAlertsRequest(request, env, createMockLogger());
     
     expect(response.status).toBe(201);
     const data = await response.json();
@@ -383,7 +384,7 @@ describe("API Schema Validation - Alerts", () => {
       body: JSON.stringify(updateRequest),
     });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env);
+    const response = await handleAlertsRequest(request, env, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -408,7 +409,7 @@ describe("API Schema Validation - Alerts", () => {
 
     const request = new Request("https://example.com/v1/api/alerts/123", { method: "GET" });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env);
+    const response = await handleAlertsRequest(request, env, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();

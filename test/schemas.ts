@@ -56,13 +56,19 @@ export interface SearchStockResponse extends Array<{
 
 export interface HistoricalPriceRecord {
   date: string; // YYYY-MM-DD format
-  price: number;
+  price: number; // Closing price (backward compatibility)
+  close?: number | null; // Closing price (alias, same as price)
   volume?: number | null;
+  open?: number | null; // Opening price (null if OHLC data unavailable)
+  high?: number | null; // Highest price (null if OHLC data unavailable)
+  low?: number | null; // Lowest price (null if OHLC data unavailable)
 }
 
 export interface HistoricalPricesResponse {
   symbol: string;
-  days: number;
+  days?: number; // Optional - only present when using 'days' parameter
+  from?: string; // Optional - only present when using 'from'/'to' parameters or calculated internally
+  to?: string; // Optional - only present when using 'from'/'to' parameters or calculated internally
   data: HistoricalPriceRecord[];
 }
 
@@ -210,7 +216,10 @@ export function validateUpdateAlertRequest(data: any): data is UpdateAlertReques
 export function validateHistoricalPricesResponse(data: any): data is HistoricalPricesResponse {
   if (!data || typeof data !== "object") return false;
   if (typeof data.symbol !== "string") return false;
-  if (typeof data.days !== "number") return false;
+  // days, from, to are all optional
+  if (data.days !== undefined && typeof data.days !== "number") return false;
+  if (data.from !== undefined && typeof data.from !== "string") return false;
+  if (data.to !== undefined && typeof data.to !== "string") return false;
   if (!Array.isArray(data.data)) return false;
   return data.data.every((record: any) => {
     if (!record || typeof record !== "object") return false;
