@@ -6,6 +6,7 @@ export interface UserSettings {
   refreshIntervalMinutes: number;
   cacheStaleTimeMinutes?: number;
   cacheGcTimeMinutes?: number;
+  newsFavoriteSymbols?: string[];
   updatedAt: string;
 }
 
@@ -27,7 +28,7 @@ export async function getSettings(
   try {
     const row = await env.stockly
       .prepare(
-        `SELECT user_id, refresh_interval_minutes, cache_stale_time_minutes, cache_gc_time_minutes, updated_at
+        `SELECT user_id, refresh_interval_minutes, cache_stale_time_minutes, cache_gc_time_minutes, news_favorite_symbols, updated_at
          FROM user_settings WHERE user_id = ?`
       )
       .bind(userId)
@@ -36,15 +37,26 @@ export async function getSettings(
         refresh_interval_minutes: number;
         cache_stale_time_minutes: number | null;
         cache_gc_time_minutes: number | null;
+        news_favorite_symbols: string | null;
         updated_at: string;
       }>();
 
     if (row) {
+      let newsFavoriteSymbols: string[] | undefined;
+      if (row.news_favorite_symbols) {
+        try {
+          newsFavoriteSymbols = JSON.parse(row.news_favorite_symbols);
+        } catch (e) {
+          logger.warn("Failed to parse news_favorite_symbols", { userId, error: e });
+        }
+      }
+
       const settings: UserSettings = {
         userId: row.user_id,
         refreshIntervalMinutes: row.refresh_interval_minutes,
         cacheStaleTimeMinutes: row.cache_stale_time_minutes ?? 5,
         cacheGcTimeMinutes: row.cache_gc_time_minutes ?? 10,
+        newsFavoriteSymbols,
         updatedAt: row.updated_at,
       };
       return json(settings);
@@ -55,6 +67,7 @@ export async function getSettings(
         refreshIntervalMinutes: 5,
         cacheStaleTimeMinutes: 5,
         cacheGcTimeMinutes: 10,
+        newsFavoriteSymbols: [],
         updatedAt: new Date().toISOString(),
       };
       return json(defaultSettings);
