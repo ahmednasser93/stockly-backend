@@ -633,41 +633,56 @@ describe("API - Settings", () => {
     };
 
     const env = createEnv();
+    const logger = createMockLogger();
     const bind = vi.fn().mockReturnValue({
-      first: vi.fn().mockResolvedValue(mockSettings),
+      first: vi.fn().mockResolvedValue({
+        user_id: "user-123",
+        refresh_interval_minutes: 10,
+        cache_stale_time_minutes: 8,
+        cache_gc_time_minutes: 15,
+        updated_at: "2025-01-01T00:00:00Z",
+      }),
     });
     env.stockly.prepare = vi.fn().mockReturnValue({ bind });
 
-    const response = await getSettings("user-123", env);
+    const response = await getSettings("user-123", env, logger);
     
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data.userId).toBe("user-123");
     expect(data.refreshIntervalMinutes).toBe(10);
+    expect(data.cacheStaleTimeMinutes).toBe(8);
+    expect(data.cacheGcTimeMinutes).toBe(15);
   });
 
   it("GET /v1/api/settings/:userId returns default settings when not found", async () => {
     const env = createEnv();
+    const logger = createMockLogger();
     const bind = vi.fn().mockReturnValue({
       first: vi.fn().mockResolvedValue(null),
     });
     env.stockly.prepare = vi.fn().mockReturnValue({ bind });
 
-    const response = await getSettings("user-123", env);
+    const response = await getSettings("user-123", env, logger);
     
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data.userId).toBe("user-123");
     expect(data.refreshIntervalMinutes).toBe(5); // Default
+    expect(data.cacheStaleTimeMinutes).toBe(5); // Default
+    expect(data.cacheGcTimeMinutes).toBe(10); // Default
   });
 
   it("PUT /v1/api/settings updates user settings", async () => {
     const payload = {
       userId: "user-123",
       refreshIntervalMinutes: 15,
+      cacheStaleTimeMinutes: 8,
+      cacheGcTimeMinutes: 15,
     };
 
     const env = createEnv();
+    const logger = createMockLogger();
     const bind = vi.fn().mockReturnValue({
       first: vi.fn().mockResolvedValue(null), // No existing settings
       run: vi.fn().mockResolvedValue(undefined),
@@ -680,12 +695,14 @@ describe("API - Settings", () => {
       body: JSON.stringify(payload),
     });
 
-    const response = await updateSettings(request, env);
+    const response = await updateSettings(request, env, logger);
     
     expect(response.status).toBe(201);
     const data = await response.json();
     expect(data.success).toBe(true);
     expect(data.settings.refreshIntervalMinutes).toBe(15);
+    expect(data.settings.cacheStaleTimeMinutes).toBe(8);
+    expect(data.settings.cacheGcTimeMinutes).toBe(15);
   });
 });
 

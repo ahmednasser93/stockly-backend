@@ -42,11 +42,17 @@ wrangler d1 execute stockly --remote --yes --file=./migrations/006_create_notifi
 echo "Migration 7/8: 007_create_user_settings.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/007_create_user_settings.sql || echo "⚠️  Migration 7 already applied or failed"
 
-echo "Migration 8/9: 008_create_historical_prices.sql"
+echo "Migration 8/11: 008_create_historical_prices.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/008_create_historical_prices.sql || echo "⚠️  Migration 8 already applied or failed"
 
-echo "Migration 9/9: 009_add_ohlc_to_historical_prices.sql"
+echo "Migration 9/11: 009_add_ohlc_to_historical_prices.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/009_add_ohlc_to_historical_prices.sql || echo "⚠️  Migration 9 already applied or failed"
+
+echo "Migration 10/11: 010_news_feed.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/010_news_feed.sql || echo "⚠️  Migration 10 already applied or failed"
+
+echo "Migration 11/11: 011_add_cache_settings.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/011_add_cache_settings.sql || echo "⚠️  Migration 11 already applied or failed"
 
 echo ""
 echo "✅ Database migrations complete"

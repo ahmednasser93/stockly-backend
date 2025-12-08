@@ -2,7 +2,7 @@ import { json, CORS_HEADERS } from "./util";
 import { getStock } from "./api/get-stock";
 import { getStocks } from "./api/get-stocks";
 import { getStockDetailsRoute } from "./api/get-stock-details";
-import { getNews } from "./api/get-news";
+import { getNews, getGeneralNews, getFavoriteNews } from "./api/get-news";
 import { getStockNews } from "./api/get-stock-news";
 import { searchStock } from "./api/search-stock";
 import { healthCheck } from "./api/health";
@@ -12,7 +12,10 @@ import { getPreferences, updatePreferences } from "./api/preferences";
 import { getSettings, updateSettings } from "./api/settings";
 import { getRecentNotifications, getFailedNotifications, retryNotification } from "./api/admin";
 import { getAllDevices, sendTestNotification, deleteDevice } from "./api/devices";
+import { updateUserPreferences } from "./api/user-preferences";
+import { getArchivedNews, toggleArchivedNews } from "./api/news-archive";
 import { runAlertCron } from "./cron/alerts-cron";
+import { runNewsAlertCron } from "./cron/news-alert-cron";
 import { getHistorical } from "./api/get-historical";
 import { getHistoricalIntraday } from "./api/get-historical-intraday";
 import { getOpenApiSpec } from "./api/openapi";
@@ -119,6 +122,10 @@ export default {
         response = await getStockDetailsRoute(url, loggedEnv, ctx, logger);
       } else if (pathname === "/v1/api/get-news") {
         response = await getNews(url, loggedEnv, logger);
+      } else if (pathname === "/v1/api/news/general") {
+        response = await getGeneralNews(url, loggedEnv, logger);
+      } else if (pathname === "/v1/api/news/favorites") {
+        response = await getFavoriteNews(url, loggedEnv, logger);
       } else if (pathname === "/v1/api/get-stock-news") {
         response = await getStockNews(url, loggedEnv, logger);
       } else if (pathname === "/v1/api/search-stock") {
@@ -147,6 +154,13 @@ export default {
         const extractedUserId = pathname.split("/v1/api/settings/")[1];
         logger.updateContext({ userId: extractedUserId });
         response = await getSettings(extractedUserId, loggedEnv, logger);
+      } else if (pathname === "/v1/api/users/preferences/update" && request.method === "POST") {
+        response = await updateUserPreferences(request, loggedEnv, logger);
+      } else if (pathname === "/v1/api/news/archive" && request.method === "GET") {
+        response = await getArchivedNews(request, loggedEnv, logger);
+      } else if (pathname.startsWith("/v1/api/news/archive/") && request.method === "POST") {
+        const articleId = pathname.split("/v1/api/news/archive/")[1];
+        response = await toggleArchivedNews(request, articleId, loggedEnv, logger);
       } else if (pathname === "/v1/api/notifications/recent") {
         response = await getRecentNotifications(loggedEnv, logger);
       } else if (pathname === "/v1/api/notifications/failed") {
@@ -210,6 +224,14 @@ export default {
     return response;
   },
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(runAlertCron(env, ctx));
+    // Run price alerts every 5 minutes (default cron)
+    if (event.cron === "*/5 * * * *" || !event.cron) {
+      ctx.waitUntil(runAlertCron(env, ctx));
+    }
+
+    // Run news alerts every hour
+    if (event.cron === "0 * * * *") {
+      ctx.waitUntil(runNewsAlertCron(env, ctx));
+    }
   },
 };

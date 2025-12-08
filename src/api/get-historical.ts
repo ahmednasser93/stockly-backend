@@ -115,8 +115,9 @@ export async function getHistorical(url: URL, env: Env, ctx: ExecutionContext | 
         });
       }
       logger.info(`No historical data in database for ${normalizedSymbol}`, {
-        dateRange: `${formatDate(fromDate!)} to ${formatDate(toDate!)}`, \n          action: \"fetching from FMP API\",
-        });
+        dateRange: `${formatDate(fromDate!)} to ${formatDate(toDate!)}`,
+        action: "fetching from FMP API",
+      });
     }
 
     // Create a minimal ExecutionContext if not provided
@@ -164,18 +165,17 @@ export async function getHistorical(url: URL, env: Env, ctx: ExecutionContext | 
       console.error(`[get-historical] Error fetching historical data from FMP API for ${normalizedSymbol}:`, fetchError?.message || fetchError);
       // Continue with empty data - let client handle empty state
     }
-  }
 
     // Return data even if empty (let client handle empty state gracefully)
     // This prevents 500 errors and allows UI to show appropriate message
     return json({
-    symbol: normalizedSymbol,
-    days: days ?? undefined,
-    from: fromDate ? formatDate(fromDate) : undefined,
-    to: toDate ? formatDate(toDate) : undefined,
-    data,
-  });
-} catch (error) {
+      symbol: normalizedSymbol,
+      days: days ?? undefined,
+      from: fromDate ? formatDate(fromDate) : undefined,
+      to: toDate ? formatDate(toDate) : undefined,
+      data,
+    });
+  } catch (error) {
   console.error(`ERROR in getHistorical for ${normalizedSymbol}:`, error);
 
   // Return empty array instead of 500 error for better UX

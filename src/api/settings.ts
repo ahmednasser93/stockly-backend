@@ -4,6 +4,8 @@ import type { Env } from "../index";
 export interface UserSettings {
   userId: string;
   refreshIntervalMinutes: number;
+  cacheStaleTimeMinutes?: number;
+  cacheGcTimeMinutes?: number;
   updatedAt: string;
 }
 
@@ -25,13 +27,15 @@ export async function getSettings(
   try {
     const row = await env.stockly
       .prepare(
-        `SELECT user_id, refresh_interval_minutes, updated_at
+        `SELECT user_id, refresh_interval_minutes, cache_stale_time_minutes, cache_gc_time_minutes, updated_at
          FROM user_settings WHERE user_id = ?`
       )
       .bind(userId)
       .first<{
         user_id: string;
         refresh_interval_minutes: number;
+        cache_stale_time_minutes: number | null;
+        cache_gc_time_minutes: number | null;
         updated_at: string;
       }>();
 
@@ -39,6 +43,8 @@ export async function getSettings(
       const settings: UserSettings = {
         userId: row.user_id,
         refreshIntervalMinutes: row.refresh_interval_minutes,
+        cacheStaleTimeMinutes: row.cache_stale_time_minutes ?? 5,
+        cacheGcTimeMinutes: row.cache_gc_time_minutes ?? 10,
         updatedAt: row.updated_at,
       };
       return json(settings);
@@ -47,6 +53,8 @@ export async function getSettings(
       const defaultSettings: UserSettings = {
         userId,
         refreshIntervalMinutes: 5,
+        cacheStaleTimeMinutes: 5,
+        cacheGcTimeMinutes: 10,
         updatedAt: new Date().toISOString(),
       };
       return json(defaultSettings);
@@ -68,7 +76,7 @@ export async function updateSettings(
 ): Promise<Response> {
   try {
     const payload = await request.json();
-    const { userId, refreshIntervalMinutes } = payload;
+    const { userId, refreshIntervalMinutes, cacheStaleTimeMinutes, cacheGcTimeMinutes } = payload;
 
     if (!userId || typeof userId !== "string") {
       return json({ error: "userId is required and must be a string" }, 400);
@@ -91,6 +99,32 @@ export async function updateSettings(
     }
 
     const roundedMinutes = Math.round(minutes);
+
+    // Validate cache settings (optional)
+    let staleTimeMinutes: number | null = null;
+    if (cacheStaleTimeMinutes !== null && cacheStaleTimeMinutes !== undefined) {
+      const staleTime = Number(cacheStaleTimeMinutes);
+      if (!Number.isFinite(staleTime) || staleTime < 0 || staleTime > 60) {
+        return json(
+          { error: "cacheStaleTimeMinutes must be between 0 and 60 (minutes)" },
+          400
+        );
+      }
+      staleTimeMinutes = Math.round(staleTime);
+    }
+
+    let gcTimeMinutes: number | null = null;
+    if (cacheGcTimeMinutes !== null && cacheGcTimeMinutes !== undefined) {
+      const gcTime = Number(cacheGcTimeMinutes);
+      if (!Number.isFinite(gcTime) || gcTime < 1 || gcTime > 120) {
+        return json(
+          { error: "cacheGcTimeMinutes must be between 1 and 120 (minutes)" },
+          400
+        );
+      }
+      gcTimeMinutes = Math.round(gcTime);
+    }
+
     const now = new Date().toISOString();
 
     // Check if settings already exist for user
@@ -104,10 +138,13 @@ export async function updateSettings(
       await env.stockly
         .prepare(
           `UPDATE user_settings
-           SET refresh_interval_minutes = ?, updated_at = ?
+           SET refresh_interval_minutes = ?,
+               cache_stale_time_minutes = ?,
+               cache_gc_time_minutes = ?,
+               updated_at = ?
            WHERE user_id = ?`
         )
-        .bind(roundedMinutes, now, userId)
+        .bind(roundedMinutes, staleTimeMinutes, gcTimeMinutes, now, userId)
         .run();
       return json({
         success: true,
@@ -115,6 +152,8 @@ export async function updateSettings(
         settings: {
           userId,
           refreshIntervalMinutes: roundedMinutes,
+          cacheStaleTimeMinutes: staleTimeMinutes ?? 5,
+          cacheGcTimeMinutes: gcTimeMinutes ?? 10,
           updatedAt: now,
         },
       });
@@ -122,10 +161,10 @@ export async function updateSettings(
       // Insert new settings
       await env.stockly
         .prepare(
-          `INSERT INTO user_settings (user_id, refresh_interval_minutes, updated_at)
-           VALUES (?, ?, ?)`
+          `INSERT INTO user_settings (user_id, refresh_interval_minutes, cache_stale_time_minutes, cache_gc_time_minutes, updated_at)
+           VALUES (?, ?, ?, ?, ?)`
         )
-        .bind(userId, roundedMinutes, now)
+        .bind(userId, roundedMinutes, staleTimeMinutes, gcTimeMinutes, now)
         .run();
       return json(
         {
@@ -134,6 +173,8 @@ export async function updateSettings(
           settings: {
             userId,
             refreshIntervalMinutes: roundedMinutes,
+            cacheStaleTimeMinutes: staleTimeMinutes ?? 5,
+            cacheGcTimeMinutes: gcTimeMinutes ?? 10,
             updatedAt: now,
           },
         },

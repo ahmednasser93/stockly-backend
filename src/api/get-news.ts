@@ -28,13 +28,13 @@ async function fetchNewsFromApi(
 ): Promise<any[]> {
   // FMP API supports comma-separated symbols
   const symbolsParam = symbols.join(",");
-  
+
   // Build query parameters
   const params = new URLSearchParams({
     symbols: symbolsParam,
     apikey: API_KEY,
   });
-  
+
   // Add pagination parameters if provided
   if (options?.from) {
     params.append("from", options.from);
@@ -48,7 +48,7 @@ async function fetchNewsFromApi(
   if (options?.limit !== undefined) {
     params.append("limit", Math.min(options.limit, 250).toString()); // Max 250
   }
-  
+
   const api = `${API_URL}/news/stock?${params.toString()}`;
 
   try {
@@ -63,7 +63,7 @@ async function fetchNewsFromApi(
     }
 
     const data = await res.json();
-    
+
     // Check for FMP API error messages
     if (data && typeof data === "object" && !Array.isArray(data)) {
       if ("Error Message" in data || "error" in data) {
@@ -98,19 +98,19 @@ function normalizeNewsItem(item: any) {
  */
 function parseDate(dateStr: string | null): string | undefined {
   if (!dateStr) return undefined;
-  
+
   // Basic validation: YYYY-MM-DD format
   const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
   if (!dateRegex.test(dateStr)) {
     return undefined;
   }
-  
+
   // Validate it's a valid date
   const date = new Date(dateStr + "T00:00:00Z");
   if (isNaN(date.getTime())) {
     return undefined;
   }
-  
+
   return dateStr;
 }
 
@@ -226,7 +226,7 @@ export async function getNews(url: URL, env: Env, logger: Logger): Promise<Respo
   // If pagination params exist, always fetch fresh (or cache with shorter TTL)
   const useCache = !from && !to && page === undefined && limit === undefined;
   const cachedEntry = useCache ? getCacheIfValid(cacheKey, pollingIntervalSec) : null;
-  
+
   if (cachedEntry) {
     const ageSeconds = Math.floor((Date.now() - cachedEntry.cachedAt) / 1000);
     console.log(
@@ -311,9 +311,146 @@ export async function getNews(url: URL, env: Env, logger: Logger): Promise<Respo
         },
         error: "Failed to fetch news",
         partial: true,
+        cached: false,
       },
       200 // Return 200 with error flag, not 500 (graceful degradation)
     );
+  }
+}
+
+/**
+ * Fetch general news from FMP API
+ * Endpoint: /stable/news/general-latest?page=0&limit=20
+ */
+async function fetchGeneralNewsFromApi(
+  options?: {
+    page?: number;
+    limit?: number;
+  }
+): Promise<any[]> {
+  const params = new URLSearchParams({
+    apikey: API_KEY,
+  });
+
+  if (options?.page !== undefined) {
+    params.append("page", options.page.toString());
+  }
+  if (options?.limit !== undefined) {
+    params.append("limit", Math.min(options.limit, 250).toString());
+  }
+
+  const api = `${API_URL}/news/general-latest?${params.toString()}`;
+
+  try {
+    const res = await fetch(api, {
+      headers: {
+        Accept: "application/json",
+      },
+    });
+
+    if (!res.ok) {
+      throw new Error(`FMP API failed: HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error("Failed to fetch general news from FMP API:", error);
+    throw error;
+  }
+}
+
+export async function getGeneralNews(url: URL, env: Env, logger: Logger): Promise<Response> {
+  const page = parsePage(url.searchParams.get("page"));
+  const limit = parseLimit(url.searchParams.get("limit"));
+
+  const config = await getConfig(env);
+  const pollingIntervalSec = config.pollingIntervalSec;
+
+  const cacheKey = `news:general:${page || 0}:${limit || 20}`;
+
+  // Only cache first page
+  const useCache = page === undefined || page === 0;
+  const cachedEntry = useCache ? getCacheIfValid(cacheKey, pollingIntervalSec) : null;
+
+  if (cachedEntry) {
+    return json({
+      news: cachedEntry.data.news,
+      cached: true,
+    });
+  }
+
+  try {
+    if (config.featureFlags.simulateProviderFailure) {
+      return json({ news: [], cached: false, stale_reason: "simulation_mode" });
+    }
+
+    const newsData = await fetchGeneralNewsFromApi({ page, limit });
+    const normalizedNews = newsData.map(normalizeNewsItem);
+
+    if (useCache) {
+      setCache(cacheKey, { news: normalizedNews }, pollingIntervalSec + 5);
+    }
+
+    return json({
+      news: normalizedNews,
+      cached: false,
+    });
+  } catch (error) {
+    logger.error("Failed to fetch general news", error);
+    return json({ news: [], error: "Failed to fetch general news" }, 200);
+  }
+}
+
+export async function getFavoriteNews(url: URL, env: Env, logger: Logger): Promise<Response> {
+  const userId = url.searchParams.get("userId") || logger.getContext().userId;
+
+  if (!userId) {
+    logger.warn("getFavoriteNews: userId is required", { url: url.toString() });
+    return json({ error: "userId is required" }, 400);
+  }
+
+  try {
+    logger.info("Fetching favorite news", { userId });
+
+    // Fetch user preferences
+    const row = await env.stockly
+      .prepare(`SELECT news_favorite_symbols FROM user_settings WHERE user_id = ?`)
+      .bind(userId)
+      .first<{ news_favorite_symbols: string }>();
+
+    let symbols: string[] = [];
+    if (row && row.news_favorite_symbols) {
+      try {
+        symbols = JSON.parse(row.news_favorite_symbols);
+      } catch (e) {
+        logger.warn("Failed to parse news_favorite_symbols", { userId, error: e });
+      }
+    }
+
+    if (symbols.length === 0) {
+      logger.info("No favorite symbols selected", { userId });
+      return json({ 
+        news: [], 
+        pagination: { page: 0, limit: 20, total: 0, hasMore: false },
+        message: "No favorite symbols selected" 
+      });
+    }
+
+    logger.info("Favorite symbols found", { userId, symbolCount: symbols.length, symbols });
+
+    // Reuse getNews logic by constructing a new URL with symbols
+    // This avoids duplicating the fetching/normalization logic
+    // Pagination params (page, limit, from, to) are already in the URL and will be passed through
+    const newUrl = new URL(url.toString());
+    newUrl.searchParams.set("symbols", symbols.join(","));
+
+    // Call getNews with the new URL (getNews already supports pagination)
+    return getNews(newUrl, env, logger);
+
+  } catch (error) {
+    logger.error("Failed to fetch favorite news", error, { userId });
+    return json({ error: "Failed to fetch favorite news" }, 500);
   }
 }
 

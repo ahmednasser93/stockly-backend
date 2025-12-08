@@ -14,8 +14,7 @@
 		{
 			"binding": "stockly",
 			"database_name": "stockly",
-			"database_id": "d234268d-d8f1-49d2-9643-6a1d5bf0a589",
-			"remote": true
+			"database_id": "d234268d-d8f1-49d2-9643-6a1d5bf0a589"
 		}
 	],
 	/**
@@ -35,8 +34,8 @@
 	 * Adjust as needed: every 15 min, hourly, etc.
 	 */
 	"triggers": {
-		"crons": ["*/5 * * * *"]
-	}
+		"crons": ["*/5 * * * *", "0 * * * *"]
+	},
 	/**
 	 * Smart Placement
 	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
