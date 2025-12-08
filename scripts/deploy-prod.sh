@@ -5,6 +5,9 @@
 # ==============================================================================
 # Runs all database migrations and deploys the API (non-interactive)
 # ==============================================================================
+# NOTE: This script is kept for backward compatibility.
+#       For unified deployment (API + Webapp), use: ../../scripts/deploy-prod.sh
+# ==============================================================================
 
 set -e
 
@@ -21,25 +24,25 @@ echo "🗄️  Running Database Migrations (Production)..."
 echo "------------------------------------------------"
 
 # Run migrations in order (non-interactive with --yes)
-echo "Migration 1/8: 001_init.sql"
+echo "Migration 1/11: 001_init.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/001_init.sql || echo "⚠️  Migration 1 already applied or failed"
 
-echo "Migration 2/8: 002_add_search_cache.sql"
+echo "Migration 2/11: 002_add_search_cache.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/002_add_search_cache.sql || echo "⚠️  Migration 2 already applied or failed"
 
-echo "Migration 3/8: 003_create_alerts.sql"
+echo "Migration 3/11: 003_create_alerts.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/003_create_alerts.sql || echo "⚠️  Migration 3 already applied or failed"
 
-echo "Migration 4/8: 004_create_user_push_tokens.sql"
+echo "Migration 4/11: 004_create_user_push_tokens.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/004_create_user_push_tokens.sql || echo "⚠️  Migration 4 already applied or failed"
 
-echo "Migration 5/8: 005_create_notification_preferences.sql"
+echo "Migration 5/11: 005_create_notification_preferences.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/005_create_notification_preferences.sql || echo "⚠️  Migration 5 already applied or failed"
 
-echo "Migration 6/8: 006_create_notifications_log.sql"
+echo "Migration 6/11: 006_create_notifications_log.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/006_create_notifications_log.sql || echo "⚠️  Migration 6 already applied or failed"
 
-echo "Migration 7/8: 007_create_user_settings.sql"
+echo "Migration 7/11: 007_create_user_settings.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/007_create_user_settings.sql || echo "⚠️  Migration 7 already applied or failed"
 
 echo "Migration 8/11: 008_create_historical_prices.sql"
