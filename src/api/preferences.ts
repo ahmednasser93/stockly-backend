@@ -104,15 +104,15 @@ export async function updatePreferences(
 
     // Validate enabled is boolean
     if (typeof enabled !== "boolean") {
-      return json({ error: "enabled must be a boolean" }, 400);
+      return json({ error: "enabled must be a boolean" }, 400, request);
     }
 
     // Validate quietStart and quietEnd if provided
     if (quietStart && typeof quietStart !== "string") {
-      return json({ error: "quietStart must be a string (HH:MM format)" }, 400);
+      return json({ error: "quietStart must be a string (HH:MM format)" }, 400, request);
     }
     if (quietEnd && typeof quietEnd !== "string") {
-      return json({ error: "quietEnd must be a string (HH:MM format)" }, 400);
+      return json({ error: "quietEnd must be a string (HH:MM format)" }, 400, request);
     }
 
     // Validate maxDaily if provided
@@ -120,7 +120,8 @@ export async function updatePreferences(
       if (typeof maxDaily !== "number" || maxDaily < 0) {
         return json(
           { error: "maxDaily must be a non-negative number" },
-          400
+          400,
+          request
         );
       }
     }
@@ -129,7 +130,7 @@ export async function updatePreferences(
     let symbolsString: string | null = null;
     if (allowedSymbols) {
       if (!Array.isArray(allowedSymbols)) {
-        return json({ error: "allowedSymbols must be an array" }, 400);
+        return json({ error: "allowedSymbols must be an array" }, 400, request);
       }
       symbolsString = allowedSymbols.join(",");
     }

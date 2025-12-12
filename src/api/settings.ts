@@ -131,7 +131,7 @@ export async function updateSettings(
 
     // Validate refreshIntervalMinutes
     if (refreshIntervalMinutes === null || refreshIntervalMinutes === undefined) {
-      return json({ error: "refreshIntervalMinutes is required" }, 400);
+      return json({ error: "refreshIntervalMinutes is required" }, 400, request);
     }
 
     const minutes = Number(refreshIntervalMinutes);
@@ -141,7 +141,8 @@ export async function updateSettings(
           error:
             "refreshIntervalMinutes must be a number between 1 and 720 (minutes)",
         },
-        400
+        400,
+        request
       );
     }
 
@@ -154,7 +155,8 @@ export async function updateSettings(
       if (!Number.isFinite(staleTime) || staleTime < 0 || staleTime > 60) {
         return json(
           { error: "cacheStaleTimeMinutes must be between 0 and 60 (minutes)" },
-          400
+          400,
+          request
         );
       }
       staleTimeMinutes = Math.round(staleTime);
@@ -166,7 +168,8 @@ export async function updateSettings(
       if (!Number.isFinite(gcTime) || gcTime < 1 || gcTime > 120) {
         return json(
           { error: "cacheGcTimeMinutes must be between 1 and 120 (minutes)" },
-          400
+          400,
+          request
         );
       }
       gcTimeMinutes = Math.round(gcTime);

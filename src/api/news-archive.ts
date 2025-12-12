@@ -60,14 +60,14 @@ export async function getArchivedNews(
             userId, 
             pageParam: url.searchParams.get("page") 
         });
-        return json({ error: "invalid 'page' parameter (must be non-negative integer)" }, 400);
+        return json({ error: "invalid 'page' parameter (must be non-negative integer)" }, 400, request);
     }
     if (url.searchParams.has("limit") && limit === undefined) {
         logger.warn("getArchivedNews: invalid limit parameter", { 
             userId, 
             limitParam: url.searchParams.get("limit") 
         });
-        return json({ error: "invalid 'limit' parameter (must be 1-250)" }, 400);
+        return json({ error: "invalid 'limit' parameter (must be 1-250)" }, 400, request);
     }
 
     const pageNum = page ?? 0;
@@ -121,7 +121,7 @@ export async function getArchivedNews(
         });
     } catch (error) {
         logger.error("Failed to fetch archived news", error, { userId, page: pageNum, limit: limitNum });
-        return json({ error: "Failed to fetch archived news" }, 500);
+        return json({ error: "Failed to fetch archived news" }, 500, request);
     }
 }
 

@@ -144,6 +144,8 @@ function parseLimit(limitStr: string | null): number | undefined {
  * GET /v1/api/get-news?symbol=AAPL
  * GET /v1/api/get-news?symbols=AAPL,MSFT&from=2025-01-01&to=2025-01-31&page=0&limit=20
  */
+import { authenticateRequest } from "../auth/middleware";
+import { createErrorResponse } from "../auth/error-handler";
 import type { Logger } from "../logging/logger";
 
 export async function getNews(url: URL, env: Env, logger: Logger): Promise<Response> {
@@ -452,7 +454,7 @@ export async function getFavoriteNews(
         news: [], 
         pagination: { page: 0, limit: 20, total: 0, hasMore: false },
         message: "No favorite symbols selected" 
-      });
+      }, 200, request);
     }
 
     logger.info("Favorite symbols found", { userId, symbolCount: symbols.length, symbols });

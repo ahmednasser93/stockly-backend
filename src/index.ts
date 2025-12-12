@@ -149,10 +149,10 @@ export default {
         response = await getHistoricalIntraday(url, loggedEnv, logger);
       } else if (pathname.startsWith("/v1/api/alerts")) {
         response = await handleAlertsRequest(request, loggedEnv, logger);
-      } else if (pathname === "/v1/api/push-token") {
-        response = await registerPushToken(request, loggedEnv, logger);
       } else if (pathname === "/v1/api/push-token" && request.method === "GET") {
         response = await getPushToken(request, loggedEnv, logger);
+      } else if (pathname === "/v1/api/push-token" && request.method === "POST") {
+        response = await registerPushToken(request, loggedEnv, logger);
       } else if (pathname === "/v1/api/preferences" && request.method === "GET") {
         response = await getPreferences(request, loggedEnv, logger);
       } else if (pathname === "/v1/api/preferences" && request.method === "PUT") {
@@ -174,7 +174,7 @@ export default {
         response = await getFailedNotifications(loggedEnv, logger);
       } else if (pathname.startsWith("/v1/api/notifications/retry/")) {
         if (request.method !== "POST") {
-          response = json({ error: "Method not allowed" }, 405);
+          response = json({ error: "Method not allowed" }, 405, request);
         } else {
           const logId = pathname.split("/v1/api/notifications/retry/")[1];
           response = await retryNotification(logId, loggedEnv, logger);
@@ -214,7 +214,7 @@ export default {
         pathname,
         method: request.method,
       });
-      response = json({ error: "Internal Server Error" }, 500);
+      response = json({ error: "Internal Server Error" }, 500, request);
     }
 
     // Ship logs asynchronously (non-blocking) - this happens after response is ready
