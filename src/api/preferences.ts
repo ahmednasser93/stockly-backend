@@ -1,5 +1,8 @@
 import { json } from "../util";
 import type { Env } from "../index";
+import { authenticateRequest } from "../auth/middleware";
+import { createErrorResponse } from "../auth/error-handler";
+import type { Logger } from "../logging/logger";
 
 export interface NotificationPreferences {
   userId: string;
@@ -11,16 +14,34 @@ export interface NotificationPreferences {
   updatedAt: string;
 }
 
-import type { Logger } from "../logging/logger";
-
+/**
+ * GET /v1/api/preferences
+ * Retrieve notification preferences (userId from JWT)
+ */
 export async function getPreferences(
-  userId: string,
+  request: Request,
   env: Env,
   logger: Logger
 ): Promise<Response> {
-  if (!userId) {
-    return json({ error: "userId is required" }, 400);
+  // Authenticate request to get userId
+  const auth = await authenticateRequest(
+    request,
+    env.JWT_SECRET || "",
+    env.JWT_REFRESH_SECRET
+  );
+
+  if (!auth) {
+    const { response } = createErrorResponse(
+      "AUTH_MISSING_TOKEN",
+      "Authentication required",
+      undefined,
+      undefined,
+      request
+    );
+    return response;
   }
+
+  const userId = auth.userId;
 
   try {
     const row = await env.stockly
@@ -51,7 +72,7 @@ export async function getPreferences(
         maxDaily: row.max_daily,
         updatedAt: row.updated_at,
       };
-      return json(preferences);
+      return json(preferences, 200, request);
     } else {
       // Return default preferences if not found
       const defaultPreferences: NotificationPreferences = {
@@ -63,11 +84,11 @@ export async function getPreferences(
         maxDaily: null,
         updatedAt: new Date().toISOString(),
       };
-      return json(defaultPreferences);
+      return json(defaultPreferences, 200, request);
     }
   } catch (error) {
-    console.error("Failed to retrieve preferences:", error);
-    return json({ error: "Failed to retrieve preferences" }, 500);
+    logger.error("Failed to retrieve preferences", { error, userId });
+    return json({ error: "Failed to retrieve preferences" }, 500, request);
   }
 }
 
@@ -78,12 +99,8 @@ export async function updatePreferences(
 ): Promise<Response> {
   try {
     const payload = await request.json();
-    const { userId, enabled, quietStart, quietEnd, allowedSymbols, maxDaily } =
-      payload;
-
-    if (!userId || typeof userId !== "string") {
-      return json({ error: "userId is required and must be a string" }, 400);
-    }
+    const { enabled, quietStart, quietEnd, allowedSymbols, maxDaily } = payload;
+    // userId is from JWT authentication, not from payload
 
     // Validate enabled is boolean
     if (typeof enabled !== "boolean") {
@@ -143,7 +160,7 @@ export async function updatePreferences(
           userId
         )
         .run();
-      return json({ success: true, message: "Preferences updated" });
+      return json({ success: true, message: "Preferences updated" }, 200, request);
     } else {
       // Insert new preferences
       await env.stockly
@@ -161,11 +178,11 @@ export async function updatePreferences(
           now
         )
         .run();
-      return json({ success: true, message: "Preferences created" }, 201);
+      return json({ success: true, message: "Preferences created" }, 201, request);
     }
   } catch (error) {
-    console.error("Failed to update preferences:", error);
-    return json({ error: "Failed to update preferences" }, 500);
+    logger.error("Failed to update preferences", { error, userId });
+    return json({ error: "Failed to update preferences" }, 500, request);
   }
 }
 

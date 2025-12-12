@@ -17,6 +17,7 @@ type AlertRow = {
   channel: AlertChannel;
   target: string;
   notes: string | null;
+  user_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -34,32 +35,42 @@ const mapRow = (row: AlertRow): AlertRecord => ({
   updatedAt: row.updated_at,
 });
 
-const SELECT_BASE = `SELECT id, symbol, direction, threshold, status, channel, target, notes, created_at, updated_at FROM alerts`;
+const SELECT_BASE = `SELECT id, symbol, direction, threshold, status, channel, target, notes, user_id, created_at, updated_at FROM alerts`;
 
-export async function listAlerts(env: Env): Promise<AlertRecord[]> {
-  const statement = env.stockly.prepare(`${SELECT_BASE} ORDER BY created_at DESC`);
-  const result = await statement.all<AlertRow>();
+export async function listAlerts(env: Env, userId: string): Promise<AlertRecord[]> {
+  const statement = env.stockly.prepare(`${SELECT_BASE} WHERE user_id = ? ORDER BY created_at DESC`);
+  const result = await statement.bind(userId).all<AlertRow>();
   return (result.results ?? []).map(mapRow);
 }
 
-export async function listActiveAlerts(env: Env): Promise<AlertRecord[]> {
-  const statement = env.stockly.prepare(
-    `${SELECT_BASE} WHERE status = ? ORDER BY created_at DESC`
-  );
-  const result = await statement.bind("active").all<AlertRow>();
-  return (result.results ?? []).map(mapRow);
+export async function listActiveAlerts(env: Env, userId?: string): Promise<AlertRecord[]> {
+  if (userId) {
+    // Filter by user for API endpoints
+    const statement = env.stockly.prepare(
+      `${SELECT_BASE} WHERE user_id = ? AND status = ? ORDER BY created_at DESC`
+    );
+    const result = await statement.bind(userId, "active").all<AlertRow>();
+    return (result.results ?? []).map(mapRow);
+  } else {
+    // Get all active alerts (for cron job)
+    const statement = env.stockly.prepare(
+      `${SELECT_BASE} WHERE status = ? ORDER BY created_at DESC`
+    );
+    const result = await statement.bind("active").all<AlertRow>();
+    return (result.results ?? []).map(mapRow);
+  }
 }
 
-export async function getAlert(env: Env, id: string): Promise<AlertRecord | null> {
+export async function getAlert(env: Env, id: string, userId: string): Promise<AlertRecord | null> {
   const row = await env.stockly
-    .prepare(`${SELECT_BASE} WHERE id = ?`)
-    .bind(id)
+    .prepare(`${SELECT_BASE} WHERE id = ? AND user_id = ?`)
+    .bind(id, userId)
     .first<AlertRow>();
 
   return row ? mapRow(row) : null;
 }
 
-export async function createAlert(env: Env, draft: AlertDraft): Promise<AlertRecord> {
+export async function createAlert(env: Env, draft: AlertDraft, userId: string): Promise<AlertRecord> {
   try {
     const now = new Date().toISOString();
     const id = crypto.randomUUID();
@@ -67,13 +78,13 @@ export async function createAlert(env: Env, draft: AlertDraft): Promise<AlertRec
     
     await env.stockly
       .prepare(
-        `INSERT INTO alerts (id, symbol, direction, threshold, status, channel, target, notes, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`
+        `INSERT INTO alerts (id, symbol, direction, threshold, status, channel, target, notes, user_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)`
       )
-      .bind(id, draft.symbol, draft.direction, draft.threshold, draft.channel, draft.target, notes, now, now)
+      .bind(id, draft.symbol, draft.direction, draft.threshold, draft.channel, draft.target, notes, userId, now, now)
       .run();
 
-    const created = await getAlert(env, id);
+    const created = await getAlert(env, id, userId);
     if (!created) {
       throw new Error("failed to load created alert after creation");
     }
@@ -101,7 +112,8 @@ export async function createAlert(env: Env, draft: AlertDraft): Promise<AlertRec
 export async function updateAlert(
   env: Env,
   id: string,
-  updates: AlertUpdate
+  updates: AlertUpdate,
+  userId: string
 ): Promise<AlertRecord | null> {
   try {
     const fields: string[] = [];
@@ -137,17 +149,17 @@ export async function updateAlert(
     }
 
     if (!fields.length) {
-      return await getAlert(env, id);
+      return await getAlert(env, id, userId);
     }
 
     fields.push("updated_at = ?");
     const updatedAt = new Date().toISOString();
-    values.push(updatedAt, id);
+    values.push(updatedAt, id, userId);
 
-    const sql = `UPDATE alerts SET ${fields.join(", ")} WHERE id = ?`;
+    const sql = `UPDATE alerts SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`;
     await env.stockly.prepare(sql).bind(...values).run();
 
-    return await getAlert(env, id);
+    return await getAlert(env, id, userId);
   } catch (error) {
     if (error instanceof Error) {
       // Check for common database errors
@@ -165,10 +177,10 @@ export async function updateAlert(
   }
 }
 
-export async function deleteAlert(env: Env, id: string): Promise<boolean> {
+export async function deleteAlert(env: Env, id: string, userId: string): Promise<boolean> {
   const result = await env.stockly
-    .prepare(`DELETE FROM alerts WHERE id = ?`)
-    .bind(id)
+    .prepare(`DELETE FROM alerts WHERE id = ? AND user_id = ?`)
+    .bind(id, userId)
     .run();
 
   const meta = (result as any)?.meta ?? {};

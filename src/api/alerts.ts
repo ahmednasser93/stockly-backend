@@ -3,6 +3,8 @@ import type { Env } from "../index";
 import { createAlert, deleteAlert, getAlert, listAlerts, updateAlert } from "../alerts/storage";
 import { deleteAlertState } from "../alerts/state";
 import { validateAlertUpdate, validateNewAlert } from "../alerts/validation";
+import { authenticateRequest } from "../auth/middleware";
+import { createErrorResponse } from "../auth/error-handler";
 import type { Logger } from "../logging/logger";
 
 const ALERT_PREFIX = "/v1/api/alerts";
@@ -21,90 +23,111 @@ export async function handleAlertsRequest(
   env: Env,
   logger: Logger
 ): Promise<Response> {
+  // Authenticate request to get userId
+  const auth = await authenticateRequest(
+    request,
+    env.JWT_SECRET || "",
+    env.JWT_REFRESH_SECRET
+  );
+
+  if (!auth) {
+    const { response } = createErrorResponse(
+      "AUTH_MISSING_TOKEN",
+      "Authentication required",
+      undefined,
+      undefined,
+      request
+    );
+    return response;
+  }
+
+  const userId = auth.userId;
+
   const url = new URL(request.url);
   const tail = url.pathname.slice(ALERT_PREFIX.length);
   const segments = tail.split("/").filter(Boolean);
 
   if (!segments.length) {
     if (request.method === "GET") {
-      const alerts = await listAlerts(env);
-      logger.info("Fetched alerts from D1");
-      return json({ alerts });
+      const alerts = await listAlerts(env, userId);
+      logger.info("Fetched alerts from D1", { userId });
+      return json({ alerts }, 200, request);
     }
 
     if (request.method === "POST") {
       const payload = await readBody(request, logger);
       if (!payload) {
-        return json({ error: "invalid JSON payload" }, 400);
+        return json({ error: "invalid JSON payload" }, 400, request);
       }
       const validation = validateNewAlert(payload);
       if (!validation.ok) {
-        return json({ error: validation.errors.join(", ") }, 400);
+        return json({ error: validation.errors.join(", ") }, 400, request);
       }
 
       try {
-        const alert = await createAlert(env, validation.data);
-        logger.info("Created alert", { alertId: alert.id });
-        return json(alert, 201);
+        const alert = await createAlert(env, validation.data, userId);
+        logger.info("Created alert", { alertId: alert.id, userId });
+        return json(alert, 201, request);
       } catch (error) {
-        logger.error("failed to create alert", error);
+        logger.error("failed to create alert", error, { userId });
         const errorMessage = error instanceof Error ? error.message : "failed to create alert";
-        return json({ error: errorMessage }, 500);
+        return json({ error: errorMessage }, 500, request);
       }
     }
 
-    return json({ error: "method not allowed" }, 405);
+    return json({ error: "method not allowed" }, 405, request);
   }
 
   if (segments.length === 1) {
     const id = segments[0];
 
     if (request.method === "GET") {
-      const alert = await getAlert(env, id);
+      const alert = await getAlert(env, id, userId);
       if (!alert) {
-        return json({ error: "alert not found" }, 404);
+        return json({ error: "alert not found" }, 404, request);
       }
-      return json(alert);
+      return json(alert, 200, request);
     }
 
     if (request.method === "PUT") {
       const payload = await readBody(request, logger);
       if (!payload) {
-        return json({ error: "invalid JSON payload" }, 400);
+        return json({ error: "invalid JSON payload" }, 400, request);
       }
 
       const validation = validateAlertUpdate(payload);
       if (!validation.ok) {
-        return json({ error: validation.errors.join(", ") }, 400);
+        return json({ error: validation.errors.join(", ") }, 400, request);
       }
 
       try {
-        const updated = await updateAlert(env, id, validation.data);
+        const updated = await updateAlert(env, id, validation.data, userId);
         if (!updated) {
-          return json({ error: "alert not found" }, 404);
+          return json({ error: "alert not found" }, 404, request);
         }
-        logger.info("Updated alert", { alertId: id });
-        return json(updated);
+        logger.info("Updated alert", { alertId: id, userId });
+        return json(updated, 200, request);
       } catch (error) {
-        logger.error("failed to update alert", error, { alertId: id });
+        logger.error("failed to update alert", error, { alertId: id, userId });
         const errorMessage = error instanceof Error ? error.message : "failed to update alert";
-        return json({ error: errorMessage }, 500);
+        return json({ error: errorMessage }, 500, request);
       }
     }
 
     if (request.method === "DELETE") {
-      const deleted = await deleteAlert(env, id);
+      const deleted = await deleteAlert(env, id, userId);
       if (!deleted) {
-        return json({ error: "alert not found" }, 404);
+        return json({ error: "alert not found" }, 404, request);
       }
 
       if (env.alertsKv) {
         await deleteAlertState(env.alertsKv, id);
       }
 
-      return json({ success: true }, 200);
+      logger.info("Deleted alert", { alertId: id, userId });
+      return json({ success: true }, 200, request);
     }
   }
 
-  return json({ error: "Not Found" }, 404);
+  return json({ error: "Not Found" }, 404, request);
 }

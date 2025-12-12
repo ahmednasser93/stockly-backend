@@ -1,6 +1,9 @@
 import { json } from "../util";
 import type { Env } from "../index";
+import { authenticateRequest } from "../auth/middleware";
+import { createErrorResponse } from "../auth/error-handler";
 import { sendFCMNotification } from "../notifications/fcm-sender";
+import type { Logger } from "../logging/logger";
 
 export interface Device {
   userId: string;
@@ -13,19 +16,43 @@ export interface Device {
 }
 
 /**
- * Get all registered devices with alert counts
+ * Get all registered devices with alert counts for authenticated user
  * GET /v1/api/devices
  */
-import type { Logger } from "../logging/logger";
+export async function getAllDevices(
+  request: Request,
+  env: Env,
+  logger: Logger
+): Promise<Response> {
+  // Authenticate request to get userId
+  const auth = await authenticateRequest(
+    request,
+    env.JWT_SECRET || "",
+    env.JWT_REFRESH_SECRET
+  );
 
-export async function getAllDevices(env: Env, logger: Logger): Promise<Response> {
+  if (!auth) {
+    const { response } = createErrorResponse(
+      "AUTH_MISSING_TOKEN",
+      "Authentication required",
+      undefined,
+      undefined,
+      request
+    );
+    return response;
+  }
+
+  const userId = auth.userId;
+
   try {
     const rows = await env.stockly
       .prepare(
         `SELECT user_id, push_token, device_info, created_at, updated_at 
          FROM user_push_tokens 
+         WHERE user_id = ?
          ORDER BY updated_at DESC`
       )
+      .bind(userId)
       .all<{
         user_id: string;
         push_token: string;
@@ -34,19 +61,19 @@ export async function getAllDevices(env: Env, logger: Logger): Promise<Response>
         updated_at: string;
       }>();
 
-    // For each device, count alerts that use its push token
+    // For each device, count alerts that use its push token and belong to the authenticated user
     const devices: Device[] = await Promise.all(
       (rows.results || []).map(async (row) => {
-        // Count total alerts for this push token
+        // Count total alerts for this push token and user
         const totalAlertsResult = await env.stockly
-          .prepare(`SELECT COUNT(*) as count FROM alerts WHERE target = ?`)
-          .bind(row.push_token)
+          .prepare(`SELECT COUNT(*) as count FROM alerts WHERE target = ? AND user_id = ?`)
+          .bind(row.push_token, userId)
           .first<{ count: number }>();
 
-        // Count active alerts for this push token
+        // Count active alerts for this push token and user
         const activeAlertsResult = await env.stockly
-          .prepare(`SELECT COUNT(*) as count FROM alerts WHERE target = ? AND status = 'active'`)
-          .bind(row.push_token)
+          .prepare(`SELECT COUNT(*) as count FROM alerts WHERE target = ? AND user_id = ? AND status = 'active'`)
+          .bind(row.push_token, userId)
           .first<{ count: number }>();
 
         return {
@@ -61,25 +88,42 @@ export async function getAllDevices(env: Env, logger: Logger): Promise<Response>
       })
     );
 
-    return json({ devices });
+    return json({ devices }, 200, request);
   } catch (error) {
-    logger.error("Failed to get devices", error);
-    return json({ error: "Failed to get devices" }, 500);
+    logger.error("Failed to get devices", { error, userId });
+    return json({ error: "Failed to get devices" }, 500, request);
   }
 }
 
 /**
  * Delete a device
- * DELETE /v1/api/devices/:userId
+ * DELETE /v1/api/devices
+ * userId from JWT authentication
  */
 export async function deleteDevice(
-  userId: string,
+  request: Request,
   env: Env,
   logger: Logger
 ): Promise<Response> {
-  if (!userId) {
-    return json({ error: "userId is required" }, 400);
+  // Authenticate request to get userId
+  const auth = await authenticateRequest(
+    request,
+    env.JWT_SECRET || "",
+    env.JWT_REFRESH_SECRET
+  );
+
+  if (!auth) {
+    const { response } = createErrorResponse(
+      "AUTH_MISSING_TOKEN",
+      "Authentication required",
+      undefined,
+      undefined,
+      request
+    );
+    return response;
   }
+
+  const userId = auth.userId;
 
   try {
     // Check if device exists
@@ -91,7 +135,7 @@ export async function deleteDevice(
       .first<{ user_id: string }>();
 
     if (!device) {
-      return json({ error: "Device not found" }, 404);
+      return json({ error: "Device not found" }, 404, request);
     }
 
     // Delete the device
@@ -100,41 +144,59 @@ export async function deleteDevice(
       .bind(userId)
       .run();
 
+    logger.info("Device deleted successfully", { userId });
     return json({
       success: true,
       message: "Device deleted successfully",
       userId,
-    });
+    }, 200, request);
   } catch (error) {
-    logger.error("Failed to delete device", error, { userId });
+    logger.error("Failed to delete device", { error, userId });
     const errorMessage = error instanceof Error ? error.message : String(error);
     return json(
       {
         success: false,
         error: `Failed to delete device: ${errorMessage}`,
       },
-      500
+      500,
+      request
     );
   }
 }
 
 /**
  * Send a test notification to a device
- * POST /v1/api/devices/:userId/test
+ * POST /v1/api/devices/test
+ * userId from JWT authentication
  */
 export async function sendTestNotification(
-  userId: string,
   request: Request,
   env: Env,
   logger: Logger
 ): Promise<Response> {
   if (request.method !== "POST") {
-    return json({ error: "Method not allowed" }, 405);
+    return json({ error: "Method not allowed" }, 405, request);
   }
 
-  if (!userId) {
-    return json({ error: "userId is required" }, 400);
+  // Authenticate request to get userId
+  const auth = await authenticateRequest(
+    request,
+    env.JWT_SECRET || "",
+    env.JWT_REFRESH_SECRET
+  );
+
+  if (!auth) {
+    const { response } = createErrorResponse(
+      "AUTH_MISSING_TOKEN",
+      "Authentication required",
+      undefined,
+      undefined,
+      request
+    );
+    return response;
   }
+
+  const userId = auth.userId;
 
   try {
     // Get the device's push token
@@ -152,7 +214,7 @@ export async function sendTestNotification(
       }>();
 
     if (!device) {
-      return json({ error: "Device not found" }, 404);
+      return json({ error: "Device not found" }, 404, request);
     }
 
     // Parse optional custom message from request body
@@ -186,11 +248,12 @@ export async function sendTestNotification(
     );
 
     if (success) {
+      logger.info("Test notification sent successfully", { userId });
       return json({
         success: true,
         message: "Test notification sent successfully",
         userId: device.user_id,
-      });
+      }, 200, request);
     } else {
       return json(
         {
@@ -198,18 +261,20 @@ export async function sendTestNotification(
           error: "Failed to send test notification",
           userId: device.user_id,
         },
-        500
+        500,
+        request
       );
     }
   } catch (error) {
-    logger.error("Failed to send test notification", error, { userId });
+    logger.error("Failed to send test notification", { error, userId });
     const errorMessage = error instanceof Error ? error.message : String(error);
     return json(
       {
         success: false,
         error: `Failed to send test notification: ${errorMessage}`,
       },
-      500
+      500,
+      request
     );
   }
 }

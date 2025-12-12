@@ -1,5 +1,7 @@
 import { json } from "../util";
 import type { Env } from "../index";
+import { authenticateRequest } from "../auth/middleware";
+import { createErrorResponse } from "../auth/error-handler";
 import type { Logger } from "../logging/logger";
 
 /**
@@ -27,13 +29,26 @@ export async function getArchivedNews(
     env: Env,
     logger: Logger
 ): Promise<Response> {
-    const url = new URL(request.url);
-    const userId = url.searchParams.get("userId");
+    // Authenticate request to get userId
+    const auth = await authenticateRequest(
+        request,
+        env.JWT_SECRET || "",
+        env.JWT_REFRESH_SECRET
+    );
 
-    if (!userId) {
-        logger.warn("getArchivedNews: userId is required", { url: url.toString() });
-        return json({ error: "userId is required" }, 400);
+    if (!auth) {
+        const { response } = createErrorResponse(
+            "AUTH_MISSING_TOKEN",
+            "Authentication required",
+            undefined,
+            undefined,
+            request
+        );
+        return response;
     }
+
+    const userId = auth.userId;
+    const url = new URL(request.url);
 
     // Parse pagination parameters
     const page = parsePage(url.searchParams.get("page"));
@@ -116,13 +131,30 @@ export async function toggleArchivedNews(
     env: Env,
     logger: Logger
 ): Promise<Response> {
+    // Authenticate request to get userId
+    const auth = await authenticateRequest(
+        request,
+        env.JWT_SECRET || "",
+        env.JWT_REFRESH_SECRET
+    );
+
+    if (!auth) {
+        const { response } = createErrorResponse(
+            "AUTH_MISSING_TOKEN",
+            "Authentication required",
+            undefined,
+            undefined,
+            request
+        );
+        return response;
+    }
+
+    const userId = auth.userId;
+
     try {
         const payload = await request.json() as any;
-        const { userId, symbol, title, url, action } = payload;
-
-        if (!userId) {
-            return json({ error: "userId is required" }, 400);
-        }
+        const { symbol, title, url } = payload;
+        // userId is from JWT authentication, not from payload
 
         // action can be 'save' or 'unsave' (optional, if not provided, toggle logic could be used but explicit is better)
         // However, for toggle endpoint, usually we check existence.
@@ -147,11 +179,11 @@ export async function toggleArchivedNews(
                 )
                 .bind(userId, articleId)
                 .run();
-            return json({ success: true, saved: false });
+            return json({ success: true, saved: false }, 200, request);
         } else {
             // Add
             if (!symbol || !title || !url) {
-                return json({ error: "symbol, title, and url are required to save article" }, 400);
+                return json({ error: "symbol, title, and url are required to save article" }, 400, request);
             }
 
             await env.stockly
@@ -161,10 +193,10 @@ export async function toggleArchivedNews(
                 )
                 .bind(userId, articleId, symbol, title, url)
                 .run();
-            return json({ success: true, saved: true });
+            return json({ success: true, saved: true }, 200, request);
         }
     } catch (error) {
-        logger.error("Failed to toggle archived news", error);
-        return json({ error: "Failed to toggle archived news" }, 500);
+        logger.error("Failed to toggle archived news", error, { userId, articleId });
+        return json({ error: "Failed to toggle archived news" }, 500, request);
     }
 }

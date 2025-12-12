@@ -57,8 +57,11 @@ wrangler d1 execute stockly --remote --yes --file=./migrations/010_news_feed.sql
 echo "Migration 11/11: 011_add_cache_settings.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/011_add_cache_settings.sql || echo "⚠️  Migration 11 already applied or failed"
 
-echo "Migration 12/12: 012_create_users.sql"
+echo "Migration 12/13: 012_create_users.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/012_create_users.sql || echo "⚠️  Migration 12 already applied or failed"
+
+echo "Migration 13/13: 013_add_user_id_to_alerts.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/013_add_user_id_to_alerts.sql || echo "⚠️  Migration 13 already applied or failed"
 
 echo ""
 echo "✅ Database migrations complete"

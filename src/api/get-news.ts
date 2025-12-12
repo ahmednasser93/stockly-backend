@@ -402,13 +402,31 @@ export async function getGeneralNews(url: URL, env: Env, logger: Logger): Promis
   }
 }
 
-export async function getFavoriteNews(url: URL, env: Env, logger: Logger): Promise<Response> {
-  const userId = url.searchParams.get("userId") || logger.getContext().userId;
+export async function getFavoriteNews(
+  request: Request,
+  url: URL,
+  env: Env,
+  logger: Logger
+): Promise<Response> {
+  // Authenticate request to get userId
+  const auth = await authenticateRequest(
+    request,
+    env.JWT_SECRET || "",
+    env.JWT_REFRESH_SECRET
+  );
 
-  if (!userId) {
-    logger.warn("getFavoriteNews: userId is required", { url: url.toString() });
-    return json({ error: "userId is required" }, 400);
+  if (!auth) {
+    const { response } = createErrorResponse(
+      "AUTH_MISSING_TOKEN",
+      "Authentication required",
+      undefined,
+      undefined,
+      request
+    );
+    return response;
   }
+
+  const userId = auth.userId;
 
   try {
     logger.info("Fetching favorite news", { userId });
@@ -450,7 +468,7 @@ export async function getFavoriteNews(url: URL, env: Env, logger: Logger): Promi
 
   } catch (error) {
     logger.error("Failed to fetch favorite news", error, { userId });
-    return json({ error: "Failed to fetch favorite news" }, 500);
+    return json({ error: "Failed to fetch favorite news" }, 500, request);
   }
 }
 

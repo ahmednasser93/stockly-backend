@@ -138,7 +138,7 @@ export default {
       } else if (pathname === "/v1/api/news/general") {
         response = await getGeneralNews(url, loggedEnv, logger);
       } else if (pathname === "/v1/api/news/favorites") {
-        response = await getFavoriteNews(url, loggedEnv, logger);
+        response = await getFavoriteNews(request, url, loggedEnv, logger);
       } else if (pathname === "/v1/api/get-stock-news") {
         response = await getStockNews(url, loggedEnv, logger);
       } else if (pathname === "/v1/api/search-stock") {
@@ -151,22 +151,16 @@ export default {
         response = await handleAlertsRequest(request, loggedEnv, logger);
       } else if (pathname === "/v1/api/push-token") {
         response = await registerPushToken(request, loggedEnv, logger);
-      } else if (pathname.startsWith("/v1/api/push-token/")) {
-        const extractedUserId = pathname.split("/v1/api/push-token/")[1];
-        logger.updateContext({ userId: extractedUserId });
-        response = await getPushToken(extractedUserId, loggedEnv, logger);
+      } else if (pathname === "/v1/api/push-token" && request.method === "GET") {
+        response = await getPushToken(request, loggedEnv, logger);
+      } else if (pathname === "/v1/api/preferences" && request.method === "GET") {
+        response = await getPreferences(request, loggedEnv, logger);
       } else if (pathname === "/v1/api/preferences" && request.method === "PUT") {
         response = await updatePreferences(request, loggedEnv, logger);
-      } else if (pathname.startsWith("/v1/api/preferences/")) {
-        const extractedUserId = pathname.split("/v1/api/preferences/")[1];
-        logger.updateContext({ userId: extractedUserId });
-        response = await getPreferences(extractedUserId, loggedEnv, logger);
+      } else if (pathname === "/v1/api/settings" && request.method === "GET") {
+        response = await getSettings(request, loggedEnv, logger);
       } else if (pathname === "/v1/api/settings" && request.method === "PUT") {
         response = await updateSettings(request, loggedEnv, logger);
-      } else if (pathname.startsWith("/v1/api/settings/")) {
-        const extractedUserId = pathname.split("/v1/api/settings/")[1];
-        logger.updateContext({ userId: extractedUserId });
-        response = await getSettings(extractedUserId, loggedEnv, logger);
       } else if (pathname === "/v1/api/users/preferences/update" && request.method === "POST") {
         response = await updateUserPreferences(request, loggedEnv, logger);
       } else if (pathname === "/v1/api/news/archive" && request.method === "GET") {
@@ -185,24 +179,12 @@ export default {
           const logId = pathname.split("/v1/api/notifications/retry/")[1];
           response = await retryNotification(logId, loggedEnv, logger);
         }
-      } else if (pathname === "/v1/api/devices") {
-        response = await getAllDevices(loggedEnv, logger);
-      } else if (pathname.startsWith("/v1/api/devices/")) {
-        const pathAfterDevices = pathname.split("/v1/api/devices/")[1];
-
-        if (pathAfterDevices.endsWith("/test")) {
-          // POST /v1/api/devices/:userId/test
-          const extractedUserId = pathAfterDevices.replace("/test", "");
-          logger.updateContext({ userId: extractedUserId });
-          response = await sendTestNotification(extractedUserId, request, loggedEnv, logger);
-        } else if (request.method === "DELETE") {
-          // DELETE /v1/api/devices/:userId
-          const extractedUserId = pathAfterDevices;
-          logger.updateContext({ userId: extractedUserId });
-          response = await deleteDevice(extractedUserId, loggedEnv, logger);
-        } else {
-          response = json({ error: "Not Found" }, 404);
-        }
+      } else if (pathname === "/v1/api/devices" && request.method === "GET") {
+        response = await getAllDevices(request, loggedEnv, logger);
+      } else if (pathname === "/v1/api/devices/test" && request.method === "POST") {
+        response = await sendTestNotification(request, loggedEnv, logger);
+      } else if (pathname === "/v1/api/devices" && request.method === "DELETE") {
+        response = await deleteDevice(request, loggedEnv, logger);
       } else if (pathname === "/config/get" && request.method === "GET") {
         response = await getConfigEndpoint(loggedEnv, logger);
       } else if (pathname === "/config/update" && request.method === "POST") {

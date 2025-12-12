@@ -1,50 +1,66 @@
 import { json } from "../util";
 import type { Env } from "../index";
+import { authenticateRequest } from "../auth/middleware";
+import { createErrorResponse } from "../auth/error-handler";
+import type { Logger } from "../logging/logger";
 
 interface PushTokenPayload {
-  userId: string;
   token: string;
   deviceInfo?: string;
 }
 
 /**
- * Register or update a user's Expo push token
+ * Register or update a user's push token
  * POST /v1/api/push-token
+ * userId is extracted from JWT authentication
  */
-import type { Logger } from "../logging/logger";
-
 export async function registerPushToken(
   request: Request,
   env: Env,
   logger: Logger
 ): Promise<Response> {
   if (request.method !== "POST") {
-    return json({ error: "Method not allowed" }, 405);
+    return json({ error: "Method not allowed" }, 405, request);
   }
+
+  // Authenticate request to get userId
+  const auth = await authenticateRequest(
+    request,
+    env.JWT_SECRET || "",
+    env.JWT_REFRESH_SECRET
+  );
+
+  if (!auth) {
+    const { response } = createErrorResponse(
+      "AUTH_MISSING_TOKEN",
+      "Authentication required",
+      undefined,
+      undefined,
+      request
+    );
+    return response;
+  }
+
+  const userId = auth.userId;
 
   let payload: PushTokenPayload;
   try {
     payload = await request.json();
   } catch (error) {
-    return json({ error: "Invalid JSON payload" }, 400);
+    return json({ error: "Invalid JSON payload" }, 400, request);
   }
 
-  const { userId, token, deviceInfo } = payload;
-
-  // Validate required fields
-  if (!userId || typeof userId !== "string" || userId.trim().length === 0) {
-    return json({ error: "userId is required" }, 400);
-  }
+  const { token, deviceInfo } = payload;
 
   if (!token || typeof token !== "string" || token.trim().length === 0) {
-    return json({ error: "token is required" }, 400);
+    return json({ error: "token is required" }, 400, request);
   }
 
   // Reject old Expo tokens explicitly
   if (token.startsWith("ExponentPushToken[")) {
     return json({ 
       error: "Expo push tokens are no longer supported. Please use the mobile app to register a new FCM token. The app will automatically get a new token when you open it." 
-    }, 400);
+    }, 400, request);
   }
 
   // Validate FCM token format
@@ -54,12 +70,12 @@ export async function registerPushToken(
   // - Expo may return tokens with colons or other separators
   // We'll be more lenient: at least 20 characters, allow alphanumeric, hyphens, underscores, and colons
   if (token.length < 20) {
-    return json({ error: `Invalid FCM token format: token too short (${token.length} chars, minimum 20)` }, 400);
+    return json({ error: `Invalid FCM token format: token too short (${token.length} chars, minimum 20)` }, 400, request);
   }
   
   // Allow alphanumeric, hyphens, underscores, colons, and dots (common in FCM tokens)
   if (!/^[A-Za-z0-9_\-:\.]+$/.test(token)) {
-    return json({ error: `Invalid FCM token format: contains invalid characters. Token: ${token.substring(0, 50)}...` }, 400);
+    return json({ error: `Invalid FCM token format: contains invalid characters. Token: ${token.substring(0, 50)}...` }, 400, request);
   }
   
   console.log(`✅ FCM token validation passed: length=${token.length}, format valid`);
@@ -88,7 +104,7 @@ export async function registerPushToken(
         success: true,
         message: "Push token updated",
         userId,
-      });
+      }, 200, request);
     } else {
       // Insert new token
       await env.stockly
@@ -103,26 +119,43 @@ export async function registerPushToken(
         success: true,
         message: "Push token registered",
         userId,
-      }, 201);
+      }, 201, request);
     }
   } catch (error) {
-    console.error("Failed to register push token:", error);
-    return json({ error: "Failed to register push token" }, 500);
+    logger.error("Failed to register push token", { error, userId });
+    return json({ error: "Failed to register push token" }, 500, request);
   }
 }
 
 /**
  * Get a user's push token
- * GET /v1/api/push-token/:userId
+ * GET /v1/api/push-token
+ * userId from JWT authentication
  */
 export async function getPushToken(
-  userId: string,
+  request: Request,
   env: Env,
   logger: Logger
 ): Promise<Response> {
-  if (!userId) {
-    return json({ error: "userId is required" }, 400);
+  // Authenticate request to get userId
+  const auth = await authenticateRequest(
+    request,
+    env.JWT_SECRET || "",
+    env.JWT_REFRESH_SECRET
+  );
+
+  if (!auth) {
+    const { response } = createErrorResponse(
+      "AUTH_MISSING_TOKEN",
+      "Authentication required",
+      undefined,
+      undefined,
+      request
+    );
+    return response;
   }
+
+  const userId = auth.userId;
 
   try {
     const row = await env.stockly
@@ -141,7 +174,7 @@ export async function getPushToken(
       }>();
 
     if (!row) {
-      return json({ error: "Push token not found" }, 404);
+      return json({ error: "Push token not found" }, 404, request);
     }
 
     return json({
@@ -150,10 +183,10 @@ export async function getPushToken(
       deviceInfo: row.device_info,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
-    });
+    }, 200, request);
   } catch (error) {
-    console.error("Failed to get push token:", error);
-    return json({ error: "Failed to get push token" }, 500);
+    logger.error("Failed to get push token", { error, userId });
+    return json({ error: "Failed to get push token" }, 500, request);
   }
 }
 
