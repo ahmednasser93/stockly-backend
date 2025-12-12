@@ -249,7 +249,7 @@ export class Logger {
 
 /**
  * Helper function to extract userId from request path or headers
- * This is a placeholder - adjust based on your actual auth implementation
+ * Supports both legacy URL params and JWT tokens (from Authorization header or cookies)
  */
 export function extractUserId(request: Request, pathname: string): string | null {
   // Try to extract from path (e.g., /v1/api/preferences/:userId)
@@ -267,15 +267,53 @@ export function extractUserId(request: Request, pathname: string): string | null
     }
   }
 
-  // Try to extract from Authorization header (if JWT or similar)
+  // Try to extract from Authorization header (JWT token)
   const authHeader = request.headers.get("Authorization");
-  if (authHeader) {
-    // If you have JWT parsing, extract userId from token
-    // For now, return null if not in path
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const token = authHeader.substring(7);
+    try {
+      // Decode JWT without verification (just for logging)
+      const parts = token.split(".");
+      if (parts.length === 3) {
+        const payload = JSON.parse(
+          new TextDecoder().decode(
+            Uint8Array.from(atob(parts[1]), (c) => c.charCodeAt(0))
+          )
+        );
+        return payload.userId || null;
+      }
+    } catch {
+      // Invalid token format, ignore
+    }
   }
 
-  // Try to extract from request body for POST/PUT requests
-  // This would require async parsing, so we'll handle it in handlers
+  // Try to extract from httpOnly cookie (webapp)
+  const cookieHeader = request.headers.get("Cookie");
+  if (cookieHeader) {
+    const cookies = cookieHeader.split(";").reduce((acc, cookie) => {
+      const [name, value] = cookie.trim().split("=");
+      if (name && value) {
+        acc[name] = decodeURIComponent(value);
+      }
+      return acc;
+    }, {} as Record<string, string>);
+
+    if (cookies.accessToken) {
+      try {
+        const parts = cookies.accessToken.split(".");
+        if (parts.length === 3) {
+          const payload = JSON.parse(
+            new TextDecoder().decode(
+              Uint8Array.from(atob(parts[1]), (c) => c.charCodeAt(0))
+            )
+          );
+          return payload.userId || null;
+        }
+      } catch {
+        // Invalid token format, ignore
+      }
+    }
+  }
 
   return null;
 }

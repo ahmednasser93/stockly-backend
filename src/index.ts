@@ -1,4 +1,4 @@
-import { json, CORS_HEADERS } from "./util";
+import { json, CORS_HEADERS, getCorsHeaders } from "./util";
 import { getStock } from "./api/get-stock";
 import { getStocks } from "./api/get-stocks";
 import { getStockDetailsRoute } from "./api/get-stock-details";
@@ -25,6 +25,14 @@ import {
   simulateProviderFailureEndpoint,
   disableProviderFailureEndpoint,
 } from "./api/config";
+import {
+  handleGoogleAuth,
+  checkUsernameAvailability,
+  setUsername,
+  refreshToken,
+  logout,
+  getCurrentUser,
+} from "./api/auth";
 import { Logger, extractUserId } from "./logging/logger";
 import { sendLogsToLoki } from "./logging/loki-shipper";
 import { LoggedD1Database } from "./logging/d1-wrapper";
@@ -38,6 +46,10 @@ export interface Env {
   LOKI_URL?: string; // Grafana Loki endpoint URL (e.g., "https://logs-prod-us-central-0.grafana.net")
   LOKI_USERNAME?: string; // Grafana Cloud username (instance ID) for Basic Auth
   LOKI_PASSWORD?: string; // Grafana Cloud API token or password for Basic Auth
+  GOOGLE_CLIENT_ID?: string; // Google OAuth client ID
+  GOOGLE_CLIENT_SECRET?: string; // Google OAuth client secret (optional, for additional verification)
+  JWT_SECRET?: string; // Secret for signing JWT access tokens
+  JWT_REFRESH_SECRET?: string; // Secret for signing JWT refresh tokens
 }
 
 export default {
@@ -71,9 +83,10 @@ export default {
       // Get the requested headers from the browser (comma-separated list)
       const requestedHeaders = request.headers.get("Access-Control-Request-Headers");
 
-      // Build response headers with defaults
+      // Build response headers with dynamic CORS support
+      const corsHeaders = getCorsHeaders(request);
       const headers: HeadersInit = {
-        ...CORS_HEADERS,
+        ...corsHeaders,
       };
 
       // Echo back the requested headers if provided (browsers can be strict about header matching)
@@ -81,7 +94,7 @@ export default {
       if (requestedHeaders) {
         // Merge requested headers with our default allowed headers
         // This ensures we allow everything the browser is requesting
-        const defaultHeadersList = CORS_HEADERS["Access-Control-Allow-Headers"].split(", ").map(h => h.trim());
+        const defaultHeadersList = (CORS_HEADERS["Access-Control-Allow-Headers"] as string).split(", ").map(h => h.trim());
         const requestedHeadersList = requestedHeaders.split(",").map(h => h.trim());
         // Combine and deduplicate, keeping order (requested first, then defaults)
         const allHeadersSet = new Set([...requestedHeadersList, ...defaultHeadersList]);
@@ -198,9 +211,21 @@ export default {
         response = await simulateProviderFailureEndpoint(loggedEnv, logger);
       } else if (pathname === "/v1/api/disable-provider-failure" && request.method === "POST") {
         response = await disableProviderFailureEndpoint(loggedEnv, logger);
+      } else if (pathname === "/v1/api/auth/google" && request.method === "POST") {
+        response = await handleGoogleAuth(request, loggedEnv, logger);
+      } else if (pathname === "/v1/api/auth/username/check" && request.method === "GET") {
+        response = await checkUsernameAvailability(request, loggedEnv, logger);
+      } else if (pathname === "/v1/api/auth/username" && request.method === "POST") {
+        response = await setUsername(request, loggedEnv, logger);
+      } else if (pathname === "/v1/api/auth/refresh" && request.method === "POST") {
+        response = await refreshToken(request, loggedEnv, logger);
+      } else if (pathname === "/v1/api/auth/me" && request.method === "GET") {
+        response = await getCurrentUser(request, loggedEnv, logger);
+      } else if (pathname === "/v1/api/auth/logout" && request.method === "POST") {
+        response = await logout(request, loggedEnv, logger);
       } else {
         logger.warn("Route not found", { pathname, method: request.method });
-        response = json({ error: "Not Found" }, 404);
+        response = json({ error: "Not Found" }, 404, request);
       }
     } catch (error) {
       logger.error("Unhandled error in fetch handler", error, {
