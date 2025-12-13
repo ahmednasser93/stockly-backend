@@ -813,7 +813,7 @@ export async function getCurrentUser(
       request
     );
   } catch (error) {
-    logger.error("Failed to get current user", { error });
+    logger.error("Failed to get current user", error);
     const { response } = createErrorResponse(
       "INTERNAL_ERROR",
       "Failed to retrieve user information",

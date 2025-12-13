@@ -87,7 +87,7 @@ export async function getPreferences(
       return json(defaultPreferences, 200, request);
     }
   } catch (error) {
-    logger.error("Failed to retrieve preferences", { error, userId });
+    logger.error("Failed to retrieve preferences", error, { userId });
     return json({ error: "Failed to retrieve preferences" }, 500, request);
   }
 }
@@ -182,7 +182,7 @@ export async function updatePreferences(
       return json({ success: true, message: "Preferences created" }, 201, request);
     }
   } catch (error) {
-    logger.error("Failed to update preferences", { error, userId });
+    logger.error("Failed to update preferences", error, { userId });
     return json({ error: "Failed to update preferences" }, 500, request);
   }
 }

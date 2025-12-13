@@ -248,10 +248,10 @@ async function insertQuote(env: Env, quote: QuoteRecord) {
 
 import type { Logger } from "../logging/logger";
 
-export async function getStocks(url: URL, env: Env, logger: Logger): Promise<Response> {
+export async function getStocks(request: Request, url: URL, env: Env, logger: Logger): Promise<Response> {
   const symbolsParam = url.searchParams.get("symbols");
   if (!symbolsParam) {
-    return json({ error: "symbols required" }, 400);
+    return json({ error: "symbols required" }, 400, request);
   }
 
   const symbols = Array.from(
@@ -264,7 +264,7 @@ export async function getStocks(url: URL, env: Env, logger: Logger): Promise<Res
   );
 
   if (!symbols.length) {
-    return json({ error: "symbols required" }, 400);
+    return json({ error: "symbols required" }, 400, request);
   }
 
   // Get config to check polling interval
@@ -317,7 +317,7 @@ export async function getStocks(url: URL, env: Env, logger: Logger): Promise<Res
       );
     } catch (error) {
       console.error("Failed to refresh quotes", error);
-      return json({ error: "failed to fetch stocks" }, 500);
+      return json({ error: "failed to fetch stocks" }, 500, request);
     }
   }
 
@@ -326,5 +326,5 @@ export async function getStocks(url: URL, env: Env, logger: Logger): Promise<Res
     .map((symbol) => resultBySymbol.get(symbol))
     .filter((quote): quote is any => Boolean(quote));
 
-  return json(orderedResults);
+  return json(orderedResults, 200, request);
 }

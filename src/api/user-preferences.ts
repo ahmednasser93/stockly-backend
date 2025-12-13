@@ -70,7 +70,7 @@ export async function updateUserPreferences(
 
         return json({ success: true, message: "Preferences updated" }, 200, request);
     } catch (error) {
-        logger.error("Failed to update user preferences", { error, userId });
+        logger.error("Failed to update user preferences", error, { userId });
         return json({ error: "Failed to update user preferences" }, 500, request);
     }
 }

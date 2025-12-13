@@ -83,30 +83,49 @@ export async function registerPushToken(
   const now = new Date().toISOString();
 
   try {
-    // Check if user already has a push token registered
-    const existing = await env.stockly
-      .prepare("SELECT user_id FROM user_push_tokens WHERE user_id = ?")
-      .bind(userId)
-      .first();
+    // Check if this exact token already exists (same device re-registering)
+    const existingToken = await env.stockly
+      .prepare("SELECT id, user_id FROM user_push_tokens WHERE push_token = ?")
+      .bind(token)
+      .first<{ id: number; user_id: string }>();
 
-    if (existing) {
-      // Update existing token
-      await env.stockly
-        .prepare(
-          `UPDATE user_push_tokens 
-           SET push_token = ?, device_info = ?, updated_at = ?
-           WHERE user_id = ?`
-        )
-        .bind(token, deviceInfo || null, now, userId)
-        .run();
+    if (existingToken) {
+      // Token already exists - update it (device info might have changed)
+      if (existingToken.user_id !== userId) {
+        // Token belongs to a different user - update to current user
+        await env.stockly
+          .prepare(
+            `UPDATE user_push_tokens 
+             SET user_id = ?, device_info = ?, updated_at = ?
+             WHERE push_token = ?`
+          )
+          .bind(userId, deviceInfo || null, now, token)
+          .run();
 
-      return json({
-        success: true,
-        message: "Push token updated",
-        userId,
-      }, 200, request);
+        return json({
+          success: true,
+          message: "Push token reassigned to current user",
+          userId,
+        }, 200, request);
+      } else {
+        // Same user, same token - just update device info and timestamp
+        await env.stockly
+          .prepare(
+            `UPDATE user_push_tokens 
+             SET device_info = ?, updated_at = ?
+             WHERE push_token = ?`
+          )
+          .bind(deviceInfo || null, now, token)
+          .run();
+
+        return json({
+          success: true,
+          message: "Push token updated",
+          userId,
+        }, 200, request);
+      }
     } else {
-      // Insert new token
+      // New token - insert as new device for this user
       await env.stockly
         .prepare(
           `INSERT INTO user_push_tokens (user_id, push_token, device_info, created_at, updated_at)
@@ -122,7 +141,7 @@ export async function registerPushToken(
       }, 201, request);
     }
   } catch (error) {
-    logger.error("Failed to register push token", { error, userId });
+    logger.error("Failed to register push token", error, { userId });
     return json({ error: "Failed to register push token" }, 500, request);
   }
 }
@@ -185,7 +204,7 @@ export async function getPushToken(
       updatedAt: row.updated_at,
     }, 200, request);
   } catch (error) {
-    logger.error("Failed to get push token", { error, userId });
+    logger.error("Failed to get push token", error, { userId });
     return json({ error: "Failed to get push token" }, 500, request);
   }
 }

@@ -29,12 +29,12 @@
 		}
 	],
 	/**
-	 * Cron Triggers for Price Alerts Evaluation
-	 * Schedule: Every 5 minutes
-	 * Adjust as needed: every 15 min, hourly, etc.
+	 * Cron Triggers:
+	 * - Every 5 minutes: Price alerts evaluation
+	 * - Every 6 hours: News alerts for favorite stocks (runs at 00:00, 06:00, 12:00, 18:00 UTC)
 	 */
 	"triggers": {
-		"crons": ["*/5 * * * *", "0 * * * *"]
+		"crons": ["*/5 * * * *", "0 */6 * * *"]
 	},
 	/**
 	 * Smart Placement

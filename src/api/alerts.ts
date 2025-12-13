@@ -3,7 +3,7 @@ import type { Env } from "../index";
 import { createAlert, deleteAlert, getAlert, listAlerts, updateAlert } from "../alerts/storage";
 import { deleteAlertState } from "../alerts/state";
 import { validateAlertUpdate, validateNewAlert } from "../alerts/validation";
-import { authenticateRequest } from "../auth/middleware";
+import { authenticateRequestWithAdmin } from "../auth/middleware";
 import { createErrorResponse } from "../auth/error-handler";
 import type { Logger } from "../logging/logger";
 
@@ -23,9 +23,10 @@ export async function handleAlertsRequest(
   env: Env,
   logger: Logger
 ): Promise<Response> {
-  // Authenticate request to get userId
-  const auth = await authenticateRequest(
+  // Authenticate request to get userId and admin status
+  const auth = await authenticateRequestWithAdmin(
     request,
+    env,
     env.JWT_SECRET || "",
     env.JWT_REFRESH_SECRET
   );
@@ -41,7 +42,8 @@ export async function handleAlertsRequest(
     return response;
   }
 
-  const userId = auth.userId;
+  // For admin, pass null to get all data; otherwise use userId
+  const userId = auth.isAdmin ? null : auth.userId;
 
   const url = new URL(request.url);
   const tail = url.pathname.slice(ALERT_PREFIX.length);
@@ -65,8 +67,11 @@ export async function handleAlertsRequest(
       }
 
       try {
-        const alert = await createAlert(env, validation.data, userId);
-        logger.info("Created alert", { alertId: alert.id, userId });
+        // Admin can create alerts, but we still need a userId for the alert
+        // Use the admin's userId for creation
+        const alertUserId = auth.isAdmin ? auth.userId : userId;
+        const alert = await createAlert(env, validation.data, alertUserId);
+        logger.info("Created alert", { alertId: alert.id, userId: alertUserId, isAdmin: auth.isAdmin });
         return json(alert, 201, request);
       } catch (error) {
         logger.error("failed to create alert", error, { userId });

@@ -10,6 +10,7 @@ import { getStockDetails } from "../services/get-stock-details";
 import type { Logger } from "../logging/logger";
 
 export async function getStockDetailsRoute(
+  request: Request,
   url: URL,
   env: Env,
   ctx: ExecutionContext | undefined,
@@ -18,13 +19,13 @@ export async function getStockDetailsRoute(
   const symbol = url.searchParams.get("symbol");
 
   if (!symbol) {
-    return json({ error: "symbol required" }, 400);
+    return json({ error: "symbol required" }, 400, request);
   }
 
   // Validate symbol format (basic validation)
   const normalizedSymbol = symbol.trim().toUpperCase();
   if (normalizedSymbol.length === 0 || normalizedSymbol.length > 10) {
-    return json({ error: "invalid symbol format" }, 400);
+    return json({ error: "invalid symbol format" }, 400, request);
   }
 
   try {
@@ -32,15 +33,16 @@ export async function getStockDetailsRoute(
 
     // Check if result is an error (has error field but not profile/quote)
     if ("error" in result && !("profile" in result)) {
-      return json(result, 500);
+      return json(result, 500, request);
     }
 
-    return json(result);
+    return json(result, 200, request);
   } catch (error) {
     console.error("Error in getStockDetailsRoute:", error);
     return json(
       { error: "Internal server error", symbol: normalizedSymbol },
-      500
+      500,
+      request
     );
   }
 }

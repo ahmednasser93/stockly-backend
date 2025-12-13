@@ -37,7 +37,13 @@ const mapRow = (row: AlertRow): AlertRecord => ({
 
 const SELECT_BASE = `SELECT id, symbol, direction, threshold, status, channel, target, notes, user_id, created_at, updated_at FROM alerts`;
 
-export async function listAlerts(env: Env, userId: string): Promise<AlertRecord[]> {
+export async function listAlerts(env: Env, userId: string | null): Promise<AlertRecord[]> {
+  if (userId === null) {
+    // Admin: get all alerts
+    const statement = env.stockly.prepare(`${SELECT_BASE} ORDER BY created_at DESC`);
+    const result = await statement.all<AlertRow>();
+    return (result.results ?? []).map(mapRow);
+  }
   const statement = env.stockly.prepare(`${SELECT_BASE} WHERE user_id = ? ORDER BY created_at DESC`);
   const result = await statement.bind(userId).all<AlertRow>();
   return (result.results ?? []).map(mapRow);
@@ -61,7 +67,15 @@ export async function listActiveAlerts(env: Env, userId?: string): Promise<Alert
   }
 }
 
-export async function getAlert(env: Env, id: string, userId: string): Promise<AlertRecord | null> {
+export async function getAlert(env: Env, id: string, userId: string | null): Promise<AlertRecord | null> {
+  if (userId === null) {
+    // Admin: get alert without user filter
+    const row = await env.stockly
+      .prepare(`${SELECT_BASE} WHERE id = ?`)
+      .bind(id)
+      .first<AlertRow>();
+    return row ? mapRow(row) : null;
+  }
   const row = await env.stockly
     .prepare(`${SELECT_BASE} WHERE id = ? AND user_id = ?`)
     .bind(id, userId)
@@ -113,7 +127,7 @@ export async function updateAlert(
   env: Env,
   id: string,
   updates: AlertUpdate,
-  userId: string
+  userId: string | null
 ): Promise<AlertRecord | null> {
   try {
     const fields: string[] = [];
@@ -154,10 +168,17 @@ export async function updateAlert(
 
     fields.push("updated_at = ?");
     const updatedAt = new Date().toISOString();
-    values.push(updatedAt, id, userId);
-
-    const sql = `UPDATE alerts SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`;
-    await env.stockly.prepare(sql).bind(...values).run();
+    values.push(updatedAt, id);
+    
+    if (userId === null) {
+      // Admin: update without user filter
+      const sql = `UPDATE alerts SET ${fields.join(", ")} WHERE id = ?`;
+      await env.stockly.prepare(sql).bind(...values).run();
+    } else {
+      values.push(userId);
+      const sql = `UPDATE alerts SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`;
+      await env.stockly.prepare(sql).bind(...values).run();
+    }
 
     return await getAlert(env, id, userId);
   } catch (error) {
@@ -177,11 +198,20 @@ export async function updateAlert(
   }
 }
 
-export async function deleteAlert(env: Env, id: string, userId: string): Promise<boolean> {
-  const result = await env.stockly
-    .prepare(`DELETE FROM alerts WHERE id = ? AND user_id = ?`)
-    .bind(id, userId)
-    .run();
+export async function deleteAlert(env: Env, id: string, userId: string | null): Promise<boolean> {
+  let result;
+  if (userId === null) {
+    // Admin: delete without user filter
+    result = await env.stockly
+      .prepare(`DELETE FROM alerts WHERE id = ?`)
+      .bind(id)
+      .run();
+  } else {
+    result = await env.stockly
+      .prepare(`DELETE FROM alerts WHERE id = ? AND user_id = ?`)
+      .bind(id, userId)
+      .run();
+  }
 
   const meta = (result as any)?.meta ?? {};
   if (typeof meta.changes === "number") {

@@ -21,14 +21,14 @@ function formatDate(date: Date): string {
 
 import type { Logger } from "../logging/logger";
 
-export async function getHistorical(url: URL, env: Env, ctx: ExecutionContext | undefined, logger: Logger): Promise<Response> {
+export async function getHistorical(request: Request, url: URL, env: Env, ctx: ExecutionContext | undefined, logger: Logger): Promise<Response> {
   const symbol = url.searchParams.get("symbol");
   const daysParam = url.searchParams.get("days");
   const fromParam = url.searchParams.get("from");
   const toParam = url.searchParams.get("to");
 
   if (!symbol) {
-    return json({ error: "symbol parameter is required" }, 400);
+    return json({ error: "symbol parameter is required" }, 400, request);
   }
 
   const normalizedSymbol = symbol.trim().toUpperCase();
@@ -43,19 +43,19 @@ export async function getHistorical(url: URL, env: Env, ctx: ExecutionContext | 
     if (fromParam) {
       fromDate = parseDate(fromParam);
       if (!fromDate) {
-        return json({ error: "Invalid 'from' date format (expected YYYY-MM-DD)" }, 400);
+        return json({ error: "Invalid 'from' date format (expected YYYY-MM-DD)" }, 400, request);
       }
     }
     if (toParam) {
       toDate = parseDate(toParam);
       if (!toDate) {
-        return json({ error: "Invalid 'to' date format (expected YYYY-MM-DD)" }, 400);
+        return json({ error: "Invalid 'to' date format (expected YYYY-MM-DD)" }, 400, request);
       }
     }
 
     // Validate date range
     if (fromDate && toDate && fromDate > toDate) {
-      return json({ error: "'from' date must be before or equal to 'to' date" }, 400);
+      return json({ error: "'from' date must be before or equal to 'to' date" }, 400, request);
     }
 
     // Set defaults if only one date is provided
@@ -76,7 +76,7 @@ export async function getHistorical(url: URL, env: Env, ctx: ExecutionContext | 
       fromDate = new Date(toDate);
       fromDate.setDate(fromDate.getDate() - days);
     } else {
-      return json({ error: "days parameter must be a positive number between 1 and 3650" }, 400);
+      return json({ error: "days parameter must be a positive number between 1 and 3650" }, 400, request);
     }
   } else {
     // Default to 180 days if no parameters provided
@@ -174,7 +174,7 @@ export async function getHistorical(url: URL, env: Env, ctx: ExecutionContext | 
       from: fromDate ? formatDate(fromDate) : undefined,
       to: toDate ? formatDate(toDate) : undefined,
       data,
-    });
+    }, 200, request);
   } catch (error) {
   console.error(`ERROR in getHistorical for ${normalizedSymbol}:`, error);
 
@@ -186,7 +186,7 @@ export async function getHistorical(url: URL, env: Env, ctx: ExecutionContext | 
     from: fromDate ? formatDate(fromDate) : undefined,
     to: toDate ? formatDate(toDate) : undefined,
     data: [],
-  });
+  }, 200, request);
 }
 }
 

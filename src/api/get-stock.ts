@@ -7,6 +7,7 @@ import { sendFCMNotification } from "../notifications/fcm-sender";
 import type { Logger } from "../logging/logger";
 
 export async function getStock(
+  request: Request,
   url: URL,
   env: Env,
   ctx: ExecutionContext | undefined,
@@ -14,7 +15,7 @@ export async function getStock(
 ): Promise<Response> {
   const symbol = url.searchParams.get("symbol");
 
-  if (!symbol) return json({ error: "symbol required" }, 400);
+  if (!symbol) return json({ error: "symbol required" }, 400, request);
 
   const normalizedSymbol = symbol.toUpperCase();
   const cacheKey = `quote:${normalizedSymbol}`;
@@ -34,7 +35,7 @@ export async function getStock(
       pollingIntervalSec,
       cacheStatus: "HIT",
     });
-    return json(cachedEntry.data);
+    return json(cachedEntry.data, 200, request);
   }
 
   // Cache is either missing or too old (age >= pollingIntervalSec)
@@ -89,14 +90,14 @@ export async function getStock(
           timestamp: dbRecord.timestamp,
         };
 
-        return json(staleResponse);
+        return json(staleResponse, 200, request);
       } else {
         // No data in DB either
-        return json({ error: "no_price_available" }, 404);
+        return json({ error: "no_price_available" }, 404, request);
       }
     } catch (dbError) {
       logger.error("Failed to fetch from DB during simulation", dbError);
-      return json({ error: "no_price_available" }, 500);
+      return json({ error: "no_price_available" }, 500, request);
     }
   }
 
@@ -321,7 +322,7 @@ export async function getStock(
       ctx.waitUntil(fetchAndSaveHistoricalPrice(symbol, env, ctx));
     }
 
-    return json(parsed);
+    return json(parsed, 200, request);
   } catch (err) {
     logger.error("ERROR in getStock", err, { symbol: normalizedSymbol });
     
@@ -336,15 +337,15 @@ export async function getStock(
         error: err.message,
         apiProvider: "FMP",
       });
-      return await handleProviderFailure(normalizedSymbol, env, ctx, "provider_network_error", logger);
+      return await handleProviderFailure(normalizedSymbol, env, ctx, "provider_network_error", logger, request);
     }
     
     // Unknown error - try fallback but return error if DB also fails
     try {
-      return await handleProviderFailure(normalizedSymbol, env, ctx, "provider_unknown_error", logger);
+      return await handleProviderFailure(normalizedSymbol, env, ctx, "provider_unknown_error", logger, request);
     } catch (fallbackErr) {
       logger.error("Both provider and DB fallback failed", fallbackErr);
-      return json({ error: "failed to fetch stock" }, 500);
+      return json({ error: "failed to fetch stock" }, 500, request);
     }
   }
 }
@@ -357,7 +358,8 @@ async function handleProviderFailure(
   env: Env,
   ctx: ExecutionContext | undefined,
   failureReason: string,
-  logger: Logger
+  logger: Logger,
+  request: Request
 ): Promise<Response> {
   try {
     // Try to get last cached price from DB
@@ -398,14 +400,14 @@ async function handleProviderFailure(
         timestamp: dbRecord.timestamp,
       };
 
-      return json(staleResponse);
+      return json(staleResponse, 200, request);
     } else {
       // No data in DB either
-      return json({ error: "no_price_available" }, 404);
+      return json({ error: "no_price_available" }, 404, request);
     }
   } catch (dbError) {
     logger.error("Failed to fetch from DB during provider failure", dbError);
-    return json({ error: "no_price_available" }, 500);
+    return json({ error: "no_price_available" }, 500, request);
   }
 }
 

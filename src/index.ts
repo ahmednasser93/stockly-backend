@@ -14,6 +14,7 @@ import { getRecentNotifications, getFailedNotifications, retryNotification } fro
 import { getAllDevices, sendTestNotification, deleteDevice } from "./api/devices";
 import { updateUserPreferences } from "./api/user-preferences";
 import { getArchivedNews, toggleArchivedNews } from "./api/news-archive";
+import { getFavoriteStocks, updateFavoriteStocks, deleteFavoriteStock, getAllUsersFavoriteStocks } from "./api/favorite-stocks";
 import { runAlertCron } from "./cron/alerts-cron";
 import { runNewsAlertCron } from "./cron/news-alert-cron";
 import { getHistorical } from "./api/get-historical";
@@ -128,25 +129,25 @@ export default {
       } else if (pathname === "/v1/api/health") {
         response = healthCheck();
       } else if (pathname === "/v1/api/get-stock") {
-        response = await getStock(url, loggedEnv, ctx, logger);
+        response = await getStock(request, url, loggedEnv, ctx, logger);
       } else if (pathname === "/v1/api/get-stocks") {
-        response = await getStocks(url, loggedEnv, logger);
+        response = await getStocks(request, url, loggedEnv, logger);
       } else if (pathname === "/v1/api/get-stock-details") {
-        response = await getStockDetailsRoute(url, loggedEnv, ctx, logger);
+        response = await getStockDetailsRoute(request, url, loggedEnv, ctx, logger);
       } else if (pathname === "/v1/api/get-news") {
-        response = await getNews(url, loggedEnv, logger);
+        response = await getNews(request, url, loggedEnv, logger);
       } else if (pathname === "/v1/api/news/general") {
-        response = await getGeneralNews(url, loggedEnv, logger);
+        response = await getGeneralNews(request, url, loggedEnv, logger);
       } else if (pathname === "/v1/api/news/favorites") {
         response = await getFavoriteNews(request, url, loggedEnv, logger);
       } else if (pathname === "/v1/api/get-stock-news") {
-        response = await getStockNews(url, loggedEnv, logger);
+        response = await getStockNews(request, url, loggedEnv, logger);
       } else if (pathname === "/v1/api/search-stock") {
-        response = await searchStock(url, loggedEnv, logger);
+        response = await searchStock(request, url, loggedEnv, logger);
       } else if (pathname === "/v1/api/get-historical") {
-        response = await getHistorical(url, loggedEnv, ctx, logger);
+        response = await getHistorical(request, url, loggedEnv, ctx, logger);
       } else if (pathname === "/v1/api/get-historical-intraday") {
-        response = await getHistoricalIntraday(url, loggedEnv, logger);
+        response = await getHistoricalIntraday(request, url, loggedEnv, logger);
       } else if (pathname.startsWith("/v1/api/alerts")) {
         response = await handleAlertsRequest(request, loggedEnv, logger);
       } else if (pathname === "/v1/api/push-token" && request.method === "GET") {
@@ -168,16 +169,25 @@ export default {
       } else if (pathname.startsWith("/v1/api/news/archive/") && request.method === "POST") {
         const articleId = pathname.split("/v1/api/news/archive/")[1];
         response = await toggleArchivedNews(request, articleId, loggedEnv, logger);
+      } else if (pathname === "/v1/api/favorite-stocks" && request.method === "GET") {
+        response = await getFavoriteStocks(request, loggedEnv, logger);
+      } else if (pathname === "/v1/api/favorite-stocks" && request.method === "POST") {
+        response = await updateFavoriteStocks(request, loggedEnv, logger);
+      } else if (pathname.startsWith("/v1/api/favorite-stocks/") && request.method === "DELETE") {
+        const symbol = pathname.split("/v1/api/favorite-stocks/")[1];
+        response = await deleteFavoriteStock(request, symbol, loggedEnv, logger);
+      } else if (pathname === "/v1/api/favorite-stocks/all" && request.method === "GET") {
+        response = await getAllUsersFavoriteStocks(request, loggedEnv, logger);
       } else if (pathname === "/v1/api/notifications/recent") {
-        response = await getRecentNotifications(loggedEnv, logger);
+        response = await getRecentNotifications(request, loggedEnv, logger);
       } else if (pathname === "/v1/api/notifications/failed") {
-        response = await getFailedNotifications(loggedEnv, logger);
+        response = await getFailedNotifications(request, loggedEnv, logger);
       } else if (pathname.startsWith("/v1/api/notifications/retry/")) {
         if (request.method !== "POST") {
           response = json({ error: "Method not allowed" }, 405, request);
         } else {
           const logId = pathname.split("/v1/api/notifications/retry/")[1];
-          response = await retryNotification(logId, loggedEnv, logger);
+          response = await retryNotification(request, logId, loggedEnv, logger);
         }
       } else if (pathname === "/v1/api/devices" && request.method === "GET") {
         response = await getAllDevices(request, loggedEnv, logger);
@@ -236,8 +246,8 @@ export default {
       ctx.waitUntil(runAlertCron(env, ctx));
     }
 
-    // Run news alerts every hour
-    if (event.cron === "0 * * * *") {
+    // Run news alerts every 6 hours (at 00:00, 06:00, 12:00, 18:00)
+    if (event.cron === "0 */6 * * *") {
       ctx.waitUntil(runNewsAlertCron(env, ctx));
     }
   },

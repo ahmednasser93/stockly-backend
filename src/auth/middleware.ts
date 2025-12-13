@@ -7,9 +7,48 @@
 
 import { verifyToken } from "./jwt";
 
+// D1Database type from Cloudflare Workers
+interface D1Database {
+  prepare(query: string): D1PreparedStatement;
+}
+
+interface D1PreparedStatement {
+  bind(...values: unknown[]): D1PreparedStatement;
+  first<T = unknown>(): Promise<T | null>;
+  all<T = unknown>(): Promise<D1Result<T>>;
+  run(): Promise<D1ExecResult>;
+}
+
+interface D1Result<T> {
+  results: T[];
+  success: boolean;
+  meta: {
+    duration: number;
+    size_after: number;
+    rows_read: number;
+    rows_written: number;
+  };
+}
+
+interface D1ExecResult {
+  success: boolean;
+  meta: {
+    duration: number;
+    size_after: number;
+    rows_read: number;
+    rows_written: number;
+    last_row_id: number;
+    changes: number;
+  };
+}
+
 export interface AuthResult {
   userId: string;
   tokenType: "access" | "refresh";
+}
+
+export interface AuthWithAdmin extends AuthResult {
+  isAdmin: boolean;
 }
 
 /**
@@ -80,6 +119,58 @@ export async function authenticateRequest(
   }
 
   return null;
+}
+
+/**
+ * Check if a user is admin based on username
+ * Admin username: "sngvahmed"
+ * 
+ * @param env - Environment with database access
+ * @param userId - User ID to check
+ * @returns true if user is admin, false otherwise
+ */
+export async function isAdmin(env: { stockly: D1Database }, userId: string): Promise<boolean> {
+  try {
+    const user = await env.stockly
+      .prepare("SELECT username FROM users WHERE id = ?")
+      .bind(userId)
+      .first<{ username: string | null }>();
+    
+    return user?.username === "sngvahmed";
+  } catch (error) {
+    console.error("Failed to check admin status", error);
+    return false;
+  }
+}
+
+/**
+ * Authenticate request and check admin status
+ * Returns auth result with admin flag
+ * 
+ * @param request - HTTP request
+ * @param env - Environment with database access
+ * @param accessTokenSecret - JWT access token secret
+ * @param refreshTokenSecret - JWT refresh token secret (optional)
+ * @returns Auth result with userId and isAdmin flag if valid, null if invalid/missing
+ */
+export async function authenticateRequestWithAdmin(
+  request: Request,
+  env: { stockly: D1Database },
+  accessTokenSecret: string,
+  refreshTokenSecret?: string
+): Promise<AuthWithAdmin | null> {
+  const auth = await authenticateRequest(request, accessTokenSecret, refreshTokenSecret);
+  
+  if (!auth) {
+    return null;
+  }
+  
+  const adminStatus = await isAdmin(env, auth.userId);
+  
+  return {
+    ...auth,
+    isAdmin: adminStatus,
+  };
 }
 
 /**

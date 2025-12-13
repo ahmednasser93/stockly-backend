@@ -214,25 +214,25 @@ function formatDate(date: Date): string {
  */
 import type { Logger } from "../logging/logger";
 
-export async function getHistoricalIntraday(url: URL, env: Env, logger: Logger): Promise<Response> {
+export async function getHistoricalIntraday(request: Request, url: URL, env: Env, logger: Logger): Promise<Response> {
     const symbol = url.searchParams.get("symbol");
     const interval = url.searchParams.get("interval") || "4h";
     const daysParam = url.searchParams.get("days") || "3";
 
     if (!symbol) {
-        return json({ error: "symbol parameter is required" }, 400);
+        return json({ error: "symbol parameter is required" }, 400, request);
     }
 
     const days = parseInt(daysParam, 10);
     if (isNaN(days) || days <= 0 || days > 30) {
-        return json({ error: "days parameter must be between 1 and 30" }, 400);
+        return json({ error: "days parameter must be between 1 and 30" }, 400, request);
     }
 
     // Validate interval format
     try {
         parseIntervalToMinutes(interval);
     } catch (error: any) {
-        return json({ error: error.message }, 400);
+        return json({ error: error.message }, 400, request);
     }
 
     const normalizedSymbol = symbol.trim().toUpperCase();
@@ -260,7 +260,7 @@ export async function getHistoricalIntraday(url: URL, env: Env, logger: Logger):
                 from: fromDateStr,
                 to: toDateStr,
                 data: [],
-            });
+            }, 200, request);
         }
 
         // Aggregate to requested interval
@@ -275,7 +275,7 @@ export async function getHistoricalIntraday(url: URL, env: Env, logger: Logger):
             from: fromDateStr,
             to: toDateStr,
             data: aggregatedData,
-        });
+        }, 200, request);
     } catch (error: any) {
         console.error(`[getHistoricalIntraday] Error: ${error.message}`, error);
         return json({
@@ -283,6 +283,6 @@ export async function getHistoricalIntraday(url: URL, env: Env, logger: Logger):
             symbol: normalizedSymbol,
             interval,
             days,
-        }, 500);
+        }, 500, request);
     }
 }

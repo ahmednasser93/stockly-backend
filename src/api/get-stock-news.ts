@@ -20,11 +20,11 @@ export interface StockNewsItem {
 
 import type { Logger } from "../logging/logger";
 
-export async function getStockNews(url: URL, env: Env, logger: Logger): Promise<Response> {
+export async function getStockNews(request: Request, url: URL, env: Env, logger: Logger): Promise<Response> {
   const symbol = url.searchParams.get("symbol");
 
   if (!symbol) {
-    return json({ error: "symbol required" }, 400);
+    return json({ error: "symbol required" }, 400, request);
   }
 
   const normalizedSymbol = symbol.trim().toUpperCase();
@@ -39,7 +39,7 @@ export async function getStockNews(url: URL, env: Env, logger: Logger): Promise<
   if (cachedEntry) {
     const ageSeconds = Math.floor((Date.now() - cachedEntry.cachedAt) / 1000);
     console.log(`Cache hit for news ${normalizedSymbol}: age=${ageSeconds}s < interval=${pollingIntervalSec}s`);
-    return json(cachedEntry.data);
+    return json(cachedEntry.data, 200, request);
   }
 
   // Cache is either missing or too old
@@ -62,7 +62,7 @@ export async function getStockNews(url: URL, env: Env, logger: Logger): Promise<
       stale: true,
       stale_reason: "simulation_mode"
     };
-    return json(simulationResponse);
+    return json(simulationResponse, 200, request);
   }
 
   // Normal flow: fetch from provider
@@ -86,7 +86,7 @@ export async function getStockNews(url: URL, env: Env, logger: Logger): Promise<
         stale: true,
         stale_reason: "provider_api_error"
       };
-      return json(errorResponse);
+      return json(errorResponse, 200, request);
     }
 
     const newsData = await newsRes.json();
@@ -101,7 +101,7 @@ export async function getStockNews(url: URL, env: Env, logger: Logger): Promise<
         stale: true,
         stale_reason: "provider_invalid_data"
       };
-      return json(errorResponse);
+      return json(errorResponse, 200, request);
     }
 
     // Normalize news data
@@ -127,7 +127,7 @@ export async function getStockNews(url: URL, env: Env, logger: Logger): Promise<
     // Cache the result (using polling interval + 5 seconds for TTL)
     setCache(cacheKey, newsResponse, pollingIntervalSec + 5);
 
-    return json(newsResponse);
+    return json(newsResponse, 200, request);
   } catch (err) {
     console.error(`Error fetching news for ${normalizedSymbol}:`, err);
 
@@ -146,11 +146,11 @@ export async function getStockNews(url: URL, env: Env, logger: Logger): Promise<
         stale: true,
         stale_reason: "provider_network_error"
       };
-      return json(errorResponse);
+      return json(errorResponse, 200, request);
     }
 
     // Unknown error
-    return json({ error: "Failed to fetch stock news", symbol: normalizedSymbol }, 500);
+    return json({ error: "Failed to fetch stock news", symbol: normalizedSymbol }, 500, request);
   }
 }
 

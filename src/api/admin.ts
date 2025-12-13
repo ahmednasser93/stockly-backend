@@ -1,6 +1,8 @@
 import { json } from "../util";
 import type { Env } from "../index";
 import { sendFCMNotificationWithLogs } from "../notifications/fcm-sender";
+import { authenticateRequestWithAdmin } from "../auth/middleware";
+import { createErrorResponse } from "../auth/error-handler";
 
 export interface NotificationLog {
   id: string;
@@ -18,10 +20,29 @@ export interface NotificationLog {
 
 /**
  * Get recent notification logs (last 100 notifications)
+ * Admin only - returns all notifications
  */
 import type { Logger } from "../logging/logger";
 
-export async function getRecentNotifications(env: Env, logger: Logger): Promise<Response> {
+export async function getRecentNotifications(request: Request, env: Env, logger: Logger): Promise<Response> {
+  // Authenticate and check admin status
+  const auth = await authenticateRequestWithAdmin(
+    request,
+    env,
+    env.JWT_SECRET || "",
+    env.JWT_REFRESH_SECRET
+  );
+
+  if (!auth || !auth.isAdmin) {
+    const { response } = createErrorResponse(
+      "AUTH_FORBIDDEN",
+      "Admin access required",
+      undefined,
+      undefined,
+      request
+    );
+    return response;
+  }
   try {
     const results = await env.stockly
       .prepare(
@@ -58,10 +79,10 @@ export async function getRecentNotifications(env: Env, logger: Logger): Promise<
       sentAt: row.sent_at,
     }));
 
-    return json({ notifications });
+    return json({ notifications }, 200, request);
   } catch (error) {
     console.error("Failed to retrieve recent notifications:", error);
-    return json({ error: "Failed to retrieve recent notifications" }, 500);
+    return json({ error: "Failed to retrieve recent notifications" }, 500, request);
   }
 }
 
@@ -106,17 +127,19 @@ export async function getFailedNotifications(env: Env, logger: Logger): Promise<
       sentAt: row.sent_at,
     }));
 
-    return json({ notifications });
+    return json({ notifications }, 200, request);
   } catch (error) {
     console.error("Failed to retrieve failed notifications:", error);
-    return json({ error: "Failed to retrieve failed notifications" }, 500);
+    return json({ error: "Failed to retrieve failed notifications" }, 500, request);
   }
 }
 
 /**
  * Get notification logs with filters
+ * Admin only - returns all filtered notifications
  */
 export async function getFilteredNotifications(
+  request: Request,
   symbol?: string,
   status?: string,
   startDate?: string,
@@ -124,7 +147,26 @@ export async function getFilteredNotifications(
   env?: Env
 ): Promise<Response> {
   if (!env) {
-    return json({ error: "Environment not provided" }, 500);
+    return json({ error: "Environment not provided" }, 500, request);
+  }
+
+  // Authenticate and check admin status
+  const auth = await authenticateRequestWithAdmin(
+    request,
+    env,
+    env.JWT_SECRET || "",
+    env.JWT_REFRESH_SECRET
+  );
+
+  if (!auth || !auth.isAdmin) {
+    const { response } = createErrorResponse(
+      "AUTH_FORBIDDEN",
+      "Admin access required",
+      undefined,
+      undefined,
+      request
+    );
+    return response;
   }
 
   try {
@@ -184,18 +226,37 @@ export async function getFilteredNotifications(
       sentAt: row.sent_at,
     }));
 
-    return json({ notifications });
+    return json({ notifications }, 200, request);
   } catch (error) {
     console.error("Failed to retrieve filtered notifications:", error);
-    return json({ error: "Failed to retrieve filtered notifications" }, 500);
+    return json({ error: "Failed to retrieve filtered notifications" }, 500, request);
   }
 }
 
 /**
  * Retry sending a failed notification
  * POST /v1/api/notifications/retry/:logId
+ * Admin only - can retry any notification
  */
-export async function retryNotification(logId: string, env: Env, logger: Logger): Promise<Response> {
+export async function retryNotification(request: Request, logId: string, env: Env, logger: Logger): Promise<Response> {
+  // Authenticate and check admin status
+  const auth = await authenticateRequestWithAdmin(
+    request,
+    env,
+    env.JWT_SECRET || "",
+    env.JWT_REFRESH_SECRET
+  );
+
+  if (!auth || !auth.isAdmin) {
+    const { response } = createErrorResponse(
+      "AUTH_FORBIDDEN",
+      "Admin access required",
+      undefined,
+      undefined,
+      request
+    );
+    return response;
+  }
   try {
     // Get the notification log entry
     const logResult = await env.stockly
@@ -220,7 +281,7 @@ export async function retryNotification(logId: string, env: Env, logger: Logger)
       }>();
 
     if (!logResult) {
-      return json({ error: "Notification log not found" }, 404);
+      return json({ error: "Notification log not found" }, 404, request);
     }
 
     const { symbol, threshold, price, direction, push_token } = logResult;
@@ -327,7 +388,7 @@ export async function retryNotification(logId: string, env: Env, logger: Logger)
       status: newStatus,
       errorMessage,
       logs: retryLogs,
-    });
+    }, 200, request);
   } catch (error) {
     console.error("Failed to retry notification:", error);
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -336,7 +397,7 @@ export async function retryNotification(logId: string, env: Env, logger: Logger)
       error: "Failed to retry notification",
       errorMessage,
       logs: [`[${new Date().toISOString()}] ❌ Error: ${errorMessage}`],
-    }, 500);
+    }, 500, request);
   }
 }
 

@@ -90,7 +90,7 @@ export async function getSettings(
       return json(defaultSettings, 200, request);
     }
   } catch (error) {
-    logger.error("Failed to retrieve settings", { error, userId });
+    logger.error("Failed to retrieve settings", error, { userId });
     return json({ error: "Failed to retrieve settings" }, 500, request);
   }
 }
@@ -233,7 +233,7 @@ export async function updateSettings(
       );
     }
   } catch (error) {
-    logger.error("Failed to update settings", { error, userId });
+    logger.error("Failed to update settings", error, { userId });
     return json({ error: "Failed to update settings" }, 500, request);
   }
 }

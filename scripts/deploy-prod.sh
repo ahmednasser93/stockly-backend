@@ -57,11 +57,23 @@ wrangler d1 execute stockly --remote --yes --file=./migrations/010_news_feed.sql
 echo "Migration 11/11: 011_add_cache_settings.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/011_add_cache_settings.sql || echo "⚠️  Migration 11 already applied or failed"
 
-echo "Migration 12/13: 012_create_users.sql"
+echo "Migration 12/14: 012_create_users.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/012_create_users.sql || echo "⚠️  Migration 12 already applied or failed"
 
-echo "Migration 13/13: 013_add_user_id_to_alerts.sql"
+echo "Migration 13/14: 013_add_user_id_to_alerts.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/013_add_user_id_to_alerts.sql || echo "⚠️  Migration 13 already applied or failed"
+
+echo "Migration 14/15: 014_create_user_favorite_stocks.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/014_create_user_favorite_stocks.sql || echo "⚠️  Migration 14 already applied or failed"
+
+echo "Migration 15/15: 015_support_multiple_devices_per_user.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/015_support_multiple_devices_per_user.sql || echo "⚠️  Migration 15 already applied or failed"
+
+echo "Migration 13/14: 013_add_user_id_to_alerts.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/013_add_user_id_to_alerts.sql || echo "⚠️  Migration 13 already applied or failed"
+
+echo "Migration 14/14: 014_create_user_favorite_stocks.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/014_create_user_favorite_stocks.sql || echo "⚠️  Migration 14 already applied or failed"
 
 echo ""
 echo "✅ Database migrations complete"

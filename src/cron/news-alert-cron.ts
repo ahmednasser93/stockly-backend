@@ -63,91 +63,143 @@ export async function runNewsAlertCron(env: Env, ctx?: ExecutionContext): Promis
             return;
         }
 
-        logger.info(`Checking news for ${uniqueSymbols.size} symbols`);
+        logger.info(`Checking news for ${uniqueSymbols.size} unique symbols: ${Array.from(uniqueSymbols).join(", ")}`);
 
-        // 2. Fetch news for each symbol
-        // We process in batches to avoid rate limits if necessary, but FMP handles comma-separated symbols.
-        // However, fetching news for ALL symbols in one go might be too much if the list is huge.
-        // FMP batch limit is not strictly documented but usually robust.
-        // Let's do it per symbol or small batches.
-        // Given the requirement "Call FMP for each unique symbol", we'll loop.
+        // 2. Fetch news for ALL unique symbols in ONE batch call
+        // FMP API supports comma-separated symbols, so we can fetch all at once
+        // This is more efficient than fetching per symbol
+        const symbolsArray = Array.from(uniqueSymbols);
+        const symbolsParam = symbolsArray.join(",");
+        
+        // Get today's date in YYYY-MM-DD format for filtering
+        const today = new Date();
+        const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+        
+        logger.info(`Fetching news for all symbols published today (${todayStr})`);
 
-        for (const symbol of uniqueSymbols) {
-            try {
-                const newsApi = `${API_URL}/news/stock?symbols=${symbol}&limit=5&apikey=${API_KEY}`;
-                const res = await fetch(newsApi);
-                if (!res.ok) {
-                    logger.warn(`Failed to fetch news for ${symbol}`, { status: res.status });
-                    continue;
+        try {
+            // Fetch news for all symbols at once, filtered by today's date
+            const newsApi = `${API_URL}/news/stock?symbols=${symbolsParam}&from=${todayStr}&to=${todayStr}&apikey=${API_KEY}`;
+            const res = await fetch(newsApi);
+            if (!res.ok) {
+                logger.warn(`Failed to fetch news for symbols`, { status: res.status, symbols: symbolsParam });
+                return;
+            }
+
+            const newsItems: any[] = await res.json();
+            if (!Array.isArray(newsItems)) {
+                logger.warn("FMP API returned non-array response", { responseType: typeof newsItems });
+                return;
+            }
+
+            logger.info(`Fetched ${newsItems.length} news articles published today`);
+
+            // Group news by symbol for processing
+            const newsBySymbol = new Map<string, any[]>();
+            for (const item of newsItems) {
+                const symbol = (item.symbol || "").trim().toUpperCase();
+                if (symbol && uniqueSymbols.has(symbol)) {
+                    if (!newsBySymbol.has(symbol)) {
+                        newsBySymbol.set(symbol, []);
+                    }
+                    newsBySymbol.get(symbol)!.push(item);
                 }
+            }
 
-                const newsItems: any[] = await res.json();
-                if (!Array.isArray(newsItems)) continue;
+            logger.info(`Found news for ${newsBySymbol.size} symbols: ${Array.from(newsBySymbol.keys()).join(", ")}`);
 
-                // 3. Deduplication and Notification
-                for (const item of newsItems) {
-                    const article: NewsArticle = {
-                        title: item.title,
-                        publishedDate: item.publishedDate,
-                        symbol: item.symbol,
-                        url: item.url,
-                    };
+            // 3. Process news for each symbol and send notifications
+            for (const [symbol, items] of newsBySymbol.entries()) {
+                try {
 
-                    // Create a unique key for deduplication
-                    // Key: news:{symbol}:{article_checksum}
-                    // Checksum can be a hash of title + date
-                    const checksum = await crypto.subtle.digest(
-                        "SHA-256",
-                        new TextEncoder().encode(`${article.title}${article.publishedDate}${article.symbol}`)
-                    ).then(buf => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join(''));
+                    // Process each news article for this symbol
+                    for (const item of items) {
+                        const article: NewsArticle = {
+                            title: item.title || "",
+                            publishedDate: item.publishedDate || "",
+                            symbol: symbol,
+                            url: item.url || "",
+                        };
 
-                    const kvKey = `news:${symbol}:${checksum}`;
-                    const exists = await env.alertsKv.get(kvKey);
+                        // Verify the article was published today
+                        const publishedDate = new Date(article.publishedDate);
+                        const isToday = publishedDate.toISOString().split("T")[0] === todayStr;
+                        
+                        if (!isToday) {
+                            logger.debug(`Skipping article not published today: ${article.title} (${article.publishedDate})`);
+                            continue;
+                        }
 
-                    if (!exists) {
-                        // New article!
-                        logger.info("New article found", { symbol, title: article.title });
+                        // Create a unique key for deduplication
+                        // Key: news:{symbol}:{article_checksum}
+                        // Checksum is a hash of title + date + symbol
+                        const checksum = await crypto.subtle.digest(
+                            "SHA-256",
+                            new TextEncoder().encode(`${article.title}${article.publishedDate}${article.symbol}`)
+                        ).then(buf => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join(''));
 
-                        // Mark as seen (TTL 7 days to avoid infinite growth, though news is time sensitive)
-                        await env.alertsKv.put(kvKey, "1", { expirationTtl: 60 * 60 * 24 * 7 });
+                        const kvKey = `news:${symbol}:${checksum}`;
+                        const exists = await env.alertsKv.get(kvKey);
 
-                        // Notify users
-                        const userIds = userSymbolsMap.get(symbol) || [];
-                        if (userIds.length > 0) {
-                            // Fetch push tokens for these users
-                            // This is inefficient (N+1), better to fetch all tokens once or batch.
-                            // For MVP, we fetch per user.
+                        if (!exists) {
+                            // New article published today!
+                            logger.info("New article found (published today)", { 
+                                symbol, 
+                                title: article.title,
+                                publishedDate: article.publishedDate 
+                            });
 
-                            // Optimization: Fetch all tokens for these users in one query
-                            const placeholders = userIds.map(() => "?").join(",");
-                            const tokens = await env.stockly
-                                .prepare(`SELECT user_id, token FROM user_push_tokens WHERE user_id IN (${placeholders})`)
-                                .bind(...userIds)
-                                .all<{ user_id: string; token: string }>();
+                            // Mark as seen (TTL 7 days to avoid infinite growth, though news is time sensitive)
+                            await env.alertsKv.put(kvKey, "1", { expirationTtl: 60 * 60 * 24 * 7 });
 
-                            for (const tokenRow of tokens.results || []) {
-                                await sendFCMNotification(
-                                    tokenRow.token,
-                                    `${symbol} News`,
-                                    article.title,
-                                    {
-                                        type: "news",
-                                        symbol: symbol,
-                                        url: article.url,
-                                    },
-                                    env,
-                                    logger
-                                );
+                            // Notify users who have this symbol in their favorites
+                            const userIds = userSymbolsMap.get(symbol) || [];
+                            if (userIds.length > 0) {
+                                logger.info(`Found ${userIds.length} users with ${symbol} in favorites: ${userIds.join(", ")}`);
+
+                                // Fetch all push tokens for these users in one query
+                                // This will get ALL devices for each user (supporting multiple devices per user)
+                                const placeholders = userIds.map(() => "?").join(",");
+                                const tokens = await env.stockly
+                                    .prepare(`SELECT user_id, push_token FROM user_push_tokens WHERE user_id IN (${placeholders})`)
+                                    .bind(...userIds)
+                                    .all<{ user_id: string; push_token: string }>();
+
+                                let notificationCount = 0;
+                                for (const tokenRow of tokens.results || []) {
+                                    try {
+                                        await sendFCMNotification(
+                                            tokenRow.push_token,
+                                            `${symbol} News`,
+                                            article.title,
+                                            {
+                                                type: "news",
+                                                symbol: symbol,
+                                                url: article.url,
+                                            },
+                                            env,
+                                            logger
+                                        );
+                                        notificationCount++;
+                                    } catch (notifError) {
+                                        logger.error(`Failed to send notification to user ${tokenRow.user_id}`, notifError);
+                                    }
+                                }
+
+                                logger.info(`Sent ${notificationCount} notifications for ${symbol} news to ${userIds.length} users`);
+                            } else {
+                                logger.debug(`No users found with ${symbol} in favorites`);
                             }
-
-                            logger.info(`Sent notifications to ${tokens.results?.length || 0} users for ${symbol}`);
+                        } else {
+                            logger.debug(`Article already notified: ${article.title} (${symbol})`);
                         }
                     }
+                } catch (error) {
+                    logger.error(`Error processing news for ${symbol}`, error);
                 }
-
-            } catch (error) {
-                logger.error(`Error processing news for ${symbol}`, error);
             }
+        } catch (error) {
+            logger.error("Failed to fetch news from FMP API", error);
         }
 
         logger.info("News alert cron job completed");

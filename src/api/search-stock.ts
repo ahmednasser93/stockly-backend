@@ -111,11 +111,11 @@ async function persistSearchResults(
 
 import type { Logger } from "../logging/logger";
 
-export async function searchStock(url: URL, env: Env, logger: Logger): Promise<Response> {
+export async function searchStock(request: Request, url: URL, env: Env, logger: Logger): Promise<Response> {
   const query = url.searchParams.get("query");
 
   if (!query || query.length < 2) {
-    return json([]);
+    return json([], 200, request);
   }
 
   const normalizedQuery = query.toLowerCase();
@@ -123,13 +123,13 @@ export async function searchStock(url: URL, env: Env, logger: Logger): Promise<R
 
   const memoryCached = getCache(cacheKey);
   if (memoryCached) {
-    return json(memoryCached);
+    return json(memoryCached, 200, request);
   }
 
   const dbCached = await getDbCachedResults(env, normalizedQuery);
   if (dbCached) {
     setCache(cacheKey, dbCached, DB_CACHE_TTL_SECONDS);
-    return json(dbCached);
+    return json(dbCached, 200, request);
   }
 
   try {
@@ -177,7 +177,7 @@ export async function searchStock(url: URL, env: Env, logger: Logger): Promise<R
     }
 
     if (combinedData.length === 0) {
-      return json([]);
+      return json([], 200, request);
     }
 
     // Process, rank, and deduplicate results
@@ -205,9 +205,9 @@ export async function searchStock(url: URL, env: Env, logger: Logger): Promise<R
     setCache(cacheKey, results, DB_CACHE_TTL_SECONDS);
     await persistSearchResults(env, normalizedQuery, results);
 
-    return json(results);
+    return json(results, 200, request);
   } catch (err) {
     console.error("Search error:", err);
-    return json({ error: "failed to search" }, 500);
+    return json({ error: "failed to search" }, 500, request);
   }
 }
