@@ -39,6 +39,7 @@ interface GoogleAuthPayload {
 
 interface UsernamePayload {
   username: string;
+  idToken?: string; // Optional Google ID token for users without username yet
 }
 
 interface RefreshTokenPayload {
@@ -148,19 +149,48 @@ export async function handleGoogleAuth(
         .bind(now, now, userId)
         .run();
 
-      // Generate tokens
+      const requiresUsername = !existingUser.username;
+      
+      // If username is required but not set, don't generate tokens
+      // User must set username first
+      if (requiresUsername) {
+        const responseData = {
+          user: {
+            id: existingUser.id,
+            email: existingUser.email,
+            name: existingUser.name || name,
+            picture: existingUser.picture || picture,
+            username: existingUser.username,
+          },
+          requiresUsername: true,
+        };
+        
+        logger.info("User authenticated but username required", { userId, email, requiresUsername });
+        
+        // Log authentication event
+        logAuthEvent(logger, {
+          type: "sign_in",
+          userId,
+          email,
+          success: true,
+          ipAddress: extractIpAddress(request) || undefined,
+          userAgent: extractUserAgent(request) || undefined,
+        });
+        
+        return json(responseData, 200, request);
+      }
+
+      // Generate tokens with username
       const accessToken = await generateAccessToken(
-        userId,
+        existingUser.username!,
         env.JWT_SECRET || "",
         "15m"
       );
       const refreshToken = await generateRefreshToken(
-        userId,
+        existingUser.username!,
         env.JWT_REFRESH_SECRET || "",
         "7d"
       );
-
-      const requiresUsername = !existingUser.username;
 
       // Prepare response
       const responseData = {
@@ -214,18 +244,8 @@ export async function handleGoogleAuth(
         .bind(userId, email, name || null, picture || null, now, now, now)
         .run();
 
-      // Generate tokens
-      const accessToken = await generateAccessToken(
-        userId,
-        env.JWT_SECRET || "",
-        "15m"
-      );
-      const refreshToken = await generateRefreshToken(
-        userId,
-        env.JWT_REFRESH_SECRET || "",
-        "7d"
-      );
-
+      // New users must set username before getting tokens
+      // Don't generate tokens yet - user must set username first
       const responseData = {
         user: {
           id: userId,
@@ -239,20 +259,12 @@ export async function handleGoogleAuth(
 
       let response = json(responseData, 200, request);
 
-      // Set httpOnly cookies for webapp
-      response = setHttpOnlyCookie(response, "accessToken", accessToken, 900);
-      response = setHttpOnlyCookie(response, "refreshToken", refreshToken, 604800);
-
-      // For mobile app, include tokens in response body
+      // For mobile app, don't include tokens (user must set username first)
       const isMobile = request.headers.get("User-Agent")?.includes("Mobile") || 
                        request.headers.get("X-Platform") === "mobile";
       
       if (isMobile) {
-        return json({
-          ...responseData,
-          accessToken,
-          refreshToken,
-        }, 200, request);
+        return json(responseData, 200, request);
       }
 
       logger.info("New user created and authenticated", { userId, email });
@@ -459,26 +471,6 @@ export async function setUsername(
     return json({ error: "Method not allowed" }, 405, request);
   }
 
-  // Authenticate request
-  const auth = await authenticateRequest(
-    request,
-    env.JWT_SECRET || "",
-    env.JWT_REFRESH_SECRET
-  );
-
-  if (!auth) {
-    const { response } = createErrorResponse(
-      "AUTH_MISSING_TOKEN",
-      "Authentication required",
-      undefined,
-      undefined,
-      request
-    );
-    return response;
-  }
-
-  const { userId } = auth;
-
   let payload: UsernamePayload;
   try {
     payload = await request.json();
@@ -493,7 +485,7 @@ export async function setUsername(
     return response;
   }
 
-  const { username } = payload;
+  const { username, idToken } = payload;
 
   if (!username || typeof username !== "string") {
     const { response } = createErrorResponse(
@@ -506,13 +498,75 @@ export async function setUsername(
     return response;
   }
 
-  // Check if user already has a username
-  const user = await env.stockly
-    .prepare("SELECT username FROM users WHERE id = ?")
-    .bind(userId)
-    .first<{ username: string | null }>();
+  let userId: string | null = null;
 
-  if (user && user.username) {
+  // Try to authenticate with JWT first (for users who already have username)
+  const auth = await authenticateRequest(
+    request,
+    env.JWT_SECRET || "",
+    env.JWT_REFRESH_SECRET
+  );
+
+  if (auth) {
+    // If JWT auth succeeds, get userId from username
+    const user = await env.stockly
+      .prepare("SELECT id, username FROM users WHERE username = ?")
+      .bind(auth.username)
+      .first<{ id: string; username: string | null }>();
+
+    if (user) {
+      userId = user.id;
+      // If user already has a username, they can't change it
+      if (user.username) {
+        const { response } = createErrorResponse(
+          "USERNAME_ALREADY_SET",
+          "Username has already been set and cannot be changed",
+          undefined,
+          undefined,
+          request
+        );
+        return response;
+      }
+    }
+  }
+
+  // If JWT auth failed, try Google ID token (for users without username yet)
+  if (!userId && idToken) {
+    const googleUser = await verifyGoogleToken(idToken, env.GOOGLE_CLIENT_ID || "");
+    if (googleUser) {
+      userId = googleUser.sub;
+    }
+  }
+
+  if (!userId) {
+    const { response } = createErrorResponse(
+      "AUTH_MISSING_TOKEN",
+      "Authentication required. Provide either a valid JWT token or Google ID token.",
+      undefined,
+      undefined,
+      request
+    );
+    return response;
+  }
+
+  // Check if user already has a username (double-check)
+  const user = await env.stockly
+    .prepare("SELECT id, username FROM users WHERE id = ?")
+    .bind(userId)
+    .first<{ id: string; username: string | null }>();
+
+  if (!user) {
+    const { response } = createErrorResponse(
+      "USER_NOT_FOUND",
+      "User not found",
+      undefined,
+      undefined,
+      request
+    );
+    return response;
+  }
+
+  if (user.username) {
     const { response } = createErrorResponse(
       "USERNAME_ALREADY_SET",
       "Username has already been set and cannot be changed",
@@ -601,6 +655,18 @@ export async function setUsername(
 
     logger.info("Username set successfully", { userId, username: normalized });
 
+    // Generate tokens now that username is set
+    const accessToken = await generateAccessToken(
+      normalized,
+      env.JWT_SECRET || "",
+      "15m"
+    );
+    const refreshToken = await generateRefreshToken(
+      normalized,
+      env.JWT_REFRESH_SECRET || "",
+      "7d"
+    );
+
     // Log username set event
     logAuthEvent(logger, {
       type: "username_set",
@@ -610,7 +676,7 @@ export async function setUsername(
       userAgent: extractUserAgent(request) || undefined,
     });
 
-    return json({
+    let response = json({
       success: true,
       user: {
         id: updatedUser.id,
@@ -620,6 +686,31 @@ export async function setUsername(
         username: updatedUser.username,
       },
     }, 200, request);
+
+    // Set httpOnly cookies for webapp
+    response = setHttpOnlyCookie(response, "accessToken", accessToken, 900); // 15 minutes
+    response = setHttpOnlyCookie(response, "refreshToken", refreshToken, 604800); // 7 days
+
+    // For mobile app, include tokens in response body
+    const isMobile = request.headers.get("User-Agent")?.includes("Mobile") || 
+                     request.headers.get("X-Platform") === "mobile";
+    
+    if (isMobile) {
+      return json({
+        success: true,
+        user: {
+          id: updatedUser.id,
+          email: updatedUser.email,
+          name: updatedUser.name,
+          picture: updatedUser.picture,
+          username: updatedUser.username,
+        },
+        accessToken,
+        refreshToken,
+      }, 200, request);
+    }
+
+    return response;
   } catch (error) {
     // Check if it's a unique constraint violation
     if (error instanceof Error && error.message.includes("UNIQUE constraint")) {
@@ -708,9 +799,9 @@ export async function refreshToken(
     return response;
   }
 
-  // Generate new access token
+  // Generate new access token with username
   const newAccessToken = await generateAccessToken(
-    result.userId,
+    result.username,
     env.JWT_SECRET || "",
     "15m"
   );
@@ -730,12 +821,12 @@ export async function refreshToken(
     }, 200, request);
   }
 
-  logger.info("Token refreshed successfully", { userId: result.userId });
+  logger.info("Token refreshed successfully", { username: result.username });
   
   // Log token refresh event
   logAuthEvent(logger, {
     type: "token_refresh",
-    userId: result.userId,
+    username: result.username,
     success: true,
     ipAddress: extractIpAddress(request) || undefined,
     userAgent: extractUserAgent(request) || undefined,
@@ -767,7 +858,7 @@ export async function getCurrentUser(
 
     if (!auth) {
       const { response } = createErrorResponse(
-        "UNAUTHORIZED",
+        "AUTH_MISSING_TOKEN",
         "Not authenticated",
         undefined,
         undefined,
@@ -776,10 +867,10 @@ export async function getCurrentUser(
       return response;
     }
 
-    // Get user from database
+    // Get user from database by username
     const user = await env.stockly
-      .prepare("SELECT id, email, name, picture, username FROM users WHERE id = ?")
-      .bind(auth.userId)
+      .prepare("SELECT id, email, name, picture, username FROM users WHERE username = ?")
+      .bind(auth.username)
       .first<{
         id: string;
         email: string;

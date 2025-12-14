@@ -43,7 +43,7 @@ interface D1ExecResult {
 }
 
 export interface AuthResult {
-  userId: string;
+  username: string;
   tokenType: "access" | "refresh";
 }
 
@@ -58,7 +58,7 @@ export interface AuthWithAdmin extends AuthResult {
  * @param request - HTTP request
  * @param accessTokenSecret - JWT access token secret
  * @param refreshTokenSecret - JWT refresh token secret (optional, for refresh endpoint)
- * @returns Auth result with userId if valid, null if invalid/missing
+ * @returns Auth result with username if valid, null if invalid/missing
  */
 export async function authenticateRequest(
   request: Request,
@@ -73,7 +73,7 @@ export async function authenticateRequest(
     
     if (result && result.type === "access") {
       return {
-        userId: result.userId,
+        username: result.username,
         tokenType: "access",
       };
     }
@@ -83,7 +83,7 @@ export async function authenticateRequest(
       const refreshResult = await verifyToken(token, refreshTokenSecret);
       if (refreshResult && refreshResult.type === "refresh") {
         return {
-          userId: refreshResult.userId,
+          username: refreshResult.username,
           tokenType: "refresh",
         };
       }
@@ -100,7 +100,7 @@ export async function authenticateRequest(
       const result = await verifyToken(cookies.accessToken, accessTokenSecret);
       if (result && result.type === "access") {
         return {
-          userId: result.userId,
+          username: result.username,
           tokenType: "access",
         };
       }
@@ -111,7 +111,7 @@ export async function authenticateRequest(
       const result = await verifyToken(cookies.refreshToken, refreshTokenSecret);
       if (result && result.type === "refresh") {
         return {
-          userId: result.userId,
+          username: result.username,
           tokenType: "refresh",
         };
       }
@@ -125,22 +125,11 @@ export async function authenticateRequest(
  * Check if a user is admin based on username
  * Admin username: "sngvahmed"
  * 
- * @param env - Environment with database access
- * @param userId - User ID to check
+ * @param username - Username to check
  * @returns true if user is admin, false otherwise
  */
-export async function isAdmin(env: { stockly: D1Database }, userId: string): Promise<boolean> {
-  try {
-    const user = await env.stockly
-      .prepare("SELECT username FROM users WHERE id = ?")
-      .bind(userId)
-      .first<{ username: string | null }>();
-    
-    return user?.username === "sngvahmed";
-  } catch (error) {
-    console.error("Failed to check admin status", error);
-    return false;
-  }
+export function isAdmin(username: string): boolean {
+  return username === "sngvahmed";
 }
 
 /**
@@ -148,10 +137,10 @@ export async function isAdmin(env: { stockly: D1Database }, userId: string): Pro
  * Returns auth result with admin flag
  * 
  * @param request - HTTP request
- * @param env - Environment with database access
+ * @param env - Environment with database access (for backward compatibility, not used for admin check)
  * @param accessTokenSecret - JWT access token secret
  * @param refreshTokenSecret - JWT refresh token secret (optional)
- * @returns Auth result with userId and isAdmin flag if valid, null if invalid/missing
+ * @returns Auth result with username and isAdmin flag if valid, null if invalid/missing
  */
 export async function authenticateRequestWithAdmin(
   request: Request,
@@ -165,7 +154,7 @@ export async function authenticateRequestWithAdmin(
     return null;
   }
   
-  const adminStatus = await isAdmin(env, auth.userId);
+  const adminStatus = isAdmin(auth.username);
   
   return {
     ...auth,
@@ -255,3 +244,5 @@ export function clearHttpOnlyCookie(
     headers: newHeaders,
   });
 }
+
+

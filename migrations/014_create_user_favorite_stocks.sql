@@ -15,3 +15,6 @@ CREATE INDEX IF NOT EXISTS idx_user_favorite_stocks_user_id ON user_favorite_sto
 
 -- Index on symbol for analytics (optional, but useful for tracking popular stocks)
 CREATE INDEX IF NOT EXISTS idx_user_favorite_stocks_symbol ON user_favorite_stocks(symbol);
+
+
+

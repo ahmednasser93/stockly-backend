@@ -12,6 +12,11 @@ const createUrl = (symbols: string | null) => {
   return url;
 };
 
+const createRequest = (symbols: string | null) => {
+  const url = createUrl(symbols);
+  return new Request(url.toString());
+};
+
 type DbRows = Record<string, any>;
 
 const createEnv = (rows: DbRows = {}) => {
@@ -61,7 +66,9 @@ describe("getStocks handler", () => {
 
   it("requires symbols param", async () => {
     const { env } = createEnv();
-    const response = await getStocks(createUrl(null), env, createMockLogger());
+    const url = createUrl(null);
+    const request = createRequest(null);
+    const response = await getStocks(request, url, env, createMockLogger());
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "symbols required" });
@@ -73,7 +80,9 @@ describe("getStocks handler", () => {
     const fetchSpy = vi.spyOn(globalThis as any, "fetch");
     const { env } = createEnv();
 
-    const response = await getStocks(createUrl("amzn"), env, createMockLogger());
+    const url = createUrl("amzn");
+    const request = createRequest("amzn");
+    const response = await getStocks(request, url, env, createMockLogger());
 
     expect(fetchSpy).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual([cached]);
@@ -113,7 +122,9 @@ describe("getStocks handler", () => {
       return Promise.resolve({ ok: false, status: 404 } as Response);
     });
 
-    const response = await getStocks(createUrl("aapl"), env, createMockLogger());
+    const url = createUrl("aapl");
+    const request = createRequest("aapl");
+    const response = await getStocks(request, url, env, createMockLogger());
     const data = await response.json();
 
     // We refresh to get full data (image, name, description, etc.)
@@ -162,7 +173,9 @@ describe("getStocks handler", () => {
       return Promise.resolve({ ok: false, status: 404 } as Response);
     });
 
-    const response = await getStocks(createUrl("tsla"), env, createMockLogger());
+    const url = createUrl("tsla");
+    const request = createRequest("tsla");
+    const response = await getStocks(request, url, env, createMockLogger());
     const data = await response.json();
 
     expect(spies.insertRun).toHaveBeenCalled();
@@ -177,7 +190,9 @@ describe("getStocks handler", () => {
     const { env } = createEnv();
     vi.spyOn(globalThis as any, "fetch").mockRejectedValue(new Error("boom"));
 
-    const response = await getStocks(createUrl("msft"), env, createMockLogger());
+    const url = createUrl("msft");
+    const request = createRequest("msft");
+    const response = await getStocks(request, url, env, createMockLogger());
 
     // Promise.allSettled handles failures gracefully, returns empty array
     expect(response.status).toBe(200);
@@ -225,7 +240,9 @@ describe("getStocks handler", () => {
       return Promise.resolve({ ok: false, status: 404 } as Response);
     });
 
-    const response = await getStocks(createUrl("AAPL"), env, createMockLogger());
+    const url = createUrl("AAPL");
+    const request = createRequest("AAPL");
+    const response = await getStocks(request, url, env, createMockLogger());
     const data = await response.json();
 
     expect(response.status).toBe(200);
@@ -305,7 +322,9 @@ describe("getStocks handler", () => {
       return Promise.resolve({ ok: false, status: 404 } as Response);
     });
 
-    const response = await getStocks(createUrl("AAPL,MSFT"), env, createMockLogger());
+    const url = createUrl("AAPL,MSFT");
+    const request = createRequest("AAPL,MSFT");
+    const response = await getStocks(request, url, env, createMockLogger());
     const data = await response.json();
 
     expect(response.status).toBe(200);
@@ -368,7 +387,9 @@ describe("getStocks handler", () => {
       return Promise.resolve({ ok: false, status: 404 } as Response);
     });
 
-    const response = await getStocks(createUrl("TSLA"), env, createMockLogger());
+    const url = createUrl("TSLA");
+    const request = createRequest("TSLA");
+    const response = await getStocks(request, url, env, createMockLogger());
     const data = await response.json();
 
     expect(data[0].name).toBe("Tesla, Inc.");
@@ -400,7 +421,9 @@ describe("getStocks handler", () => {
       return Promise.resolve({ ok: false, status: 404 } as Response);
     });
 
-    const response = await getStocks(createUrl("GOOGL"), env, createMockLogger());
+    const url = createUrl("GOOGL");
+    const request = createRequest("GOOGL");
+    const response = await getStocks(request, url, env, createMockLogger());
     const data = await response.json();
 
     expect(data[0].image).toBe("https://images.financialmodelingprep.com/symbol/GOOGL.png");
@@ -445,7 +468,9 @@ describe("getStocks handler", () => {
       return Promise.resolve({ ok: false, status: 404 } as Response);
     });
 
-    const response = await getStocks(createUrl("AAPL,INVALID"), env, createMockLogger());
+    const url = createUrl("AAPL,INVALID");
+    const request = createRequest("AAPL,INVALID");
+    const response = await getStocks(request, url, env, createMockLogger());
     const data = await response.json();
 
     // Should return only AAPL, not INVALID

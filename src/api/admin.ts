@@ -16,6 +16,8 @@ export interface NotificationLog {
   errorMessage?: string | null;
   attemptCount: number;
   sentAt: string;
+  userId?: string | null;
+  username?: string | null;
 }
 
 /**
@@ -46,9 +48,21 @@ export async function getRecentNotifications(request: Request, env: Env, logger:
   try {
     const results = await env.stockly
       .prepare(
-        `SELECT id, alert_id, symbol, threshold, price, direction, push_token, status, error_message, attempt_count, sent_at
-         FROM notifications_log
-         ORDER BY sent_at DESC
+        `SELECT 
+           nl.id, 
+           nl.alert_id, 
+           nl.symbol, 
+           nl.threshold, 
+           nl.price, 
+           nl.direction, 
+           nl.push_token, 
+           nl.status, 
+           nl.error_message, 
+           nl.attempt_count, 
+           nl.sent_at,
+           nl.username
+         FROM notifications_log nl
+         ORDER BY nl.sent_at DESC
          LIMIT 100`
       )
       .all<{
@@ -63,6 +77,7 @@ export async function getRecentNotifications(request: Request, env: Env, logger:
         error_message: string | null;
         attempt_count: number;
         sent_at: string;
+        username: string | null;
       }>();
 
     const notifications: NotificationLog[] = (results.results || []).map((row) => ({
@@ -77,6 +92,7 @@ export async function getRecentNotifications(request: Request, env: Env, logger:
       errorMessage: row.error_message,
       attemptCount: row.attempt_count,
       sentAt: row.sent_at,
+      username: row.username,
     }));
 
     return json({ notifications }, 200, request);
@@ -89,14 +105,26 @@ export async function getRecentNotifications(request: Request, env: Env, logger:
 /**
  * Get failed notification logs
  */
-export async function getFailedNotifications(env: Env, logger: Logger): Promise<Response> {
+export async function getFailedNotifications(request: Request, env: Env, logger: Logger): Promise<Response> {
   try {
     const results = await env.stockly
       .prepare(
-        `SELECT id, alert_id, symbol, threshold, price, direction, push_token, status, error_message, attempt_count, sent_at
-         FROM notifications_log
-         WHERE status IN ('failed', 'error')
-         ORDER BY sent_at DESC
+        `SELECT 
+           nl.id, 
+           nl.alert_id, 
+           nl.symbol, 
+           nl.threshold, 
+           nl.price, 
+           nl.direction, 
+           nl.push_token, 
+           nl.status, 
+           nl.error_message, 
+           nl.attempt_count, 
+           nl.sent_at,
+           nl.username
+         FROM notifications_log nl
+         WHERE nl.status IN ('failed', 'error')
+         ORDER BY nl.sent_at DESC
          LIMIT 100`
       )
       .all<{
@@ -111,6 +139,7 @@ export async function getFailedNotifications(env: Env, logger: Logger): Promise<
         error_message: string | null;
         attempt_count: number;
         sent_at: string;
+        username: string | null;
       }>();
 
     const notifications: NotificationLog[] = (results.results || []).map((row) => ({
@@ -125,6 +154,7 @@ export async function getFailedNotifications(env: Env, logger: Logger): Promise<
       errorMessage: row.error_message,
       attemptCount: row.attempt_count,
       sentAt: row.sent_at,
+      username: row.username,
     }));
 
     return json({ notifications }, 200, request);
@@ -170,8 +200,20 @@ export async function getFilteredNotifications(
   }
 
   try {
-    let query = `SELECT id, alert_id, symbol, threshold, price, direction, push_token, status, error_message, attempt_count, sent_at
-                 FROM notifications_log
+    let query = `SELECT 
+                   nl.id, 
+                   nl.alert_id, 
+                   nl.symbol, 
+                   nl.threshold, 
+                   nl.price, 
+                   nl.direction, 
+                   nl.push_token, 
+                   nl.status, 
+                   nl.error_message, 
+                   nl.attempt_count, 
+                   nl.sent_at,
+                   nl.username
+                 FROM notifications_log nl
                  WHERE 1=1`;
     const bindings: (string | number)[] = [];
 
@@ -195,7 +237,7 @@ export async function getFilteredNotifications(
       bindings.push(endDate);
     }
 
-    query += ` ORDER BY sent_at DESC LIMIT 200`;
+    query += ` ORDER BY nl.sent_at DESC LIMIT 200`;
 
     const stmt = env.stockly.prepare(query);
     const results = await stmt.bind(...bindings).all<{
@@ -210,6 +252,7 @@ export async function getFilteredNotifications(
       error_message: string | null;
       attempt_count: number;
       sent_at: string;
+      username: string | null;
     }>();
 
     const notifications: NotificationLog[] = (results.results || []).map((row) => ({
@@ -224,6 +267,7 @@ export async function getFilteredNotifications(
       errorMessage: row.error_message,
       attemptCount: row.attempt_count,
       sentAt: row.sent_at,
+      username: row.username,
     }));
 
     return json({ notifications }, 200, request);
@@ -258,12 +302,25 @@ export async function retryNotification(request: Request, logId: string, env: En
     return response;
   }
   try {
-    // Get the notification log entry
+    // Get the notification log entry with username (from log or alert)
     const logResult = await env.stockly
       .prepare(
-        `SELECT id, alert_id, symbol, threshold, price, direction, push_token, status, error_message, attempt_count, sent_at
-         FROM notifications_log
-         WHERE id = ?`
+        `SELECT 
+           nl.id, 
+           nl.alert_id, 
+           nl.symbol, 
+           nl.threshold, 
+           nl.price, 
+           nl.direction, 
+           nl.push_token, 
+           nl.status, 
+           nl.error_message, 
+           nl.attempt_count, 
+           nl.sent_at,
+           COALESCE(nl.username, a.username) as username
+         FROM notifications_log nl
+         LEFT JOIN alerts a ON nl.alert_id = a.id
+         WHERE nl.id = ?`
       )
       .bind(logId)
       .first<{
@@ -278,6 +335,7 @@ export async function retryNotification(request: Request, logId: string, env: En
         error_message: string | null;
         attempt_count: number;
         sent_at: string;
+        username: string | null;
       }>();
 
     if (!logResult) {
@@ -362,8 +420,8 @@ export async function retryNotification(request: Request, logId: string, env: En
     
     await env.stockly
       .prepare(
-        `INSERT INTO notifications_log (id, alert_id, symbol, threshold, price, direction, push_token, status, error_message, attempt_count, sent_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO notifications_log (id, alert_id, symbol, threshold, price, direction, push_token, status, error_message, attempt_count, username, sent_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         newLogId,
@@ -376,6 +434,7 @@ export async function retryNotification(request: Request, logId: string, env: En
         newStatus,
         errorMessage,
         1,
+        logResult.username,
         now
       )
       .run();

@@ -3,7 +3,7 @@
 # ==============================================================================
 # Stockly API Production Deployment Script
 # ==============================================================================
-# Runs all database migrations and deploys the API (non-interactive)
+# Runs tests, then database migrations, and deploys the API (non-interactive)
 # ==============================================================================
 # NOTE: This script is kept for backward compatibility.
 #       For unified deployment (API + Webapp), use: ../../scripts/deploy-prod.sh
@@ -18,6 +18,20 @@ cd "$API_DIR"
 
 echo "🚀 Deploying Stockly API to Production"
 echo "================================================"
+echo ""
+
+echo "🧪 Running Tests..."
+echo "------------------------------------------------"
+echo "⚠️  All tests must pass before deployment can proceed"
+echo ""
+
+# Run tests - exit immediately if they fail
+# With set -e, the script will stop here if tests fail
+npm run test
+
+# If we reach here, tests passed
+echo ""
+echo "✅ All tests passed!"
 echo ""
 
 echo "🗄️  Running Database Migrations (Production)..."
@@ -66,14 +80,20 @@ wrangler d1 execute stockly --remote --yes --file=./migrations/013_add_user_id_t
 echo "Migration 14/15: 014_create_user_favorite_stocks.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/014_create_user_favorite_stocks.sql || echo "⚠️  Migration 14 already applied or failed"
 
-echo "Migration 15/15: 015_support_multiple_devices_per_user.sql"
+echo "Migration 15/16: 015_support_multiple_devices_per_user.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/015_support_multiple_devices_per_user.sql || echo "⚠️  Migration 15 already applied or failed"
 
-echo "Migration 13/14: 013_add_user_id_to_alerts.sql"
-wrangler d1 execute stockly --remote --yes --file=./migrations/013_add_user_id_to_alerts.sql || echo "⚠️  Migration 13 already applied or failed"
+echo "Migration 16/19: 016_add_user_id_to_notifications_log.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/016_add_user_id_to_notifications_log.sql || echo "⚠️  Migration 16 already applied or failed"
 
-echo "Migration 14/14: 014_create_user_favorite_stocks.sql"
-wrangler d1 execute stockly --remote --yes --file=./migrations/014_create_user_favorite_stocks.sql || echo "⚠️  Migration 14 already applied or failed"
+echo "Migration 17/19: 017_add_username_to_tables.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/017_add_username_to_tables.sql || echo "⚠️  Migration 17 already applied or failed"
+
+echo "Migration 18/19: 018_populate_username_from_user_id.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/018_populate_username_from_user_id.sql || echo "⚠️  Migration 18 already applied or failed"
+
+echo "Migration 19/19: 019_make_username_required.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/019_make_username_required.sql || echo "⚠️  Migration 19 already applied or failed"
 
 echo ""
 echo "✅ Database migrations complete"

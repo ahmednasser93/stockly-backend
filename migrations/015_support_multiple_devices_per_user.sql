@@ -38,3 +38,6 @@ CREATE INDEX IF NOT EXISTS idx_user_push_tokens_user_id ON user_push_tokens (use
 CREATE INDEX IF NOT EXISTS idx_user_push_tokens_token ON user_push_tokens (push_token);
 CREATE INDEX IF NOT EXISTS idx_user_push_tokens_updated_at ON user_push_tokens (updated_at);
 
+
+
+

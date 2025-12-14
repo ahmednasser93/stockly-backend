@@ -19,6 +19,11 @@ const createUrl = (params: Record<string, string> = {}) => {
   return url;
 };
 
+const createRequest = (params: Record<string, string> = {}) => {
+  const url = createUrl(params);
+  return new Request(url.toString());
+};
+
 const createEnv = (): Env => {
   const run = vi.fn().mockResolvedValue(undefined);
   const bind = vi.fn().mockReturnValue({ run });
@@ -40,7 +45,9 @@ describe("getStock handler", () => {
   });
 
   it("requires a symbol", async () => {
-    const response = await getStock(createUrl(), createEnv(), undefined, createMockLogger());
+    const url = createUrl();
+    const request = createRequest();
+    const response = await getStock(request, url, createEnv(), undefined, createMockLogger());
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "symbol required" });
   });
@@ -50,7 +57,9 @@ describe("getStock handler", () => {
     setCache("quote:MSFT", cached, 30);
     const fetchSpy = vi.spyOn(globalThis as any, "fetch");
 
-    const response = await getStock(createUrl({ symbol: "msft" }), createEnv(), undefined, createMockLogger());
+    const url = createUrl({ symbol: "msft" });
+    const request = createRequest({ symbol: "msft" });
+    const response = await getStock(request, url, createEnv(), undefined, createMockLogger());
 
     expect(fetchSpy).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual(cached);
@@ -89,7 +98,9 @@ describe("getStock handler", () => {
     const prepare = vi.fn().mockReturnValue({ bind });
     env.stockly = { prepare } as any;
 
-    const response = await getStock(createUrl({ symbol: "AAPL" }), env, undefined, createMockLogger());
+    const url = createUrl({ symbol: "AAPL" });
+    const request = createRequest({ symbol: "AAPL" });
+    const response = await getStock(request, url, env, undefined, createMockLogger());
 
     expect(fetchMock).toHaveBeenCalledWith(
       `${API_URL}/quote?symbol=AAPL&apikey=${API_KEY}`,
@@ -124,7 +135,9 @@ describe("getStock handler", () => {
 
     vi.spyOn(globalThis as any, "fetch").mockRejectedValue(new Error("fail"));
 
-    const response = await getStock(createUrl({ symbol: "TSLA" }), env, undefined, createMockLogger());
+    const url = createUrl({ symbol: "TSLA" });
+    const request = createRequest({ symbol: "TSLA" });
+    const response = await getStock(request, url, env, undefined, createMockLogger());
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
@@ -164,7 +177,9 @@ describe("getStock handler", () => {
 
     const fetchSpy = vi.spyOn(globalThis as any, "fetch");
 
-    const response = await getStock(createUrl({ symbol: "AAPL" }), env, undefined, createMockLogger());
+    const url = createUrl({ symbol: "AAPL" });
+    const request = createRequest({ symbol: "AAPL" });
+    const response = await getStock(request, url, env, undefined, createMockLogger());
     const data = await response.json();
 
     expect(fetchSpy).not.toHaveBeenCalled(); // Should not call provider
@@ -193,7 +208,9 @@ describe("getStock handler", () => {
     const prepare = vi.fn().mockReturnValue({ bind });
     env.stockly = { prepare } as any;
 
-    const response = await getStock(createUrl({ symbol: "AAPL" }), env, undefined, createMockLogger());
+    const url = createUrl({ symbol: "AAPL" });
+    const request = createRequest({ symbol: "AAPL" });
+    const response = await getStock(request, url, env, undefined, createMockLogger());
     
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
@@ -235,7 +252,9 @@ describe("getStock handler", () => {
     const prepare = vi.fn().mockReturnValue({ bind });
     env.stockly = { prepare } as any;
 
-    const response = await getStock(createUrl({ symbol: "AAPL" }), env, undefined, createMockLogger());
+    const url = createUrl({ symbol: "AAPL" });
+    const request = createRequest({ symbol: "AAPL" });
+    const response = await getStock(request, url, env, undefined, createMockLogger());
 
     expect(fetchMock).toHaveBeenCalled();
     const data = await response.json();
@@ -320,7 +339,9 @@ describe("getStock handler", () => {
     const waitUntilSpy = vi.fn();
     const ctx = { waitUntil: waitUntilSpy } as ExecutionContext;
 
-    const response = await getStock(createUrl({ symbol: "AAPL" }), env, ctx, createMockLogger());
+    const url = createUrl({ symbol: "AAPL" });
+    const request = createRequest({ symbol: "AAPL" });
+    const response = await getStock(request, url, env, ctx, createMockLogger());
     const data = await response.json();
 
     expect(fetchSpy).toHaveBeenCalled(); // Provider was called
@@ -391,7 +412,9 @@ describe("getStock handler", () => {
     const waitUntilSpy = vi.fn();
     const ctx = { waitUntil: waitUntilSpy } as ExecutionContext;
 
-    const response = await getStock(createUrl({ symbol: "TSLA" }), env, ctx, createMockLogger());
+    const url = createUrl({ symbol: "TSLA" });
+    const request = createRequest({ symbol: "TSLA" });
+    const response = await getStock(request, url, env, ctx, createMockLogger());
     const data = await response.json();
 
     expect(data.stale).toBe(true);
@@ -457,7 +480,9 @@ describe("getStock handler", () => {
     const waitUntilSpy = vi.fn();
     const ctx = { waitUntil: waitUntilSpy } as ExecutionContext;
 
-    const response = await getStock(createUrl({ symbol: "MSFT" }), env, ctx, createMockLogger());
+    const url = createUrl({ symbol: "MSFT" });
+    const request = createRequest({ symbol: "MSFT" });
+    const response = await getStock(request, url, env, ctx, createMockLogger());
     const data = await response.json();
 
     expect(fetchSpy).toHaveBeenCalled();

@@ -11,6 +11,7 @@ export interface AlertRecord {
   channel: AlertChannel;
   target: string;
   notes: string | null;
+  username: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -38,4 +39,6 @@ export interface AlertStateSnapshot {
   lastConditionMet: boolean;
   lastPrice?: number;
   lastTriggeredAt?: number;
+  lastNotifiedPrice?: number; // Price when last notification was sent
+  lastNotifiedAt?: number; // Timestamp when last notification was sent
 }

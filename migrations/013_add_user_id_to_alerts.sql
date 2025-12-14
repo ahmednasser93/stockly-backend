@@ -11,3 +11,6 @@ CREATE INDEX IF NOT EXISTS idx_alerts_user_id ON alerts(user_id);
 -- and add a foreign key constraint. However, SQLite doesn't support
 -- ALTER TABLE for foreign keys, so we may need to recreate the table
 -- if we want to enforce referential integrity at the database level.
+
+
+

@@ -10,6 +10,7 @@ export interface Device {
   username: string | null;
   pushToken: string;
   deviceInfo: string | null;
+  deviceType: string | null;
   alertCount: number;
   activeAlertCount: number;
   createdAt: string;
@@ -44,66 +45,214 @@ export async function getAllDevices(
     return response;
   }
 
-  // For admin, get all devices; otherwise filter by userId
-  const userId = auth.isAdmin ? null : auth.userId;
+  // For admin, get all devices; otherwise filter by username
+  const username = auth.isAdmin ? null : auth.username;
 
-  try {
-    let rows;
-    if (userId === null) {
+    // Get user_id from username if not admin (initialize to avoid ReferenceError)
+    let userId: string | null = null;
+    
+    try {
+      if (username) {
+        const user = await env.stockly
+          .prepare("SELECT id FROM users WHERE username = ?")
+          .bind(username)
+          .first<{ id: string }>();
+        userId = user?.id || null;
+      }
+
+    let rows: { results?: Array<any> } | null = null;
+    if (username === null) {
       // Admin: get all devices with usernames
-      rows = await env.stockly
-        .prepare(
-          `SELECT 
-             upt.user_id, 
-             upt.push_token, 
-             upt.device_info, 
-             upt.created_at, 
-             upt.updated_at,
-             u.username
-           FROM user_push_tokens upt
-           LEFT JOIN users u ON upt.user_id = u.id
-           ORDER BY upt.updated_at DESC`
-        )
-        .all<{
-          user_id: string;
-          push_token: string;
-          device_info: string | null;
-          created_at: string;
-          updated_at: string;
-          username: string | null;
-        }>();
+      // Note: upt.username column may not exist in production, so we only use u.username from JOIN
+      try {
+        rows = await env.stockly
+          .prepare(
+            `SELECT 
+               upt.user_id, 
+               upt.push_token, 
+               upt.device_info,
+               upt.device_type,
+               upt.created_at, 
+               upt.updated_at,
+               u.username
+             FROM user_push_tokens upt
+             LEFT JOIN users u ON upt.user_id = u.id
+             ORDER BY upt.updated_at DESC`
+          )
+          .all<{
+            user_id: string;
+            push_token: string;
+            device_info: string | null;
+            device_type: string | null;
+            created_at: string;
+            updated_at: string;
+            username: string | null;
+          }>();
+      } catch (error) {
+        // If device_type or username column doesn't exist, select without them
+        if (error instanceof Error && (error.message.includes('device_type') || error.message.includes('username'))) {
+          try {
+            rows = await env.stockly
+              .prepare(
+                `SELECT 
+                   upt.user_id, 
+                   upt.push_token, 
+                   upt.device_info, 
+                   upt.created_at, 
+                   upt.updated_at,
+                   u.username
+                 FROM user_push_tokens upt
+                 LEFT JOIN users u ON upt.user_id = u.id
+                 ORDER BY upt.updated_at DESC`
+              )
+              .all<{
+                user_id: string;
+                push_token: string;
+                device_info: string | null;
+                created_at: string;
+                updated_at: string;
+                username: string | null;
+              }>();
+          } catch (fallbackError) {
+            // If even device_info doesn't exist, use minimal query
+            if (fallbackError instanceof Error && fallbackError.message.includes('device_info')) {
+              rows = await env.stockly
+                .prepare(
+                  `SELECT 
+                     upt.user_id, 
+                     upt.push_token, 
+                     upt.created_at, 
+                     upt.updated_at,
+                     u.username
+                   FROM user_push_tokens upt
+                   LEFT JOIN users u ON upt.user_id = u.id
+                   ORDER BY upt.updated_at DESC`
+                )
+                .all<{
+                  user_id: string;
+                  push_token: string;
+                  created_at: string;
+                  updated_at: string;
+                  username: string | null;
+                }>();
+            } else {
+              throw fallbackError;
+            }
+          }
+        } else {
+          throw error;
+        }
+      }
+      
+      // Log devices with null usernames for debugging
+      const devicesWithNullUsername = rows?.results?.filter(r => !r.username) || [];
+      if (devicesWithNullUsername.length > 0) {
+        logger.warn("Found devices with null username", {
+          count: devicesWithNullUsername.length,
+          deviceIds: devicesWithNullUsername.map(d => d.push_token?.substring(0, 20) + "..."),
+        });
+      }
     } else {
-      rows = await env.stockly
-        .prepare(
-          `SELECT 
-             upt.user_id, 
-             upt.push_token, 
-             upt.device_info, 
-             upt.created_at, 
-             upt.updated_at,
-             u.username
-           FROM user_push_tokens upt
-           LEFT JOIN users u ON upt.user_id = u.id
-           WHERE upt.user_id = ?
-           ORDER BY upt.updated_at DESC`
-        )
-        .bind(userId)
-        .all<{
-          user_id: string;
-          push_token: string;
-          device_info: string | null;
-          created_at: string;
-          updated_at: string;
-          username: string | null;
-        }>();
+      // Regular user: filter by username
+      // Note: upt.username column may not exist in production, so we only use u.username from JOIN
+      try {
+        rows = await env.stockly
+          .prepare(
+            `SELECT 
+               upt.user_id, 
+               upt.push_token, 
+               upt.device_info,
+               upt.device_type,
+               upt.created_at, 
+               upt.updated_at,
+               u.username
+             FROM user_push_tokens upt
+             LEFT JOIN users u ON upt.user_id = u.id
+             WHERE u.username = ?
+             ORDER BY upt.updated_at DESC`
+          )
+          .bind(username)
+          .all<{
+            user_id: string;
+            push_token: string;
+            device_info: string | null;
+            device_type: string | null;
+            created_at: string;
+            updated_at: string;
+            username: string | null;
+          }>();
+      } catch (error) {
+        // If device_type or username column doesn't exist, select without them
+        // Also remove upt.username from WHERE clause
+        if (error instanceof Error && (error.message.includes('device_type') || error.message.includes('username'))) {
+          try {
+            rows = await env.stockly
+              .prepare(
+                `SELECT 
+                   upt.user_id, 
+                   upt.push_token, 
+                   upt.device_info, 
+                   upt.created_at, 
+                   upt.updated_at,
+                   u.username
+                 FROM user_push_tokens upt
+                 LEFT JOIN users u ON upt.user_id = u.id
+                 WHERE u.username = ?
+                 ORDER BY upt.updated_at DESC`
+              )
+              .bind(username)
+              .all<{
+                user_id: string;
+                push_token: string;
+                device_info: string | null;
+                created_at: string;
+                updated_at: string;
+                username: string | null;
+              }>();
+          } catch (fallbackError) {
+            // If even device_info doesn't exist, use minimal query
+            if (fallbackError instanceof Error && fallbackError.message.includes('device_info')) {
+              rows = await env.stockly
+                .prepare(
+                  `SELECT 
+                     upt.user_id, 
+                     upt.push_token, 
+                     upt.created_at, 
+                     upt.updated_at,
+                     u.username
+                   FROM user_push_tokens upt
+                   LEFT JOIN users u ON upt.user_id = u.id
+                   WHERE u.username = ?
+                   ORDER BY upt.updated_at DESC`
+                )
+                .bind(username)
+                .all<{
+                  user_id: string;
+                  push_token: string;
+                  created_at: string;
+                  updated_at: string;
+                  username: string | null;
+                }>();
+            } else {
+              throw fallbackError;
+            }
+          }
+        } else {
+          throw error;
+        }
+      }
     }
 
-    // For each device, count alerts that use its push token
+        // For each device, count alerts that use its push token
+    if (!rows || !rows.results) {
+      return json({ devices: [] }, 200, request);
+    }
+
     const devices: Device[] = await Promise.all(
-      (rows.results || []).map(async (row) => {
+      rows.results.map(async (row) => {
         // Count total alerts for this push token
         let totalAlertsResult, activeAlertsResult;
-        if (userId === null) {
+        if (username === null) {
           // Admin: count all alerts for this push token
           totalAlertsResult = await env.stockly
             .prepare(`SELECT COUNT(*) as count FROM alerts WHERE target = ?`)
@@ -115,15 +264,15 @@ export async function getAllDevices(
             .bind(row.push_token)
             .first<{ count: number }>();
         } else {
-          // Regular user: count alerts for this push token and user
+          // Regular user: count alerts for this push token and username
           totalAlertsResult = await env.stockly
-            .prepare(`SELECT COUNT(*) as count FROM alerts WHERE target = ? AND user_id = ?`)
-            .bind(row.push_token, userId)
+            .prepare(`SELECT COUNT(*) as count FROM alerts WHERE target = ? AND username = ?`)
+            .bind(row.push_token, username)
             .first<{ count: number }>();
 
           activeAlertsResult = await env.stockly
-            .prepare(`SELECT COUNT(*) as count FROM alerts WHERE target = ? AND user_id = ? AND status = 'active'`)
-            .bind(row.push_token, userId)
+            .prepare(`SELECT COUNT(*) as count FROM alerts WHERE target = ? AND username = ? AND status = 'active'`)
+            .bind(row.push_token, username)
             .first<{ count: number }>();
         }
 
@@ -132,6 +281,7 @@ export async function getAllDevices(
           username: row.username,
           pushToken: row.push_token,
           deviceInfo: row.device_info,
+          deviceType: 'device_type' in row ? (row as any).device_type : null,
           alertCount: totalAlertsResult?.count || 0,
           activeAlertCount: activeAlertsResult?.count || 0,
           createdAt: row.created_at,
@@ -142,7 +292,7 @@ export async function getAllDevices(
 
     return json({ devices }, 200, request);
   } catch (error) {
-    logger.error("Failed to get devices", error, { userId });
+    logger.error("Failed to get devices", error, { username, userId });
     return json({ error: "Failed to get devices" }, 500, request);
   }
 }
@@ -199,7 +349,18 @@ export async function deleteDevice(
     }
 
     // Verify the device belongs to the authenticated user (unless admin)
-    if (!auth.isAdmin && device.user_id !== auth.userId) {
+    // Get device username by joining with users table
+    const deviceUser = await env.stockly
+      .prepare(
+        `SELECT u.username 
+         FROM user_push_tokens upt
+         LEFT JOIN users u ON upt.user_id = u.id
+         WHERE upt.push_token = ?`
+      )
+      .bind(pushToken)
+      .first<{ username: string | null }>();
+
+    if (!auth.isAdmin && deviceUser?.username !== auth.username) {
       return json({ error: "Unauthorized: Device does not belong to current user" }, 403, request);
     }
 
@@ -212,7 +373,7 @@ export async function deleteDevice(
     logger.info("Device deleted successfully", { 
       deletedPushToken: pushToken.substring(0, 20) + "...",
       deletedUserId: device.user_id, 
-      deletedBy: auth.userId, 
+      deletedBy: auth.username, 
       isAdmin: auth.isAdmin 
     });
     return json({
@@ -221,7 +382,7 @@ export async function deleteDevice(
       userId: device.user_id,
     }, 200, request);
   } catch (error) {
-    logger.error("Failed to delete device", error, { pushToken: pushToken?.substring(0, 20) + "...", deletedBy: auth.userId });
+    logger.error("Failed to delete device", error, { pushToken: pushToken?.substring(0, 20) + "...", deletedBy: auth.username });
     const errorMessage = error instanceof Error ? error.message : String(error);
     return json(
       {
@@ -267,9 +428,23 @@ export async function sendTestNotification(
     return response;
   }
 
-  const userId = auth.userId;
+  const username = auth.username;
+
+  // Get user_id from username first (initialize to avoid ReferenceError)
+  let userId: string | null = null;
 
   try {
+    const user = await env.stockly
+      .prepare("SELECT id FROM users WHERE username = ?")
+      .bind(username)
+      .first<{ id: string }>();
+
+    if (!user) {
+      return json({ error: "User not found" }, 404, request);
+    }
+
+    userId = user.id;
+
     // Parse request body to get pushToken
     let body: { pushToken?: string; message?: string } = {};
     try {

@@ -71,9 +71,10 @@ describe("worker router", () => {
     );
 
     expect(getStock).toHaveBeenCalledTimes(1);
-    const calledUrl = vi.mocked(getStock).mock.calls[0][0];
-    expect(calledUrl).toBeInstanceOf(URL);
-    expect(calledUrl.toString()).toBe(
+    const callArgs = vi.mocked(getStock).mock.calls[0];
+    expect(callArgs[0]).toBeInstanceOf(Request);
+    expect(callArgs[1]).toBeInstanceOf(URL);
+    expect(callArgs[1].toString()).toBe(
       "https://example.com/v1/api/get-stock?symbol=MSFT",
     );
     expect(response).toBe(mockedResponse);

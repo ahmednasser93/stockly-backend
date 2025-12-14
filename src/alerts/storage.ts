@@ -17,7 +17,7 @@ type AlertRow = {
   channel: AlertChannel;
   target: string;
   notes: string | null;
-  user_id: string | null;
+  username: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -31,31 +31,42 @@ const mapRow = (row: AlertRow): AlertRecord => ({
   channel: row.channel,
   target: row.target,
   notes: row.notes,
+  username: row.username,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
 
-const SELECT_BASE = `SELECT id, symbol, direction, threshold, status, channel, target, notes, user_id, created_at, updated_at FROM alerts`;
+const SELECT_BASE = `SELECT id, symbol, direction, threshold, status, channel, target, notes, username, created_at, updated_at FROM alerts`;
 
-export async function listAlerts(env: Env, userId: string | null): Promise<AlertRecord[]> {
-  if (userId === null) {
+export async function listAlerts(env: Env, username: string | null): Promise<AlertRecord[]> {
+  if (username === null) {
     // Admin: get all alerts
     const statement = env.stockly.prepare(`${SELECT_BASE} ORDER BY created_at DESC`);
     const result = await statement.all<AlertRow>();
     return (result.results ?? []).map(mapRow);
   }
-  const statement = env.stockly.prepare(`${SELECT_BASE} WHERE user_id = ? ORDER BY created_at DESC`);
-  const result = await statement.bind(userId).all<AlertRow>();
-  return (result.results ?? []).map(mapRow);
+  // Filter alerts by username - this ensures users only see their own alerts
+  // Important: This query will NOT return alerts with NULL username
+  const statement = env.stockly.prepare(`${SELECT_BASE} WHERE username = ? ORDER BY created_at DESC`);
+  const result = await statement.bind(username).all<AlertRow>();
+  const alerts = (result.results ?? []).map(mapRow);
+  
+  // Log for debugging - check if any alerts have null username
+  const nullUsernameCount = alerts.filter(a => a.username === null).length;
+  if (nullUsernameCount > 0) {
+    console.warn(`Warning: Found ${nullUsernameCount} alerts with null username for username ${username}`);
+  }
+  
+  return alerts;
 }
 
-export async function listActiveAlerts(env: Env, userId?: string): Promise<AlertRecord[]> {
-  if (userId) {
-    // Filter by user for API endpoints
+export async function listActiveAlerts(env: Env, username?: string): Promise<AlertRecord[]> {
+  if (username) {
+    // Filter by username for API endpoints
     const statement = env.stockly.prepare(
-      `${SELECT_BASE} WHERE user_id = ? AND status = ? ORDER BY created_at DESC`
+      `${SELECT_BASE} WHERE username = ? AND status = ? ORDER BY created_at DESC`
     );
-    const result = await statement.bind(userId, "active").all<AlertRow>();
+    const result = await statement.bind(username, "active").all<AlertRow>();
     return (result.results ?? []).map(mapRow);
   } else {
     // Get all active alerts (for cron job)
@@ -67,8 +78,8 @@ export async function listActiveAlerts(env: Env, userId?: string): Promise<Alert
   }
 }
 
-export async function getAlert(env: Env, id: string, userId: string | null): Promise<AlertRecord | null> {
-  if (userId === null) {
+export async function getAlert(env: Env, id: string, username: string | null): Promise<AlertRecord | null> {
+  if (username === null) {
     // Admin: get alert without user filter
     const row = await env.stockly
       .prepare(`${SELECT_BASE} WHERE id = ?`)
@@ -77,31 +88,46 @@ export async function getAlert(env: Env, id: string, userId: string | null): Pro
     return row ? mapRow(row) : null;
   }
   const row = await env.stockly
-    .prepare(`${SELECT_BASE} WHERE id = ? AND user_id = ?`)
-    .bind(id, userId)
+    .prepare(`${SELECT_BASE} WHERE id = ? AND username = ?`)
+    .bind(id, username)
     .first<AlertRow>();
 
   return row ? mapRow(row) : null;
 }
 
-export async function createAlert(env: Env, draft: AlertDraft, userId: string): Promise<AlertRecord> {
+export async function createAlert(env: Env, draft: AlertDraft, username: string): Promise<AlertRecord> {
+  // Validate username is not null or empty
+  if (!username || username.trim().length === 0) {
+    throw new Error("username is required and cannot be null or empty");
+  }
+  
   try {
     const now = new Date().toISOString();
     const id = crypto.randomUUID();
     const notes = draft.notes?.trim() ?? null;
     
+    console.log(`Creating alert with username: ${username}, symbol: ${draft.symbol}`);
+    
     await env.stockly
       .prepare(
-        `INSERT INTO alerts (id, symbol, direction, threshold, status, channel, target, notes, user_id, created_at, updated_at)
+        `INSERT INTO alerts (id, symbol, direction, threshold, status, channel, target, notes, username, created_at, updated_at)
          VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)`
       )
-      .bind(id, draft.symbol, draft.direction, draft.threshold, draft.channel, draft.target, notes, userId, now, now)
+      .bind(id, draft.symbol, draft.direction, draft.threshold, draft.channel, draft.target, notes, username, now, now)
       .run();
 
-    const created = await getAlert(env, id, userId);
+    const created = await getAlert(env, id, username);
     if (!created) {
       throw new Error("failed to load created alert after creation");
     }
+    
+    // Verify the created alert has the correct username
+    if (created.username !== username) {
+      console.error(`Alert created with mismatched username! Expected: ${username}, Got: ${created.username}, AlertId: ${id}`);
+      throw new Error(`Alert created with incorrect username: expected ${username}, got ${created.username}`);
+    }
+    
+    console.log(`Alert created successfully: id=${id}, username=${created.username}, symbol=${created.symbol}`);
     return created;
   } catch (error) {
     if (error instanceof Error) {
@@ -127,7 +153,7 @@ export async function updateAlert(
   env: Env,
   id: string,
   updates: AlertUpdate,
-  userId: string | null
+  username: string | null
 ): Promise<AlertRecord | null> {
   try {
     const fields: string[] = [];
@@ -163,24 +189,24 @@ export async function updateAlert(
     }
 
     if (!fields.length) {
-      return await getAlert(env, id, userId);
+      return await getAlert(env, id, username);
     }
 
     fields.push("updated_at = ?");
     const updatedAt = new Date().toISOString();
     values.push(updatedAt, id);
     
-    if (userId === null) {
+    if (username === null) {
       // Admin: update without user filter
       const sql = `UPDATE alerts SET ${fields.join(", ")} WHERE id = ?`;
       await env.stockly.prepare(sql).bind(...values).run();
     } else {
-      values.push(userId);
-      const sql = `UPDATE alerts SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`;
+      values.push(username);
+      const sql = `UPDATE alerts SET ${fields.join(", ")} WHERE id = ? AND username = ?`;
       await env.stockly.prepare(sql).bind(...values).run();
     }
 
-    return await getAlert(env, id, userId);
+    return await getAlert(env, id, username);
   } catch (error) {
     if (error instanceof Error) {
       // Check for common database errors
@@ -198,9 +224,9 @@ export async function updateAlert(
   }
 }
 
-export async function deleteAlert(env: Env, id: string, userId: string | null): Promise<boolean> {
+export async function deleteAlert(env: Env, id: string, username: string | null): Promise<boolean> {
   let result;
-  if (userId === null) {
+  if (username === null) {
     // Admin: delete without user filter
     result = await env.stockly
       .prepare(`DELETE FROM alerts WHERE id = ?`)
@@ -208,8 +234,8 @@ export async function deleteAlert(env: Env, id: string, userId: string | null): 
       .run();
   } else {
     result = await env.stockly
-      .prepare(`DELETE FROM alerts WHERE id = ? AND user_id = ?`)
-      .bind(id, userId)
+      .prepare(`DELETE FROM alerts WHERE id = ? AND username = ?`)
+      .bind(id, username)
       .run();
   }
 

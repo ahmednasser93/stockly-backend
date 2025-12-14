@@ -42,17 +42,17 @@ export async function getFavoriteStocks(
     return response;
   }
 
-  const userId = auth.userId;
+  const username = auth.username;
 
   try {
     const rows = await env.stockly
       .prepare(
         `SELECT symbol, display_order, created_at, updated_at
          FROM user_favorite_stocks
-         WHERE user_id = ?
+         WHERE username = ?
          ORDER BY display_order ASC, created_at ASC`
       )
-      .bind(userId)
+      .bind(username)
       .all<{
         symbol: string;
         display_order: number;
@@ -67,10 +67,10 @@ export async function getFavoriteStocks(
       updatedAt: new Date(row.updated_at * 1000).toISOString(),
     }));
 
-    logger.info("Fetched favorite stocks", { userId, count: stocks.length });
+    logger.info("Fetched favorite stocks", { username, count: stocks.length });
     return json({ stocks }, 200, request);
   } catch (error) {
-    logger.error("Failed to retrieve favorite stocks", error, { userId });
+    logger.error("Failed to retrieve favorite stocks", error, { username });
     return json({ error: "Failed to retrieve favorite stocks" }, 500, request);
   }
 }
@@ -103,19 +103,21 @@ export async function updateFavoriteStocks(
     return response;
   }
 
-  const userId = auth.userId;
+  const username = auth.username;
 
   try {
-    // Verify user exists in database (required for foreign key constraint)
-    const userExists = await env.stockly
-      .prepare(`SELECT id FROM users WHERE id = ?`)
-      .bind(userId)
+    // Get user_id from username (required for foreign key constraint)
+    const user = await env.stockly
+      .prepare(`SELECT id FROM users WHERE username = ?`)
+      .bind(username)
       .first<{ id: string }>();
 
-    if (!userExists) {
-      logger.warn("User not found in database", { userId });
+    if (!user) {
+      logger.warn("User not found in database", { username });
       return json({ error: "User account not found. Please sign in again." }, 404, request);
     }
+
+    const userId = user.id;
 
     // Parse request body
     let body: unknown;
@@ -198,10 +200,10 @@ export async function updateFavoriteStocks(
 
     const now = Math.floor(Date.now() / 1000);
 
-    // Delete all existing stocks for this user first
+    // Delete all existing stocks for this user first (by username)
     await env.stockly
-      .prepare(`DELETE FROM user_favorite_stocks WHERE user_id = ?`)
-      .bind(userId)
+      .prepare(`DELETE FROM user_favorite_stocks WHERE username = ?`)
+      .bind(username)
       .run();
 
     // Insert new stocks with display order using INSERT OR REPLACE to handle any race conditions
@@ -212,10 +214,10 @@ export async function updateFavoriteStocks(
           // This ensures that even if two requests come in simultaneously, we won't get UNIQUE constraint errors
           await env.stockly
             .prepare(
-              `INSERT OR REPLACE INTO user_favorite_stocks (user_id, symbol, display_order, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?)`
+              `INSERT OR REPLACE INTO user_favorite_stocks (user_id, username, symbol, display_order, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)`
             )
-            .bind(userId, uniqueSymbols[i], i, now, now)
+            .bind(userId, username, uniqueSymbols[i], i, now, now)
             .run();
         } catch (insertError) {
           // Log the specific insert error for debugging
@@ -231,7 +233,7 @@ export async function updateFavoriteStocks(
       }
     }
 
-    logger.info("Updated favorite stocks", { userId, count: uniqueSymbols.length, symbols: uniqueSymbols });
+    logger.info("Updated favorite stocks", { username, userId, count: uniqueSymbols.length, symbols: uniqueSymbols });
 
     return json({
       success: true,
@@ -254,7 +256,7 @@ export async function updateFavoriteStocks(
       : { error: String(error) };
     
     logger.error("Failed to update favorite stocks", error, { 
-      userId,
+      username,
       ...errorDetails,
     });
     
@@ -264,7 +266,7 @@ export async function updateFavoriteStocks(
       
       // Foreign key constraint violation - user doesn't exist
       if (errorMsg.includes("foreign key") || errorMsg.includes("foreign_key")) {
-        logger.error("Foreign key constraint violation - user not found", { userId, error: error.message });
+        logger.error("Foreign key constraint violation - user not found", { username, error: error.message });
         return json({ error: "User account not found. Please sign in again." }, 404, request);
       }
       
@@ -275,20 +277,20 @@ export async function updateFavoriteStocks(
       
       // General database errors
       if (errorMsg.includes("sqlite_error") || errorMsg.includes("database")) {
-        logger.error("Database error in updateFavoriteStocks", { userId, error: error.message, stack: error.stack });
+        logger.error("Database error in updateFavoriteStocks", { username, error: error.message, stack: error.stack });
         return json({ error: "Database error occurred. Please try again." }, 500, request);
       }
       
       // Constraint violations
       if (errorMsg.includes("constraint")) {
-        logger.error("Constraint violation in updateFavoriteStocks", { userId, error: error.message });
+        logger.error("Constraint violation in updateFavoriteStocks", { username, error: error.message });
         return json({ error: "Data validation failed. Please check your input." }, 400, request);
       }
     }
     
     const errorMessage = error instanceof Error ? error.message : "Failed to update favorite stocks";
     logger.error("Unexpected error in updateFavoriteStocks", { 
-      userId, 
+      username, 
       error: errorMessage,
       errorObject: error instanceof Error ? { message: error.message, stack: error.stack } : String(error)
     });
@@ -324,7 +326,7 @@ export async function deleteFavoriteStock(
     return response;
   }
 
-  const userId = auth.userId;
+  const username = auth.username;
   const normalizedSymbol = symbol.trim().toUpperCase();
 
   if (!normalizedSymbol) {
@@ -333,21 +335,21 @@ export async function deleteFavoriteStock(
 
   try {
     const result = await env.stockly
-      .prepare(`DELETE FROM user_favorite_stocks WHERE user_id = ? AND symbol = ?`)
-      .bind(userId, normalizedSymbol)
+      .prepare(`DELETE FROM user_favorite_stocks WHERE username = ? AND symbol = ?`)
+      .bind(username, normalizedSymbol)
       .run();
 
     const meta = (result as any)?.meta ?? {};
     const deleted = meta.changes > 0;
 
     if (deleted) {
-      logger.info("Deleted favorite stock", { userId, symbol: normalizedSymbol });
+      logger.info("Deleted favorite stock", { username, symbol: normalizedSymbol });
       return json({ success: true, message: "Favorite stock removed" }, 200, request);
     } else {
       return json({ error: "Favorite stock not found" }, 404, request);
     }
   } catch (error) {
-    logger.error("Failed to delete favorite stock", error, { userId, symbol: normalizedSymbol });
+    logger.error("Failed to delete favorite stock", error, { username, symbol: normalizedSymbol });
     return json({ error: "Failed to delete favorite stock" }, 500, request);
   }
 }

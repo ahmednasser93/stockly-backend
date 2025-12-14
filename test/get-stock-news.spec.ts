@@ -14,6 +14,11 @@ const createUrl = (params: Record<string, string> = {}) => {
   return url;
 };
 
+const createRequest = (params: Record<string, string> = {}) => {
+  const url = createUrl(params);
+  return new Request(url.toString());
+};
+
 const createEnv = (): Env => {
   const kvMap = new Map<string, string>();
   kvMap.set(
@@ -57,7 +62,9 @@ describe("getStockNews handler", () => {
   });
 
   it("requires a symbol", async () => {
-    const response = await getStockNews(createUrl(), createEnv(), createMockLogger());
+    const url = createUrl();
+    const request = createRequest();
+    const response = await getStockNews(request, url, createEnv(), createMockLogger());
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "symbol required" });
   });
@@ -79,7 +86,9 @@ describe("getStockNews handler", () => {
     setCache("news:AAPL", cached, 30);
     const fetchSpy = vi.spyOn(globalThis as any, "fetch");
 
-    const response = await getStockNews(createUrl({ symbol: "aapl" }), env, createMockLogger());
+    const url = createUrl({ symbol: "aapl" });
+    const request = createRequest({ symbol: "aapl" });
+    const response = await getStockNews(request, url, env, createMockLogger());
 
     expect(fetchSpy).not.toHaveBeenCalled();
     const data = await response.json();
@@ -111,7 +120,9 @@ describe("getStockNews handler", () => {
       json: async () => mockNews,
     } as Response);
 
-    const response = await getStockNews(createUrl({ symbol: "AAPL" }), env, createMockLogger());
+    const url = createUrl({ symbol: "AAPL" });
+    const request = createRequest({ symbol: "AAPL" });
+    const response = await getStockNews(request, url, env, createMockLogger());
 
     expect(fetchMock).toHaveBeenCalledWith(
       `${API_URL}/news/stock?symbols=AAPL&apikey=${API_KEY}`,
@@ -140,7 +151,9 @@ describe("getStockNews handler", () => {
       json: async () => [],
     } as Response);
 
-    const response = await getStockNews(createUrl({ symbol: "XYZ" }), env, createMockLogger());
+    const url = createUrl({ symbol: "XYZ" });
+    const request = createRequest({ symbol: "XYZ" });
+    const response = await getStockNews(request, url, env, createMockLogger());
 
     const data = await response.json();
     expect(data.symbol).toBe("XYZ");
@@ -155,7 +168,9 @@ describe("getStockNews handler", () => {
       status: 500,
     } as Response);
 
-    const response = await getStockNews(createUrl({ symbol: "AAPL" }), env, createMockLogger());
+    const url = createUrl({ symbol: "AAPL" });
+    const request = createRequest({ symbol: "AAPL" });
+    const response = await getStockNews(request, url, env, createMockLogger());
 
     const data = await response.json();
     expect(data.symbol).toBe("AAPL");
@@ -169,7 +184,9 @@ describe("getStockNews handler", () => {
 
     vi.spyOn(globalThis as any, "fetch").mockRejectedValue(new Error("Failed to fetch"));
 
-    const response = await getStockNews(createUrl({ symbol: "AAPL" }), env, createMockLogger());
+    const url = createUrl({ symbol: "AAPL" });
+    const request = createRequest({ symbol: "AAPL" });
+    const response = await getStockNews(request, url, env, createMockLogger());
 
     const data = await response.json();
     expect(data).toHaveProperty("symbol", "AAPL");
@@ -208,7 +225,9 @@ describe("getStockNews handler", () => {
 
     const fetchSpy = vi.spyOn(globalThis as any, "fetch");
 
-    const response = await getStockNews(createUrl({ symbol: "AAPL" }), env, createMockLogger());
+    const url = createUrl({ symbol: "AAPL" });
+    const request = createRequest({ symbol: "AAPL" });
+    const response = await getStockNews(request, url, env, createMockLogger());
 
     expect(fetchSpy).not.toHaveBeenCalled();
     const data = await response.json();
@@ -236,7 +255,9 @@ describe("getStockNews handler", () => {
       json: async () => mockNews,
     } as Response);
 
-    const response = await getStockNews(createUrl({ symbol: "AAPL" }), env, createMockLogger());
+    const url = createUrl({ symbol: "AAPL" });
+    const request = createRequest({ symbol: "AAPL" });
+    const response = await getStockNews(request, url, env, createMockLogger());
 
     const data = await response.json();
     expect(data.news[0].title).toBe("Test News");

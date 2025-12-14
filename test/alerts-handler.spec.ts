@@ -22,6 +22,14 @@ vi.mock("../src/alerts/state", () => ({
   deleteAlertState: vi.fn(),
 }));
 
+vi.mock("../src/auth/middleware", () => ({
+  authenticateRequestWithAdmin: vi.fn().mockResolvedValue({
+    username: "testuser",
+    tokenType: "access" as const,
+    isAdmin: false,
+  }),
+}));
+
 const createRequest = (init?: RequestInit & { path?: string }) => {
   const url = new URL(init?.path ?? "/v1/api/alerts", "https://example.com");
   url.searchParams.set("ts", Date.now().toString());
@@ -41,14 +49,15 @@ describe("alerts handler", () => {
   });
 
   it("lists alerts", async () => {
-    vi.mocked(listAlerts).mockResolvedValue([{ id: "1" } as any]);
+    vi.mocked(listAlerts).mockResolvedValue([{ id: "1", username: "testuser" } as any]);
     const response = await handleAlertsRequest(createRequest({ method: "GET" }), env as any, createMockLogger());
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ alerts: [{ id: "1" }] });
+    await expect(response.json()).resolves.toEqual({ alerts: [{ id: "1", username: "testuser" }] });
+    expect(listAlerts).toHaveBeenCalledWith(expect.anything(), "testuser");
   });
 
   it("creates an alert when payload is valid", async () => {
-    const created = { id: "2" } as any;
+    const created = { id: "2", username: "testuser" } as any;
     vi.mocked(createAlert).mockResolvedValue(created);
     const body = {
       symbol: "aapl",
@@ -66,7 +75,11 @@ describe("alerts handler", () => {
 
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toEqual(created);
-    expect(createAlert).toHaveBeenCalled();
+    expect(createAlert).toHaveBeenCalledWith(
+      expect.anything(), 
+      expect.objectContaining({ ...body, symbol: "AAPL" }), 
+      "testuser"
+    );
   });
 
   it("returns 404 when an alert is missing", async () => {
@@ -77,10 +90,11 @@ describe("alerts handler", () => {
       createMockLogger()
     );
     expect(response.status).toBe(404);
+    expect(getAlert).toHaveBeenCalledWith(expect.anything(), "missing", "testuser");
   });
 
   it("updates alerts via PUT", async () => {
-    const updated = { id: "3", status: "active" } as any;
+    const updated = { id: "3", status: "active", username: "testuser" } as any;
     vi.mocked(updateAlert).mockResolvedValue(updated);
     const response = await handleAlertsRequest(
       createRequest({
@@ -93,6 +107,7 @@ describe("alerts handler", () => {
     );
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual(updated);
+    expect(updateAlert).toHaveBeenCalledWith(expect.anything(), "3", expect.objectContaining({ status: "paused" }), "testuser");
   });
 
   it("deletes alerts and clears KV state", async () => {
@@ -103,6 +118,7 @@ describe("alerts handler", () => {
       createMockLogger()
     );
     expect(response.status).toBe(200);
+    expect(deleteAlert).toHaveBeenCalledWith(expect.anything(), "123", "testuser");
     expect(deleteAlertState).toHaveBeenCalledWith(env.alertsKv, "123");
   });
 });

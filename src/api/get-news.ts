@@ -555,15 +555,15 @@ export async function getFavoriteNews(
     return response;
   }
 
-  const userId = auth.userId;
+  const username = auth.username;
 
   try {
-    logger.info("Fetching favorite news", { userId });
+    logger.info("Fetching favorite news", { username });
 
-    // Fetch user preferences
+    // Fetch user preferences (by username)
     const row = await env.stockly
-      .prepare(`SELECT news_favorite_symbols FROM user_settings WHERE user_id = ?`)
-      .bind(userId)
+      .prepare(`SELECT news_favorite_symbols FROM user_settings WHERE username = ?`)
+      .bind(username)
       .first<{ news_favorite_symbols: string }>();
 
     let symbols: string[] = [];
@@ -571,12 +571,12 @@ export async function getFavoriteNews(
       try {
         symbols = JSON.parse(row.news_favorite_symbols);
       } catch (e) {
-        logger.warn("Failed to parse news_favorite_symbols", { userId, error: e });
+        logger.warn("Failed to parse news_favorite_symbols", { username, error: e });
       }
     }
 
     if (symbols.length === 0) {
-      logger.info("No favorite symbols selected", { userId });
+      logger.info("No favorite symbols selected", { username });
       return json({ 
         news: [], 
         pagination: { page: 0, limit: 20, total: 0, hasMore: false },
@@ -584,7 +584,7 @@ export async function getFavoriteNews(
       }, 200, request);
     }
 
-    logger.info("Favorite symbols found", { userId, symbolCount: symbols.length, symbols });
+    logger.info("Favorite symbols found", { username, symbolCount: symbols.length, symbols });
 
     // Reuse getNews logic by constructing a new URL with symbols
     // This avoids duplicating the fetching/normalization logic
@@ -596,7 +596,7 @@ export async function getFavoriteNews(
     return getNews(request, newUrl, env, logger);
 
   } catch (error) {
-    logger.error("Failed to fetch favorite news", error, { userId });
+    logger.error("Failed to fetch favorite news", error, { username });
     return json({ error: "Failed to fetch favorite news" }, 500, request);
   }
 }

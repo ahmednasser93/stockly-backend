@@ -122,3 +122,6 @@ Sent 2 notifications for AMZN news to 2 users
 News alert cron job completed
 ```
 
+
+
+

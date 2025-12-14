@@ -9,6 +9,13 @@
 		"dev": "npm run db:migrate:local && wrangler dev --local --persist-to .wrangler/state",
 		"start": "wrangler dev --local --persist-to .wrangler/state",
 		"test": "vitest run",
+		"test:watch": "vitest watch",
+		"test:coverage": "vitest run --coverage",
+		"test:integration": "vitest run test/integration",
+		"test:performance:load": "k6 run test/performance/load-test.js",
+		"test:performance:stress": "k6 run test/performance/stress-test.js",
+		"test:performance:spike": "k6 run test/performance/spike-test.js",
+		"test:performance:endurance": "k6 run test/performance/endurance-test.js",
 		"doc": "node scripts/doc-server.mjs",
 		"cf-typegen": "wrangler types",
 		"db:migrate:local": "wrangler d1 migrations apply stockly --local --persist-to .wrangler/state",
@@ -21,6 +28,8 @@
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.8.19",
+		"@vitest/coverage-istanbul": "~3.2.0",
+		"@vitest/coverage-v8": "^3.2.4",
 		"typescript": "^5.5.2",
 		"vitest": "~3.2.0",
 		"wrangler": "^4.48.0"

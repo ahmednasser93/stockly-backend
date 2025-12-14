@@ -41,15 +41,34 @@ export async function getPreferences(
     return response;
   }
 
-  const userId = auth.userId;
+  const username = auth.username;
 
   try {
+    // Get user_id from username first
+    const user = await env.stockly
+      .prepare("SELECT id FROM users WHERE username = ?")
+      .bind(username)
+      .first<{ id: string }>();
+
+    if (!user) {
+      const { response } = createErrorResponse(
+        "USER_NOT_FOUND",
+        "User not found",
+        undefined,
+        undefined,
+        request
+      );
+      return response;
+    }
+
+    const userId = user.id;
+
     const row = await env.stockly
       .prepare(
         `SELECT user_id, enabled, quiet_start, quiet_end, allowed_symbols, max_daily, updated_at
-         FROM user_notification_preferences WHERE user_id = ?`
+         FROM user_notification_preferences WHERE username = ?`
       )
-      .bind(userId)
+      .bind(username)
       .first<{
         user_id: string;
         enabled: number;
@@ -87,7 +106,7 @@ export async function getPreferences(
       return json(defaultPreferences, 200, request);
     }
   } catch (error) {
-    logger.error("Failed to retrieve preferences", error, { userId });
+    logger.error("Failed to retrieve preferences", error, { username });
     return json({ error: "Failed to retrieve preferences" }, 500, request);
   }
 }
@@ -97,7 +116,46 @@ export async function updatePreferences(
   env: Env,
   logger: Logger
 ): Promise<Response> {
+  // Authenticate request to get username
+  const auth = await authenticateRequest(
+    request,
+    env.JWT_SECRET || "",
+    env.JWT_REFRESH_SECRET
+  );
+
+  if (!auth) {
+    const { response } = createErrorResponse(
+      "AUTH_MISSING_TOKEN",
+      "Authentication required",
+      undefined,
+      undefined,
+      request
+    );
+    return response;
+  }
+
+  const username = auth.username;
+
   try {
+    // Get user_id from username first
+    const user = await env.stockly
+      .prepare("SELECT id FROM users WHERE username = ?")
+      .bind(username)
+      .first<{ id: string }>();
+
+    if (!user) {
+      const { response } = createErrorResponse(
+        "USER_NOT_FOUND",
+        "User not found",
+        undefined,
+        undefined,
+        request
+      );
+      return response;
+    }
+
+    const userId = user.id;
+
     const payload = await request.json();
     const { enabled, quietStart, quietEnd, allowedSymbols, maxDaily } = payload;
     // userId is from JWT authentication, not from payload
@@ -137,10 +195,10 @@ export async function updatePreferences(
 
     const now = new Date().toISOString();
 
-    // Check if preferences already exist for user
+    // Check if preferences already exist for user (by username)
     const existing = await env.stockly
-      .prepare(`SELECT user_id FROM user_notification_preferences WHERE user_id = ?`)
-      .bind(userId)
+      .prepare(`SELECT user_id FROM user_notification_preferences WHERE username = ?`)
+      .bind(username)
       .first();
 
     if (existing) {
@@ -149,7 +207,7 @@ export async function updatePreferences(
         .prepare(
           `UPDATE user_notification_preferences
            SET enabled = ?, quiet_start = ?, quiet_end = ?, allowed_symbols = ?, max_daily = ?, updated_at = ?
-           WHERE user_id = ?`
+           WHERE username = ?`
         )
         .bind(
           enabled ? 1 : 0,
@@ -158,19 +216,20 @@ export async function updatePreferences(
           symbolsString,
           maxDaily ?? null,
           now,
-          userId
+          username
         )
         .run();
       return json({ success: true, message: "Preferences updated" }, 200, request);
     } else {
-      // Insert new preferences
+      // Insert new preferences (with both user_id and username)
       await env.stockly
         .prepare(
-          `INSERT INTO user_notification_preferences (user_id, enabled, quiet_start, quiet_end, allowed_symbols, max_daily, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO user_notification_preferences (user_id, username, enabled, quiet_start, quiet_end, allowed_symbols, max_daily, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           userId,
+          username,
           enabled ? 1 : 0,
           quietStart || null,
           quietEnd || null,
@@ -182,7 +241,7 @@ export async function updatePreferences(
       return json({ success: true, message: "Preferences created" }, 201, request);
     }
   } catch (error) {
-    logger.error("Failed to update preferences", error, { userId });
+    logger.error("Failed to update preferences", error, { username });
     return json({ error: "Failed to update preferences" }, 500, request);
   }
 }

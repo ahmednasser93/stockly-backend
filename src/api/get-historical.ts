@@ -118,52 +118,52 @@ export async function getHistorical(request: Request, url: URL, env: Env, ctx: E
         dateRange: `${formatDate(fromDate!)} to ${formatDate(toDate!)}`,
         action: "fetching from FMP API",
       });
-    }
 
-    // Create a minimal ExecutionContext if not provided
-    // This allows us to fetch data even when ctx is missing
-    const effectiveCtx = ctx || {
-      waitUntil: () => { }, // No-op for waitUntil if ctx is missing
-      passThroughOnException: () => { },
-      props: {},
-    } as unknown as ExecutionContext;
+      // Create a minimal ExecutionContext if not provided
+      // This allows us to fetch data even when ctx is missing
+      const effectiveCtx = ctx || {
+        waitUntil: () => { }, // No-op for waitUntil if ctx is missing
+        passThroughOnException: () => { },
+        props: {},
+      } as unknown as ExecutionContext;
 
-    try {
-      // Fetch and save historical prices synchronously with date range
-      await fetchAndSaveHistoricalPrice(
-        normalizedSymbol,
-        env,
-        effectiveCtx,
-        formatDate(fromDate!),
-        formatDate(toDate!)
-      );
+      try {
+        // Fetch and save historical prices synchronously with date range
+        await fetchAndSaveHistoricalPrice(
+          normalizedSymbol,
+          env,
+          effectiveCtx,
+          formatDate(fromDate!),
+          formatDate(toDate!)
+        );
 
-      // Wait for database write to complete (D1 writes can be async, need longer wait)
-      await new Promise(resolve => setTimeout(resolve, 500));
+        // Wait for database write to complete (D1 writes can be async, need longer wait)
+        await new Promise(resolve => setTimeout(resolve, 500));
 
-      // Try to get data from database again after fetching
-      data = await getHistoricalPricesByDateRange(normalizedSymbol, fromDate!, toDate!, env);
-      logger.debug(`After FMP fetch, query result for ${normalizedSymbol}`, {
-        dateRange: `${formatDate(fromDate!)} to ${formatDate(toDate!)}`,
-        recordCount: data.length,
-      });
-
-      if (data.length === 0) {
-        logger.warn(`Still no data after fetching from FMP API for ${normalizedSymbol}`, {
+        // Try to get data from database again after fetching
+        data = await getHistoricalPricesByDateRange(normalizedSymbol, fromDate!, toDate!, env);
+        logger.debug(`After FMP fetch, query result for ${normalizedSymbol}`, {
           dateRange: `${formatDate(fromDate!)} to ${formatDate(toDate!)}`,
-          possibleReasons: [
-            "FMP API returned empty data",
-            "FMP API returned data outside the requested date range",
-            "Date range is in the future or has no trading days",
-            "Database schema missing OHLC columns (check migration 009)",
-          ],
+          recordCount: data.length,
         });
-      } else {
-        console.log(`[get-historical] Successfully fetched ${data.length} historical records for ${normalizedSymbol} from FMP API`);
+
+        if (data.length === 0) {
+          logger.warn(`Still no data after fetching from FMP API for ${normalizedSymbol}`, {
+            dateRange: `${formatDate(fromDate!)} to ${formatDate(toDate!)}`,
+            possibleReasons: [
+              "FMP API returned empty data",
+              "FMP API returned data outside the requested date range",
+              "Date range is in the future or has no trading days",
+              "Database schema missing OHLC columns (check migration 009)",
+            ],
+          });
+        } else {
+          console.log(`[get-historical] Successfully fetched ${data.length} historical records for ${normalizedSymbol} from FMP API`);
+        }
+      } catch (fetchError: any) {
+        console.error(`[get-historical] Error fetching historical data from FMP API for ${normalizedSymbol}:`, fetchError?.message || fetchError);
+        // Continue with empty data - let client handle empty state
       }
-    } catch (fetchError: any) {
-      console.error(`[get-historical] Error fetching historical data from FMP API for ${normalizedSymbol}:`, fetchError?.message || fetchError);
-      // Continue with empty data - let client handle empty state
     }
 
     // Return data even if empty (let client handle empty state gracefully)

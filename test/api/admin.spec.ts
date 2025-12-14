@@ -7,9 +7,14 @@ import {
 import { sendFCMNotificationWithLogs } from "../../src/notifications/fcm-sender";
 import type { Env } from "../../src/index";
 import { createMockLogger } from "../test-utils";
+import * as authMiddleware from "../../src/auth/middleware";
 
 vi.mock("../../src/notifications/fcm-sender", () => ({
   sendFCMNotificationWithLogs: vi.fn(),
+}));
+
+vi.mock("../../src/auth/middleware", () => ({
+  authenticateRequestWithAdmin: vi.fn(),
 }));
 
 describe("Admin API", () => {
@@ -36,6 +41,14 @@ describe("Admin API", () => {
 
     mockLogger = createMockLogger();
     vi.clearAllMocks();
+    
+    // Default mock for admin authentication
+    vi.mocked(authMiddleware.authenticateRequestWithAdmin).mockResolvedValue({
+      username: "admin",
+      userId: "admin-123",
+      tokenType: "access" as const,
+      isAdmin: true,
+    });
   });
 
   describe("getRecentNotifications", () => {
@@ -74,7 +87,8 @@ describe("Admin API", () => {
       };
       mockDb.prepare.mockReturnValue(mockStmt);
 
-      const response = await getRecentNotifications(mockEnv, mockLogger);
+      const request = new Request("https://example.com/v1/api/notifications/recent");
+      const response = await getRecentNotifications(request, mockEnv, mockLogger);
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -93,7 +107,7 @@ describe("Admin API", () => {
         sentAt: "2025-01-01T00:00:00Z",
       });
       expect(mockDb.prepare).toHaveBeenCalledWith(
-        expect.stringContaining("SELECT id, alert_id, symbol")
+        expect.stringContaining("SELECT")
       );
     });
 
@@ -103,7 +117,8 @@ describe("Admin API", () => {
       };
       mockDb.prepare.mockReturnValue(mockStmt);
 
-      const response = await getRecentNotifications(mockEnv, mockLogger);
+      const request = new Request("https://example.com/v1/api/notifications/recent");
+      const response = await getRecentNotifications(request, mockEnv, mockLogger);
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -116,7 +131,8 @@ describe("Admin API", () => {
       };
       mockDb.prepare.mockReturnValue(mockStmt);
 
-      const response = await getRecentNotifications(mockEnv, mockLogger);
+      const request = new Request("https://example.com/v1/api/notifications/recent");
+      const response = await getRecentNotifications(request, mockEnv, mockLogger);
       const data = await response.json();
 
       expect(response.status).toBe(500);
@@ -129,7 +145,8 @@ describe("Admin API", () => {
       };
       mockDb.prepare.mockReturnValue(mockStmt);
 
-      await getRecentNotifications(mockEnv, mockLogger);
+      const request = new Request("https://example.com/v1/api/notifications/recent");
+      await getRecentNotifications(request, mockEnv, mockLogger);
 
       expect(mockDb.prepare).toHaveBeenCalledWith(
         expect.stringContaining("LIMIT 100")
@@ -142,10 +159,11 @@ describe("Admin API", () => {
       };
       mockDb.prepare.mockReturnValue(mockStmt);
 
-      await getRecentNotifications(mockEnv, mockLogger);
+      const request = new Request("https://example.com/v1/api/notifications/recent");
+      await getRecentNotifications(request, mockEnv, mockLogger);
 
       expect(mockDb.prepare).toHaveBeenCalledWith(
-        expect.stringContaining("ORDER BY sent_at DESC")
+        expect.stringContaining("ORDER BY nl.sent_at DESC")
       );
     });
   });
@@ -186,7 +204,8 @@ describe("Admin API", () => {
       };
       mockDb.prepare.mockReturnValue(mockStmt);
 
-      const response = await getFailedNotifications(mockEnv, mockLogger);
+      const request = new Request("https://example.com/v1/api/notifications/failed");
+      const response = await getFailedNotifications(request, mockEnv, mockLogger);
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -194,7 +213,7 @@ describe("Admin API", () => {
       expect(data.notifications[0].status).toBe("failed");
       expect(data.notifications[1].status).toBe("error");
       expect(mockDb.prepare).toHaveBeenCalledWith(
-        expect.stringContaining("WHERE status IN ('failed', 'error')")
+        expect.stringContaining("WHERE nl.status IN ('failed', 'error')")
       );
     });
 
@@ -204,7 +223,8 @@ describe("Admin API", () => {
       };
       mockDb.prepare.mockReturnValue(mockStmt);
 
-      const response = await getFailedNotifications(mockEnv, mockLogger);
+      const request = new Request("https://example.com/v1/api/notifications/failed");
+      const response = await getFailedNotifications(request, mockEnv, mockLogger);
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -217,7 +237,8 @@ describe("Admin API", () => {
       };
       mockDb.prepare.mockReturnValue(mockStmt);
 
-      const response = await getFailedNotifications(mockEnv, mockLogger);
+      const request = new Request("https://example.com/v1/api/notifications/failed");
+      const response = await getFailedNotifications(request, mockEnv, mockLogger);
       const data = await response.json();
 
       expect(response.status).toBe(500);
@@ -270,7 +291,8 @@ describe("Admin API", () => {
         messageId: "new-message-id",
       });
 
-      const response = await retryNotification("log-1", mockEnv, mockLogger);
+      const request = new Request("https://example.com/v1/api/notifications/retry/log-1");
+      const response = await retryNotification(request, "log-1", mockEnv, mockLogger);
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -292,7 +314,8 @@ describe("Admin API", () => {
 
       mockDb.prepare.mockReturnValue(mockSelectStmt);
 
-      const response = await retryNotification("non-existent", mockEnv, mockLogger);
+      const request = new Request("https://example.com/v1/api/notifications/retry/non-existent");
+      const response = await retryNotification(request, "non-existent", mockEnv, mockLogger);
       const data = await response.json();
 
       expect(response.status).toBe(404);
@@ -345,7 +368,8 @@ describe("Admin API", () => {
         shouldCleanupToken: true,
       });
 
-      const response = await retryNotification("log-1", mockEnv, mockLogger);
+      const request = new Request("https://example.com/v1/api/notifications/retry/log-1");
+      const response = await retryNotification(request, "log-1", mockEnv, mockLogger);
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -371,6 +395,7 @@ describe("Admin API", () => {
         error_message: "Previous error",
         attempt_count: 2,
         sent_at: "2025-01-01T00:00:00Z",
+        username: "testuser",
       };
 
       const mockSelectStmt = {
@@ -402,7 +427,8 @@ describe("Admin API", () => {
         messageId: "new-message-id",
       });
 
-      await retryNotification("log-1", mockEnv, mockLogger);
+      const request = new Request("https://example.com/v1/api/notifications/retry/log-1");
+      await retryNotification(request, "log-1", mockEnv, mockLogger);
 
       // Should create new log entry with attempt_count = 1 (always starts at 1 for new retry)
       expect(mockInsertStmt.bind).toHaveBeenCalledWith(
@@ -416,6 +442,7 @@ describe("Admin API", () => {
         "success",
         null,
         1, // attempt_count always starts at 1 for new retry log entry
+        mockLog.username,
         expect.any(String)
       );
     });
@@ -458,7 +485,8 @@ describe("Admin API", () => {
         messageId: "new-message-id",
       });
 
-      const response = await retryNotification("log-1", mockEnv, mockLogger);
+      const request = new Request("https://example.com/v1/api/notifications/retry/log-1");
+      const response = await retryNotification(request, "log-1", mockEnv, mockLogger);
       const data = await response.json();
 
       expect(response.status).toBe(500);
@@ -505,7 +533,8 @@ describe("Admin API", () => {
 
       vi.mocked(sendFCMNotificationWithLogs).mockRejectedValue(new Error("FCM error"));
 
-      const response = await retryNotification("log-1", mockEnv, mockLogger);
+      const request = new Request("https://example.com/v1/api/notifications/retry/log-1");
+      const response = await retryNotification(request, "log-1", mockEnv, mockLogger);
       const data = await response.json();
 
       // FCM errors are caught and logged, but function returns 200 with success: false

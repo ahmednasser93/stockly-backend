@@ -55,6 +55,7 @@ describe("alerts storage queries", () => {
         channel: "notification",
         target: "dXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
         notes: null,
+        username: "testuser",
         created_at: "now",
         updated_at: "now",
       },
@@ -66,9 +67,10 @@ describe("alerts storage queries", () => {
       return stmt as any;
     });
 
-    const alerts = await listAlerts(env);
+    const alerts = await listAlerts(env, "testuser");
     expect(alerts).toHaveLength(1);
     expect(alerts[0].symbol).toBe("AAPL");
+    expect(alerts[0].username).toBe("testuser");
   });
 
   it("creates and returns an alert", async () => {
@@ -82,6 +84,7 @@ describe("alerts storage queries", () => {
       channel: "notification",
       target: "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]",
       notes: null,
+      username: "testuser",
       created_at: "now",
       updated_at: "now",
     };
@@ -108,7 +111,7 @@ describe("alerts storage queries", () => {
       threshold: 200,
       channel: "notification",
       target: "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]",
-    });
+    }, "testuser");
 
     expect(alert.id).toBe("generated-id");
     const insert = statements.find((stmt) => stmt.sql.includes("INSERT INTO alerts"));
@@ -126,6 +129,7 @@ describe("alerts storage queries", () => {
       channel: "notification",
       target: "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]",
       notes: "",
+      username: "testuser",
       created_at: "now",
       updated_at: "later",
     };
@@ -144,7 +148,7 @@ describe("alerts storage queries", () => {
     const result = await updateAlert(env, "1", {
       symbol: "MSFT",
       status: "paused",
-    });
+    }, "testuser");
 
     expect(result?.symbol).toBe("MSFT");
     const updateStmt = statements.find((stmt) => stmt.sql.startsWith("UPDATE alerts"));
@@ -160,7 +164,7 @@ describe("alerts storage queries", () => {
       }
       return stmt as any;
     });
-    const deleted = await deleteAlert(env, "1");
+    const deleted = await deleteAlert(env, "1", "testuser");
     expect(deleted).toBe(true);
   });
 
@@ -176,6 +180,7 @@ describe("alerts storage queries", () => {
         channel: "notification",
         target: "dXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
         notes: null,
+        username: "testuser",
         created_at: "now",
         updated_at: "now",
       },

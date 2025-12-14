@@ -17,4 +17,10 @@ export function createMockLogger(): Logger {
   });
 }
 
+// Re-export utilities from utils directory
+export * from "./utils/factories";
+export * from "./utils/mocks";
+export * from "./utils/helpers";
+export * from "./utils/test-env";
+
 

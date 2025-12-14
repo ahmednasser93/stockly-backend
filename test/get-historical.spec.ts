@@ -20,6 +20,11 @@ const createUrl = (params: Record<string, string> = {}) => {
   return url;
 };
 
+const createRequest = (params: Record<string, string> = {}) => {
+  const url = createUrl(params);
+  return new Request(url.toString());
+};
+
 const createEnv = (): Env => {
   return {
     stockly: {} as any,
@@ -52,7 +57,9 @@ describe("getHistorical handler", () => {
 
   describe("Parameter validation", () => {
     it("requires a symbol parameter", async () => {
-      const response = await getHistorical(createUrl(), createEnv(), undefined, createMockLogger());
+      const url = createUrl();
+      const request = createRequest();
+      const response = await getHistorical(request, url, createEnv(), undefined, createMockLogger());
       expect(response.status).toBe(400);
       const data = await response.json();
       expect(data).toHaveProperty("error");
@@ -61,13 +68,17 @@ describe("getHistorical handler", () => {
 
     it("accepts symbol parameter", async () => {
       vi.mocked(getHistoricalPricesByDateRange).mockResolvedValue([]);
-      const response = await getHistorical(createUrl({ symbol: "AAPL" }), createEnv());
+      const url = createUrl({ symbol: "AAPL" });
+      const request = createRequest({ symbol: "AAPL" });
+      const response = await getHistorical(request, url, createEnv(), undefined, createMockLogger());
       expect(response.status).toBe(200);
     });
 
     it("normalizes symbol to uppercase", async () => {
       vi.mocked(getHistoricalPricesByDateRange).mockResolvedValue([]);
-      const response = await getHistorical(createUrl({ symbol: "aapl" }), createEnv(), undefined, createMockLogger());
+      const url = createUrl({ symbol: "aapl" });
+      const request = createRequest({ symbol: "aapl" });
+      const response = await getHistorical(request, url, createEnv(), undefined, createMockLogger());
       expect(response.status).toBe(200);
       const data = await response.json();
       expect(data.symbol).toBe("AAPL");
@@ -79,12 +90,19 @@ describe("getHistorical handler", () => {
       const mockData = createMockData(["2025-01-01", "2025-01-02", "2025-01-03"]);
       vi.mocked(getHistoricalPricesByDateRange).mockResolvedValue(mockData);
       
+      const url = createUrl({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          from: "2025-01-01",
-          to: "2025-01-31",
-        }),
+        request,
+        url,
         createEnv(),
         undefined,
         createMockLogger()
@@ -99,12 +117,19 @@ describe("getHistorical handler", () => {
     });
 
     it("validates from date format", async () => {
+      const url = createUrl({
+        symbol: "AAPL",
+        from: "invalid-date",
+        to: "2025-01-31",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        from: "invalid-date",
+        to: "2025-01-31",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          from: "invalid-date",
-          to: "2025-01-31",
-        }),
+        request,
+        url,
         createEnv(),
         undefined,
         createMockLogger()
@@ -116,12 +141,19 @@ describe("getHistorical handler", () => {
     });
 
     it("validates to date format", async () => {
+      const url = createUrl({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "invalid-date",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "invalid-date",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          from: "2025-01-01",
-          to: "invalid-date",
-        }),
+        request,
+        url,
         createEnv(),
         undefined,
         createMockLogger()
@@ -133,12 +165,19 @@ describe("getHistorical handler", () => {
     });
 
     it("validates that from date is before to date", async () => {
+      const url = createUrl({
+        symbol: "AAPL",
+        from: "2025-01-31",
+        to: "2025-01-01",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        from: "2025-01-31",
+        to: "2025-01-01",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          from: "2025-01-31",
-          to: "2025-01-01",
-        }),
+        request,
+        url,
         createEnv(),
         undefined,
         createMockLogger()
@@ -153,12 +192,19 @@ describe("getHistorical handler", () => {
       const mockData = createMockData(["2025-01-01"]);
       vi.mocked(getHistoricalPricesByDateRange).mockResolvedValue(mockData);
       
+      const url = createUrl({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-01",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-01",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          from: "2025-01-01",
-          to: "2025-01-01",
-        }),
+        request,
+        url,
         createEnv(),
         undefined,
         createMockLogger()
@@ -170,11 +216,17 @@ describe("getHistorical handler", () => {
     it("defaults to today when only 'to' is provided", async () => {
       vi.mocked(getHistoricalPricesByDateRange).mockResolvedValue([]);
       
+      const url = createUrl({
+        symbol: "AAPL",
+        to: "2025-01-31",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        to: "2025-01-31",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          to: "2025-01-31",
-        }),
+        request,
+        url,
         createEnv(),
         undefined,
         createMockLogger()
@@ -189,11 +241,17 @@ describe("getHistorical handler", () => {
     it("defaults to today when only 'from' is provided", async () => {
       vi.mocked(getHistoricalPricesByDateRange).mockResolvedValue([]);
       
+      const url = createUrl({
+        symbol: "AAPL",
+        from: "2025-01-01",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        from: "2025-01-01",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          from: "2025-01-01",
-        }),
+        request,
+        url,
         createEnv(),
         undefined,
         createMockLogger()
@@ -211,11 +269,17 @@ describe("getHistorical handler", () => {
       const mockData = createMockData(["2025-01-01", "2025-01-02"]);
       vi.mocked(getHistoricalPricesByDateRange).mockResolvedValue(mockData);
       
+      const url = createUrl({
+        symbol: "AAPL",
+        days: "30",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        days: "30",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          days: "30",
-        }),
+        request,
+        url,
         createEnv(),
         undefined,
         createMockLogger()
@@ -231,7 +295,9 @@ describe("getHistorical handler", () => {
     it("defaults to 180 days when no parameters provided", async () => {
       vi.mocked(getHistoricalPricesByDateRange).mockResolvedValue([]);
       
-      const response = await getHistorical(createUrl({ symbol: "AAPL" }), createEnv());
+      const url = createUrl({ symbol: "AAPL" });
+      const request = createRequest({ symbol: "AAPL" });
+      const response = await getHistorical(request, url, createEnv(), undefined, createMockLogger());
       
       expect(response.status).toBe(200);
       const data = await response.json();
@@ -239,11 +305,17 @@ describe("getHistorical handler", () => {
     });
 
     it("validates days parameter minimum value", async () => {
+      const url = createUrl({
+        symbol: "AAPL",
+        days: "0",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        days: "0",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          days: "0",
-        }),
+        request,
+        url,
         createEnv(),
         undefined,
         createMockLogger()
@@ -255,11 +327,17 @@ describe("getHistorical handler", () => {
     });
 
     it("validates days parameter maximum value", async () => {
+      const url = createUrl({
+        symbol: "AAPL",
+        days: "4000",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        days: "4000",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          days: "4000",
-        }),
+        request,
+        url,
         createEnv(),
         undefined,
         createMockLogger()
@@ -271,11 +349,17 @@ describe("getHistorical handler", () => {
     });
 
     it("validates days parameter is a number", async () => {
+      const url = createUrl({
+        symbol: "AAPL",
+        days: "invalid",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        days: "invalid",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          days: "invalid",
-        }),
+        request,
+        url,
         createEnv(),
         undefined,
         createMockLogger()
@@ -292,13 +376,21 @@ describe("getHistorical handler", () => {
       const mockData = createMockData(["2025-01-01"]);
       vi.mocked(getHistoricalPricesByDateRange).mockResolvedValue(mockData);
       
+      const url = createUrl({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+        days: "30",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+        days: "30",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          from: "2025-01-01",
-          to: "2025-01-31",
-          days: "30",
-        }),
+        request,
+        url,
         createEnv(),
         undefined,
         createMockLogger()
@@ -317,12 +409,19 @@ describe("getHistorical handler", () => {
       const mockData = createMockData(["2025-01-01", "2025-01-02"]);
       vi.mocked(getHistoricalPricesByDateRange).mockResolvedValue(mockData);
       
+      const url = createUrl({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
       await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          from: "2025-01-01",
-          to: "2025-01-31",
-        }),
+        request,
+        url,
         createEnv(),
         undefined,
         createMockLogger()
@@ -347,12 +446,19 @@ describe("getHistorical handler", () => {
       const mockData = createMockData(["2025-01-01", "2025-01-02", "2025-01-03"]);
       vi.mocked(getHistoricalPricesByDateRange).mockResolvedValue(mockData);
       
+      const url = createUrl({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          from: "2025-01-01",
-          to: "2025-01-31",
-        }),
+        request,
+        url,
         createEnv(),
         undefined,
         createMockLogger()
@@ -367,12 +473,19 @@ describe("getHistorical handler", () => {
     it("returns empty array when database has no data", async () => {
       vi.mocked(getHistoricalPricesByDateRange).mockResolvedValue([]);
       
+      const url = createUrl({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          from: "2025-01-01",
-          to: "2025-01-31",
-        }),
+        request,
+        url,
         createEnv(),
         undefined,
         createMockLogger()
@@ -395,14 +508,22 @@ describe("getHistorical handler", () => {
       const env = createEnv();
       const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
       
+      const url = createUrl({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          from: "2025-01-01",
-          to: "2025-01-31",
-        }),
+        request,
+        url,
         env,
-        ctx
+        ctx,
+        createMockLogger()
       );
       
       expect(fetchAndSaveHistoricalPrice).toHaveBeenCalledWith("AAPL", env, expect.anything(), "2025-01-01", "2025-01-31");
@@ -416,12 +537,19 @@ describe("getHistorical handler", () => {
         .mockResolvedValueOnce(createMockData(["2025-01-01"])); // Second call - after fetch
       vi.mocked(fetchAndSaveHistoricalPrice).mockResolvedValue();
       
+      const url = createUrl({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          from: "2025-01-01",
-          to: "2025-01-31",
-        }),
+        request,
+        url,
         createEnv(),
         undefined,
         createMockLogger()
@@ -441,14 +569,22 @@ describe("getHistorical handler", () => {
       const env = createEnv();
       const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
       
+      const url = createUrl({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          from: "2025-01-01",
-          to: "2025-01-31",
-        }),
+        request,
+        url,
         env,
-        ctx
+        ctx,
+        createMockLogger()
       );
       
       expect(response.status).toBe(200);
@@ -462,12 +598,19 @@ describe("getHistorical handler", () => {
       const mockData = createMockData(["2025-01-01"]);
       vi.mocked(getHistoricalPricesByDateRange).mockResolvedValue(mockData);
       
+      const url = createUrl({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          from: "2025-01-01",
-          to: "2025-01-31",
-        }),
+        request,
+        url,
         createEnv(),
         undefined,
         createMockLogger()
@@ -488,11 +631,17 @@ describe("getHistorical handler", () => {
       const mockData = createMockData(["2025-01-01"]);
       vi.mocked(getHistoricalPricesByDateRange).mockResolvedValue(mockData);
       
+      const url = createUrl({
+        symbol: "AAPL",
+        days: "30",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        days: "30",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          days: "30",
-        }),
+        request,
+        url,
         createEnv(),
         undefined,
         createMockLogger()
@@ -514,12 +663,19 @@ describe("getHistorical handler", () => {
       const mockData = createMockData(["2025-01-01"]);
       vi.mocked(getHistoricalPricesByDateRange).mockResolvedValue(mockData);
       
+      const url = createUrl({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          from: "2025-01-01",
-          to: "2025-01-31",
-        }),
+        request,
+        url,
         createEnv(),
         undefined,
         createMockLogger()
@@ -577,14 +733,22 @@ describe("getHistorical handler", () => {
       const env = createEnv();
       const ctx = { waitUntil: vi.fn(), passThroughOnException: vi.fn(), props: {} } as unknown as ExecutionContext;
       
+      const url = createUrl({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          from: "2025-01-01",
-          to: "2025-01-31",
-        }),
+        request,
+        url,
         env,
-        ctx
+        ctx,
+        createMockLogger()
       );
       
       // Should detect missing OHLC and trigger re-fetch
@@ -617,14 +781,22 @@ describe("getHistorical handler", () => {
       const env = createEnv();
       const ctx = { waitUntil: vi.fn(), passThroughOnException: vi.fn(), props: {} } as unknown as ExecutionContext;
       
+      const url = createUrl({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          from: "2025-01-01",
-          to: "2025-01-31",
-        }),
+        request,
+        url,
         env,
-        ctx
+        ctx,
+        createMockLogger()
       );
       
       // Should NOT re-fetch since OHLC data is present
@@ -643,12 +815,19 @@ describe("getHistorical handler", () => {
     it("handles database query errors gracefully", async () => {
       vi.mocked(getHistoricalPricesByDateRange).mockRejectedValue(new Error("Database error"));
       
+      const url = createUrl({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
+      const request = createRequest({
+        symbol: "AAPL",
+        from: "2025-01-01",
+        to: "2025-01-31",
+      });
       const response = await getHistorical(
-        createUrl({
-          symbol: "AAPL",
-          from: "2025-01-01",
-          to: "2025-01-31",
-        }),
+        request,
+        url,
         createEnv(),
         undefined,
         createMockLogger()

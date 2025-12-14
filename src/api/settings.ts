@@ -40,17 +40,18 @@ export async function getSettings(
     return response;
   }
 
-  const userId = auth.userId;
+  const username = auth.username;
 
   try {
     const row = await env.stockly
       .prepare(
-        `SELECT user_id, refresh_interval_minutes, cache_stale_time_minutes, cache_gc_time_minutes, news_favorite_symbols, updated_at
-         FROM user_settings WHERE user_id = ?`
+        `SELECT user_id, username, refresh_interval_minutes, cache_stale_time_minutes, cache_gc_time_minutes, news_favorite_symbols, updated_at
+         FROM user_settings WHERE username = ?`
       )
-      .bind(userId)
+      .bind(username)
       .first<{
         user_id: string;
+        username: string | null;
         refresh_interval_minutes: number;
         cache_stale_time_minutes: number | null;
         cache_gc_time_minutes: number | null;
@@ -64,7 +65,7 @@ export async function getSettings(
         try {
           newsFavoriteSymbols = JSON.parse(row.news_favorite_symbols);
         } catch (e) {
-          logger.warn("Failed to parse news_favorite_symbols", { userId, error: e });
+          logger.warn("Failed to parse news_favorite_symbols", { username, userId: row.user_id, error: e });
         }
       }
 
@@ -78,9 +79,15 @@ export async function getSettings(
       };
       return json(settings, 200, request);
     } else {
+      // Get user_id from username for default settings
+      const user = await env.stockly
+        .prepare("SELECT id FROM users WHERE username = ?")
+        .bind(username)
+        .first<{ id: string }>();
+      
       // Return default settings if not found
       const defaultSettings: UserSettings = {
-        userId,
+        userId: user?.id || "",
         refreshIntervalMinutes: 5,
         cacheStaleTimeMinutes: 5,
         cacheGcTimeMinutes: 10,
@@ -90,7 +97,7 @@ export async function getSettings(
       return json(defaultSettings, 200, request);
     }
   } catch (error) {
-    logger.error("Failed to retrieve settings", error, { userId });
+    logger.error("Failed to retrieve settings", error, { username });
     return json({ error: "Failed to retrieve settings" }, 500, request);
   }
 }
@@ -122,9 +129,28 @@ export async function updateSettings(
     return response;
   }
 
-  const userId = auth.userId;
+  const username = auth.username;
 
   try {
+    // Get user_id from username first
+    const user = await env.stockly
+      .prepare("SELECT id FROM users WHERE username = ?")
+      .bind(username)
+      .first<{ id: string }>();
+
+    if (!user) {
+      const { response } = createErrorResponse(
+        "USER_NOT_FOUND",
+        "User not found",
+        undefined,
+        undefined,
+        request
+      );
+      return response;
+    }
+
+    const userId = user.id;
+
     const payload = await request.json();
     const { refreshIntervalMinutes, cacheStaleTimeMinutes, cacheGcTimeMinutes } = payload;
     // userId is from JWT authentication, not from payload
@@ -177,10 +203,10 @@ export async function updateSettings(
 
     const now = new Date().toISOString();
 
-    // Check if settings already exist for user
+    // Check if settings already exist for user (by username)
     const existing = await env.stockly
-      .prepare(`SELECT user_id FROM user_settings WHERE user_id = ?`)
-      .bind(userId)
+      .prepare(`SELECT user_id FROM user_settings WHERE username = ?`)
+      .bind(username)
       .first();
 
     if (existing) {
@@ -192,9 +218,9 @@ export async function updateSettings(
                cache_stale_time_minutes = ?,
                cache_gc_time_minutes = ?,
                updated_at = ?
-           WHERE user_id = ?`
+           WHERE username = ?`
         )
-        .bind(roundedMinutes, staleTimeMinutes, gcTimeMinutes, now, userId)
+        .bind(roundedMinutes, staleTimeMinutes, gcTimeMinutes, now, username)
         .run();
       return json({
         success: true,
@@ -208,13 +234,13 @@ export async function updateSettings(
         },
       }, 200, request);
     } else {
-      // Insert new settings
+      // Insert new settings (with both user_id and username)
       await env.stockly
         .prepare(
-          `INSERT INTO user_settings (user_id, refresh_interval_minutes, cache_stale_time_minutes, cache_gc_time_minutes, updated_at)
-           VALUES (?, ?, ?, ?, ?)`
+          `INSERT INTO user_settings (user_id, username, refresh_interval_minutes, cache_stale_time_minutes, cache_gc_time_minutes, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)`
         )
-        .bind(userId, roundedMinutes, staleTimeMinutes, gcTimeMinutes, now)
+        .bind(userId, username, roundedMinutes, staleTimeMinutes, gcTimeMinutes, now)
         .run();
       return json(
         {
@@ -233,7 +259,7 @@ export async function updateSettings(
       );
     }
   } catch (error) {
-    logger.error("Failed to update settings", error, { userId });
+    logger.error("Failed to update settings", error, { username });
     return json({ error: "Failed to update settings" }, 500, request);
   }
 }

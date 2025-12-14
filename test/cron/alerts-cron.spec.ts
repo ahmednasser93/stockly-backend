@@ -64,6 +64,7 @@ describe("Alert Cron Job", () => {
     status: "active",
     channel: "notification",
     target: "fcm-token-123",
+    username: "testuser",
     notes: null,
     createdAt: "2025-01-01T00:00:00.000Z",
     updatedAt: "2025-01-01T00:00:00.000Z",
@@ -146,11 +147,23 @@ describe("Alert Cron Job", () => {
       vi.mocked(getConfig).mockResolvedValue({ kvWriteIntervalSec: 3600 });
       vi.mocked(sendFCMNotification).mockResolvedValue(true);
 
-      const mockStmt = {
+      // Mock push tokens query
+      const pushTokensStmt = {
+        bind: vi.fn().mockReturnThis(),
+        all: vi.fn().mockResolvedValue({ 
+          results: [{ push_token: "fcm-token-123", device_type: "android" }] 
+        }),
+      };
+      
+      // Mock notifications_log insert
+      const logStmt = {
         bind: vi.fn().mockReturnThis(),
         run: vi.fn().mockResolvedValue({ success: true }),
       };
-      mockDb.prepare.mockReturnValue(mockStmt);
+      
+      mockDb.prepare
+        .mockReturnValueOnce(pushTokensStmt) // For push tokens query
+        .mockReturnValueOnce(logStmt); // For notifications_log insert
 
       await runAlertCron(mockEnv, mockCtx);
 
@@ -219,11 +232,23 @@ describe("Alert Cron Job", () => {
       });
       vi.mocked(getConfig).mockResolvedValue({ kvWriteIntervalSec: 3600 });
 
-      const mockStmt = {
+      // Mock push tokens query - returns Expo token
+      const pushTokensStmt = {
+        bind: vi.fn().mockReturnThis(),
+        all: vi.fn().mockResolvedValue({ 
+          results: [{ push_token: "ExponentPushToken[123]", device_type: null }] 
+        }),
+      };
+      
+      // Mock notifications_log insert
+      const logStmt = {
         bind: vi.fn().mockReturnThis(),
         run: vi.fn().mockResolvedValue({ success: true }),
       };
-      mockDb.prepare.mockReturnValue(mockStmt);
+      
+      mockDb.prepare
+        .mockReturnValueOnce(pushTokensStmt) // For push tokens query
+        .mockReturnValueOnce(logStmt); // For notifications_log insert
 
       await runAlertCron(mockEnv, mockCtx);
 
@@ -263,11 +288,23 @@ describe("Alert Cron Job", () => {
       vi.mocked(getConfig).mockResolvedValue({ kvWriteIntervalSec: 3600 });
       vi.mocked(sendFCMNotification).mockResolvedValue(false);
 
-      const mockStmt = {
+      // Mock push tokens query
+      const pushTokensStmt = {
+        bind: vi.fn().mockReturnThis(),
+        all: vi.fn().mockResolvedValue({ 
+          results: [{ push_token: "fcm-token-123", device_type: "android" }] 
+        }),
+      };
+      
+      // Mock notifications_log insert
+      const logStmt = {
         bind: vi.fn().mockReturnThis(),
         run: vi.fn().mockResolvedValue({ success: true }),
       };
-      mockDb.prepare.mockReturnValue(mockStmt);
+      
+      mockDb.prepare
+        .mockReturnValueOnce(pushTokensStmt) // For push tokens query
+        .mockReturnValueOnce(logStmt); // For notifications_log insert
 
       await runAlertCron(mockEnv, mockCtx);
 
@@ -306,11 +343,23 @@ describe("Alert Cron Job", () => {
         new Error("FCM send failed")
       );
 
-      const mockStmt = {
+      // Mock push tokens query
+      const pushTokensStmt = {
+        bind: vi.fn().mockReturnThis(),
+        all: vi.fn().mockResolvedValue({ 
+          results: [{ push_token: "fcm-token-123", device_type: "android" }] 
+        }),
+      };
+      
+      // Mock notifications_log insert
+      const logStmt = {
         bind: vi.fn().mockReturnThis(),
         run: vi.fn().mockResolvedValue({ success: true }),
       };
-      mockDb.prepare.mockReturnValue(mockStmt);
+      
+      mockDb.prepare
+        .mockReturnValueOnce(pushTokensStmt) // For push tokens query
+        .mockReturnValueOnce(logStmt); // For notifications_log insert
 
       await runAlertCron(mockEnv, mockCtx);
 
@@ -366,11 +415,26 @@ describe("Alert Cron Job", () => {
       vi.mocked(getConfig).mockResolvedValue({ kvWriteIntervalSec: 3600 });
       vi.mocked(sendFCMNotification).mockResolvedValue(true);
 
-      const mockStmt = {
+      // Mock push tokens query (called once per alert, but same user)
+      const pushTokensStmt = {
+        bind: vi.fn().mockReturnThis(),
+        all: vi.fn().mockResolvedValue({ 
+          results: [{ push_token: "fcm-token-123", device_type: "android" }] 
+        }),
+      };
+      
+      // Mock notifications_log insert (called once per notification)
+      const logStmt = {
         bind: vi.fn().mockReturnThis(),
         run: vi.fn().mockResolvedValue({ success: true }),
       };
-      mockDb.prepare.mockReturnValue(mockStmt);
+      
+      // Two alerts, so we need: 2 push token queries + 2 log inserts
+      mockDb.prepare
+        .mockReturnValueOnce(pushTokensStmt) // For first alert push tokens query
+        .mockReturnValueOnce(logStmt) // For first alert notifications_log insert
+        .mockReturnValueOnce(pushTokensStmt) // For second alert push tokens query
+        .mockReturnValueOnce(logStmt); // For second alert notifications_log insert
 
       await runAlertCron(mockEnv, mockCtx);
 

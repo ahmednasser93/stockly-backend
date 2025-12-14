@@ -7,5 +7,20 @@ export default defineWorkersConfig({
 				wrangler: { configPath: './wrangler.jsonc' },
 			},
 		},
+		coverage: {
+			provider: 'istanbul',
+			reporter: ['text', 'json', 'html'],
+			exclude: [
+				'node_modules/',
+				'test/',
+				'**/*.spec.ts',
+				'**/*.test.ts',
+			],
+		},
+		reporters: ['default', 'json', 'junit'],
+		outputFile: {
+			json: './test-results/results.json',
+			junit: './test-results/junit.xml',
+		},
 	},
 });

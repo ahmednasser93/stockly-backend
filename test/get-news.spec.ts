@@ -1,12 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { getGeneralNews, getFavoriteNews } from '../src/api/get-news';
 import { getArchivedNews, toggleArchivedNews } from '../src/api/news-archive';
-import { updatePreferences } from '../src/api/user-preferences';
-import { createTestEnv, createTestRequest } from './test-utils';
+import { updateUserPreferences } from '../src/api/user-preferences';
+import { createTestEnv, createTestRequest, createMockLogger } from './test-utils';
+import * as authMiddleware from '../src/auth/middleware';
 
 // Mock fetch
 const fetchMock = vi.fn();
 global.fetch = fetchMock;
+
+vi.mock('../src/auth/middleware', () => ({
+  authenticateRequest: vi.fn(),
+  authenticateRequestWithAdmin: vi.fn(),
+}));
 
 describe('News API', () => {
     let env: any;
@@ -14,6 +20,15 @@ describe('News API', () => {
     beforeEach(() => {
         env = createTestEnv();
         fetchMock.mockReset();
+        vi.clearAllMocks();
+        
+        // Default mock for authentication
+        vi.mocked(authMiddleware.authenticateRequest).mockResolvedValue({
+          username: "testuser",
+          userId: "user-123",
+          tokenType: "access" as const,
+          isAdmin: false,
+        });
     });
 
     describe('getGeneralNews', () => {
@@ -36,11 +51,14 @@ describe('News API', () => {
             });
 
             const request = createTestRequest('http://localhost/v1/api/news/general');
-            const response = await getGeneralNews(request, env);
+            const url = new URL(request.url);
+            const logger = createMockLogger();
+            const response = await getGeneralNews(request, url, env, logger);
             const data = await response.json();
 
             expect(response.status).toBe(200);
             expect(data).toHaveProperty('news');
+            expect(Array.isArray(data.news)).toBe(true);
             expect(data.news).toHaveLength(1);
             expect(data.news[0].title).toBe('Apple News');
             expect(fetchMock).toHaveBeenCalledWith(
@@ -50,16 +68,18 @@ describe('News API', () => {
         });
 
         it('should handle API errors gracefully', async () => {
-            fetchMock.mockResolvedValueOnce({
-                ok: false,
-                status: 500,
-            });
+            // Use pagination to bypass cache (page=1 disables cache)
+            // Mock fetch to throw an error (simulating API failure)
+            fetchMock.mockRejectedValueOnce(new Error('API error'));
 
-            const request = createTestRequest('http://localhost/v1/api/news/general');
-            const response = await getGeneralNews(request, env);
+            const request = createTestRequest('http://localhost/v1/api/news/general?page=1');
+            const url = new URL(request.url);
+            const logger = createMockLogger();
+            const response = await getGeneralNews(request, url, env, logger);
             const data = await response.json();
 
-            expect(response.status).toBe(200); // Should return empty list, not error
+            // When API fails, the function should still return 200 with empty news array
+            expect(response.status).toBe(200);
             expect(data.news).toEqual([]);
         });
     });
@@ -67,13 +87,15 @@ describe('News API', () => {
     describe('getFavoriteNews', () => {
         it('should return news for favorite symbols', async () => {
             // Mock user settings
-            env.DB.prepare = vi.fn().mockReturnValue({
-                bind: vi.fn().mockReturnValue({
-                    first: vi.fn().mockResolvedValue({
-                        news_favorite_symbols: JSON.stringify(['AAPL', 'TSLA']),
+            env.stockly = {
+                prepare: vi.fn().mockReturnValue({
+                    bind: vi.fn().mockReturnValue({
+                        first: vi.fn().mockResolvedValue({
+                            news_favorite_symbols: JSON.stringify(['AAPL', 'TSLA']),
+                        }),
                     }),
                 }),
-            });
+            } as any;
 
             const mockNews = [
                 {
@@ -93,24 +115,31 @@ describe('News API', () => {
             });
 
             const request = createTestRequest('http://localhost/v1/api/news/favorites');
-            const response = await getFavoriteNews(request, env);
+            const url = new URL(request.url);
+            const logger = createMockLogger();
+            const response = await getFavoriteNews(request, url, env, logger);
             const data = await response.json();
 
             expect(response.status).toBe(200);
             expect(data).toHaveProperty('news');
+            expect(Array.isArray(data.news)).toBe(true);
             // Note: Actual implementation might deduplicate or limit, but we expect some news
             expect(fetchMock).toHaveBeenCalled();
         });
 
         it('should return empty list if no favorites', async () => {
-            env.DB.prepare = vi.fn().mockReturnValue({
-                bind: vi.fn().mockReturnValue({
-                    first: vi.fn().mockResolvedValue(null),
+            env.stockly = {
+                prepare: vi.fn().mockReturnValue({
+                    bind: vi.fn().mockReturnValue({
+                        first: vi.fn().mockResolvedValue(null),
+                    }),
                 }),
-            });
+            } as any;
 
             const request = createTestRequest('http://localhost/v1/api/news/favorites');
-            const response = await getFavoriteNews(request, env);
+            const url = new URL(request.url);
+            const logger = createMockLogger();
+            const response = await getFavoriteNews(request, url, env, logger);
             const data = await response.json();
 
             expect(response.status).toBe(200);
@@ -132,19 +161,33 @@ describe('News API', () => {
                 }
             );
 
-            // Mock DB check (not exists)
-            env.DB.prepare = vi.fn().mockReturnValue({
-                bind: vi.fn().mockReturnValue({
-                    first: vi.fn().mockResolvedValue(null), // Not bookmarked yet
-                    run: vi.fn().mockResolvedValue({ success: true }),
+            // Mock DB calls: user lookup, then bookmark check, then insert
+            let callCount = 0;
+            env.stockly = {
+                prepare: vi.fn().mockImplementation((query: string) => {
+                    const stmt = {
+                        bind: vi.fn().mockReturnValue({
+                            first: vi.fn().mockImplementation(() => {
+                                callCount++;
+                                if (query.includes("SELECT id FROM users")) {
+                                    return Promise.resolve({ id: "user-123" });
+                                }
+                                // Bookmark check - not exists
+                                return Promise.resolve(null);
+                            }),
+                            run: vi.fn().mockResolvedValue({ success: true }),
+                        }),
+                    };
+                    return stmt;
                 }),
-            });
+            } as any;
 
-            const response = await toggleArchivedNews(request, env);
+            const logger = createMockLogger();
+            const response = await toggleArchivedNews(request, articleId, env, logger);
             const data = await response.json();
 
             expect(response.status).toBe(200);
-            expect(data.bookmarked).toBe(true);
+            expect(data.saved).toBe(true);
         });
 
         it('should retrieve archived news', async () => {
@@ -153,26 +196,44 @@ describe('News API', () => {
                     article_id: '1',
                     title: 'Saved Article',
                     url: 'https://example.com',
-                    published_date: '2023-10-27',
-                    source: 'Test Source',
+                    saved_at: '2023-10-27T10:00:00Z',
                     symbol: 'AAPL',
-                    image_url: 'image.jpg',
                 },
             ];
 
-            env.DB.prepare = vi.fn().mockReturnValue({
-                bind: vi.fn().mockReturnValue({
-                    all: vi.fn().mockResolvedValue({ results: mockSavedNews }),
+            let callCount = 0;
+            env.stockly = {
+                prepare: vi.fn().mockImplementation((query: string) => {
+                    const stmt = {
+                        bind: vi.fn().mockReturnThis(),
+                        first: vi.fn().mockResolvedValue({ id: 'user-123' }),
+                        all: vi.fn().mockResolvedValue({ results: [] }),
+                    };
+                    
+                    if (query.includes('SELECT id FROM users')) {
+                        // First call: get user_id from username
+                        return stmt;
+                    } else if (query.includes('SELECT COUNT(*)')) {
+                        // Second call: get total count
+                        stmt.first = vi.fn().mockResolvedValue({ total: 1 });
+                        return stmt;
+                    } else if (query.includes('SELECT article_id')) {
+                        // Third call: get archived articles
+                        stmt.all = vi.fn().mockResolvedValue({ results: mockSavedNews });
+                        return stmt;
+                    }
+                    return stmt;
                 }),
-            });
+            } as any;
 
             const request = createTestRequest('http://localhost/v1/api/news/archive');
-            const response = await getArchivedNews(request, env);
+            const logger = createMockLogger();
+            const response = await getArchivedNews(request, env, logger);
             const data = await response.json();
 
             expect(response.status).toBe(200);
-            expect(data.news).toHaveLength(1);
-            expect(data.news[0].title).toBe('Saved Article');
+            expect(data.articles).toHaveLength(1);
+            expect(data.articles[0].title).toBe('Saved Article');
         });
     });
 
@@ -186,13 +247,28 @@ describe('News API', () => {
                 }
             );
 
-            env.DB.prepare = vi.fn().mockReturnValue({
-                bind: vi.fn().mockReturnValue({
-                    run: vi.fn().mockResolvedValue({ success: true }),
+            // Mock user lookup and preferences update
+            let callCount = 0;
+            env.stockly = {
+                prepare: vi.fn().mockImplementation((query: string) => {
+                    const stmt = {
+                        bind: vi.fn().mockReturnValue({
+                            first: vi.fn().mockImplementation(() => {
+                                callCount++;
+                                if (query.includes("SELECT id FROM users")) {
+                                    return Promise.resolve({ id: "user-123" });
+                                }
+                                return Promise.resolve(null);
+                            }),
+                            run: vi.fn().mockResolvedValue({ success: true }),
+                        }),
+                    };
+                    return stmt;
                 }),
-            });
+            } as any;
 
-            const response = await updatePreferences(request, env);
+            const logger = createMockLogger();
+            const response = await updateUserPreferences(request, env, logger);
             const data = await response.json();
 
             expect(response.status).toBe(200);

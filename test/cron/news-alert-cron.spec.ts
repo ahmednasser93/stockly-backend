@@ -76,7 +76,10 @@ describe("News Alert Cron Job", () => {
       };
 
       const mockStmt = {
+        bind: vi.fn().mockReturnThis(),
         all: vi.fn().mockResolvedValue(mockSettings),
+        first: vi.fn().mockResolvedValue(null),
+        run: vi.fn().mockResolvedValue({ success: true }),
       };
 
       mockDb.prepare.mockReturnValue(mockStmt);
@@ -114,7 +117,10 @@ describe("News Alert Cron Job", () => {
       };
 
       const mockStmt = {
+        bind: vi.fn().mockReturnThis(),
         all: vi.fn().mockResolvedValue(mockSettings),
+        first: vi.fn().mockResolvedValue(null),
+        run: vi.fn().mockResolvedValue({ success: true }),
       };
 
       mockDb.prepare.mockReturnValue(mockStmt);
@@ -143,7 +149,10 @@ describe("News Alert Cron Job", () => {
       };
 
       const mockStmt = {
+        bind: vi.fn().mockReturnThis(),
         all: vi.fn().mockResolvedValue(mockSettings),
+        first: vi.fn().mockResolvedValue(null),
+        run: vi.fn().mockResolvedValue({ success: true }),
       };
 
       mockDb.prepare.mockReturnValue(mockStmt);
@@ -170,7 +179,10 @@ describe("News Alert Cron Job", () => {
       };
 
       const mockStmt = {
+        bind: vi.fn().mockReturnThis(),
         all: vi.fn().mockResolvedValue(mockSettings),
+        first: vi.fn().mockResolvedValue(null),
+        run: vi.fn().mockResolvedValue({ success: true }),
       };
 
       mockDb.prepare.mockReturnValue(mockStmt);
@@ -282,7 +294,10 @@ describe("News Alert Cron Job", () => {
       };
 
       const mockStmt = {
+        bind: vi.fn().mockReturnThis(),
         all: vi.fn().mockResolvedValue(mockSettings),
+        first: vi.fn().mockResolvedValue(null),
+        run: vi.fn().mockResolvedValue({ success: true }),
       };
 
       mockDb.prepare.mockReturnValue(mockStmt);
@@ -368,7 +383,10 @@ describe("News Alert Cron Job", () => {
       };
 
       const mockStmt = {
+        bind: vi.fn().mockReturnThis(),
         all: vi.fn().mockResolvedValue(mockSettings),
+        first: vi.fn().mockResolvedValue(null),
+        run: vi.fn().mockResolvedValue({ success: true }),
       };
 
       mockDb.prepare.mockReturnValue(mockStmt);
@@ -423,8 +441,8 @@ describe("News Alert Cron Job", () => {
           // Subsequent calls: push tokens
           return Promise.resolve({
             results: [
-              { user_id: "user1", token: "token-user1" },
-              { user_id: "user3", token: "token-user3" },
+              { user_id: "user1", push_token: "token-user1" },
+              { user_id: "user3", push_token: "token-user3" },
             ],
           });
         }),
@@ -586,7 +604,10 @@ describe("News Alert Cron Job", () => {
       };
 
       const mockStmt = {
+        bind: vi.fn().mockReturnThis(),
         all: vi.fn().mockResolvedValue(mockSettings),
+        first: vi.fn().mockResolvedValue(null),
+        run: vi.fn().mockResolvedValue({ success: true }),
       };
 
       mockDb.prepare.mockReturnValue(mockStmt);
@@ -609,7 +630,10 @@ describe("News Alert Cron Job", () => {
       };
 
       const mockStmt = {
+        bind: vi.fn().mockReturnThis(),
         all: vi.fn().mockResolvedValue(mockSettings),
+        first: vi.fn().mockResolvedValue(null),
+        run: vi.fn().mockResolvedValue({ success: true }),
       };
 
       mockDb.prepare.mockReturnValue(mockStmt);
@@ -629,7 +653,10 @@ describe("News Alert Cron Job", () => {
       };
 
       const mockStmt = {
+        bind: vi.fn().mockReturnThis(),
         all: vi.fn().mockResolvedValue(mockSettings),
+        first: vi.fn().mockResolvedValue(null),
+        run: vi.fn().mockResolvedValue({ success: true }),
       };
 
       mockDb.prepare.mockReturnValue(mockStmt);
@@ -651,7 +678,10 @@ describe("News Alert Cron Job", () => {
       };
 
       const mockStmt = {
+        bind: vi.fn().mockReturnThis(),
         all: vi.fn().mockResolvedValue(mockSettings),
+        first: vi.fn().mockResolvedValue(null),
+        run: vi.fn().mockResolvedValue({ success: true }),
       };
 
       mockDb.prepare.mockReturnValue(mockStmt);

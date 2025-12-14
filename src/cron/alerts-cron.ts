@@ -121,24 +121,21 @@ export async function runAlertCron(env: Env, ctx?: ExecutionContext): Promise<vo
         channel: alert.channel,
       });
 
-      // Send push notification if channel is "notification" and target is a push token
-      if (alert.channel === "notification" && alert.target) {
-        // Skip old Expo tokens - they need to be cleaned up
-        if (alert.target.startsWith("ExponentPushToken[")) {
-          logger.warn("Skipping alert with old Expo token - FCM migration required", {
+      // Send push notification if channel is "notification" and username exists
+      if (alert.channel === "notification" && alert.username) {
+        // Get all push tokens for this username (supporting multiple devices per user)
+        const userTokens = await env.stockly
+          .prepare(`SELECT push_token, device_type FROM user_push_tokens WHERE username = ?`)
+          .bind(alert.username)
+          .all<{ push_token: string; device_type: string | null }>();
+
+        if (!userTokens.results || userTokens.results.length === 0) {
+          logger.warn("No push tokens found for username", {
             alertId: alert.id,
             symbol: alert.symbol,
+            username: alert.username,
           });
-          const logId = `${alert.id}_${Date.now()}`;
-          const now = new Date().toISOString();
-          await env.stockly
-            .prepare(
-              `INSERT INTO notifications_log (id, alert_id, symbol, threshold, price, direction, push_token, status, error_message, sent_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-            )
-            .bind(logId, alert.id, alert.symbol, alert.threshold, price, alert.direction, alert.target, "error", "Expo token detected - FCM migration required. User must re-register token.", now)
-            .run();
-          continue; // Skip this alert
+          continue; // Skip this alert - no devices to notify
         }
 
         const title = `${alert.symbol} Alert`;
@@ -155,55 +152,103 @@ export async function runAlertCron(env: Env, ctx?: ExecutionContext): Promise<vo
           direction: alert.direction,
         };
 
-        try {
-        const sent = await sendFCMNotification(alert.target, title, body, pushData, env, logger);
-        const logId = `${alert.id}_${Date.now()}`;
-        const now = new Date().toISOString();
-        
-        if (sent) {
-          logger.info("FCM notification sent successfully", {
-            alertId: alert.id,
-            symbol: alert.symbol,
-          });
-          // Log successful notification
-          await env.stockly
-            .prepare(
-              `INSERT INTO notifications_log (id, alert_id, symbol, threshold, price, direction, push_token, status, sent_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-            )
-            .bind(logId, alert.id, alert.symbol, alert.threshold, price, alert.direction, alert.target, "success", now)
-            .run();
-        } else {
-          logger.error("Failed to send FCM notification", new Error("FCM send returned false"), {
-            alertId: alert.id,
-            symbol: alert.symbol,
-          });
-          // Log failed notification
-          await env.stockly
-            .prepare(
-              `INSERT INTO notifications_log (id, alert_id, symbol, threshold, price, direction, push_token, status, error_message, sent_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-            )
-            .bind(logId, alert.id, alert.symbol, alert.threshold, price, alert.direction, alert.target, "failed", "Failed to send FCM notification", now)
-            .run();
+        // Send notification to all devices for this user
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const tokenRow of userTokens.results) {
+          const pushToken = tokenRow.push_token;
+
+          // Skip old Expo tokens - they need to be cleaned up
+          if (pushToken.startsWith("ExponentPushToken[")) {
+            logger.warn("Skipping alert with old Expo token - FCM migration required", {
+              alertId: alert.id,
+              symbol: alert.symbol,
+              pushToken: pushToken.substring(0, 50),
+            });
+            const logId = `${alert.id}_${Date.now()}_${pushToken.substring(0, 20)}`;
+            const now = new Date().toISOString();
+            await env.stockly
+              .prepare(
+                `INSERT INTO notifications_log (id, alert_id, symbol, threshold, price, direction, push_token, status, error_message, username, sent_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              )
+              .bind(logId, alert.id, alert.symbol, alert.threshold, price, alert.direction, pushToken, "error", "Expo token detected - FCM migration required. User must re-register token.", alert.username, now)
+              .run();
+            failCount++;
+            continue;
+          }
+
+          try {
+            const sent = await sendFCMNotification(pushToken, title, body, pushData, env, logger);
+            const logId = `${alert.id}_${Date.now()}_${pushToken.substring(0, 20)}`;
+            const now = new Date().toISOString();
+            
+            if (sent) {
+              successCount++;
+              logger.info("FCM notification sent successfully", {
+                alertId: alert.id,
+                symbol: alert.symbol,
+                pushToken: pushToken.substring(0, 50),
+              });
+              // Log successful notification with username
+              await env.stockly
+                .prepare(
+                  `INSERT INTO notifications_log (id, alert_id, symbol, threshold, price, direction, push_token, status, username, sent_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                )
+                .bind(logId, alert.id, alert.symbol, alert.threshold, price, alert.direction, pushToken, "success", alert.username, now)
+                .run();
+            } else {
+              failCount++;
+              logger.error("Failed to send FCM notification", new Error("FCM send returned false"), {
+                alertId: alert.id,
+                symbol: alert.symbol,
+                pushToken: pushToken.substring(0, 50),
+              });
+              // Log failed notification with username
+              await env.stockly
+                .prepare(
+                  `INSERT INTO notifications_log (id, alert_id, symbol, threshold, price, direction, push_token, status, error_message, username, sent_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                )
+                .bind(logId, alert.id, alert.symbol, alert.threshold, price, alert.direction, pushToken, "failed", "Failed to send FCM notification", alert.username, now)
+                .run();
+            }
+          } catch (error) {
+            failCount++;
+            logger.error("Error sending FCM notification", error, {
+              alertId: alert.id,
+              symbol: alert.symbol,
+              pushToken: pushToken.substring(0, 50),
+            });
+            // Log error with username
+            const logId = `${alert.id}_${Date.now()}_${pushToken.substring(0, 20)}`;
+            const now = new Date().toISOString();
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            await env.stockly
+              .prepare(
+                `INSERT INTO notifications_log (id, alert_id, symbol, threshold, price, direction, push_token, status, error_message, username, sent_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              )
+              .bind(logId, alert.id, alert.symbol, alert.threshold, price, alert.direction, pushToken, "error", errorMessage, alert.username, now)
+              .run();
+          }
         }
-      } catch (error) {
-        logger.error("Error sending FCM notification", error, {
+
+        logger.info("Alert notification sent to all user devices", {
+          alertId: alert.id,
+          symbol: alert.symbol,
+          username: alert.username,
+          devicesCount: userTokens.results.length,
+          successCount,
+          failCount,
+        });
+      } else if (alert.channel === "notification" && !alert.username) {
+        logger.warn("Alert has no username - cannot send notification", {
           alertId: alert.id,
           symbol: alert.symbol,
         });
-        // Log error
-        const logId = `${alert.id}_${Date.now()}`;
-        const now = new Date().toISOString();
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        await env.stockly
-          .prepare(
-            `INSERT INTO notifications_log (id, alert_id, symbol, threshold, price, direction, push_token, status, error_message, sent_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-          )
-          .bind(logId, alert.id, alert.symbol, alert.threshold, price, alert.direction, alert.target, "error", errorMessage, now)
-          .run();
-        }
       }
     }
 

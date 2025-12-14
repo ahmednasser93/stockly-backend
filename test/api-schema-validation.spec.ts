@@ -45,6 +45,14 @@ vi.mock("../src/alerts/storage", () => ({
 vi.mock("../src/alerts/state", () => ({
   deleteAlertState: vi.fn(),
 }));
+
+vi.mock("../src/auth/middleware", () => ({
+  authenticateRequest: vi.fn(),
+  authenticateRequestWithAdmin: vi.fn(),
+}));
+
+import { authenticateRequestWithAdmin } from "../src/auth/middleware";
+
 import { API_KEY, API_URL } from "../src/util";
 import { clearCache } from "../src/api/cache";
 import type { Env } from "../src/index";
@@ -60,6 +68,11 @@ const createUrl = (path: string, params: Record<string, string> = {}) => {
     url.searchParams.set(key, value);
   });
   return url;
+};
+
+const createRequest = (path: string, params: Record<string, string> = {}) => {
+  const url = createUrl(path, params);
+  return new Request(url.toString());
 };
 
 const createEnv = (): Env => {
@@ -126,7 +139,9 @@ describe("API Schema Validation - Get Stock", () => {
       } as Response);
 
     const env = createEnv();
-    const response = await getStock(createUrl("/v1/api/get-stock", { symbol: "AAPL" }), env, undefined, createMockLogger());
+    const url = createUrl("/v1/api/get-stock", { symbol: "AAPL" });
+    const request = createRequest("/v1/api/get-stock", { symbol: "AAPL" });
+    const response = await getStock(request, url, env, undefined, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -138,7 +153,9 @@ describe("API Schema Validation - Get Stock", () => {
 
   it("getStock returns valid ErrorResponse schema on error", async () => {
     const env = createEnv();
-    const response = await getStock(createUrl("/v1/api/get-stock"), env, undefined, createMockLogger());
+    const url = createUrl("/v1/api/get-stock");
+    const request = createRequest("/v1/api/get-stock");
+    const response = await getStock(request, url, env, undefined, createMockLogger());
     
     expect(response.status).toBe(400);
     const data = await response.json();
@@ -175,7 +192,9 @@ describe("API Schema Validation - Get Stocks", () => {
       } as Response);
 
     const env = createEnv();
-    const response = await getStocks(createUrl("/v1/api/get-stocks", { symbols: "AAPL,MSFT" }), env, createMockLogger());
+    const url = createUrl("/v1/api/get-stocks", { symbols: "AAPL,MSFT" });
+    const request = createRequest("/v1/api/get-stocks", { symbols: "AAPL,MSFT" });
+    const response = await getStocks(request, url, env, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -189,7 +208,9 @@ describe("API Schema Validation - Get Stocks", () => {
 
   it("getStocks returns valid ErrorResponse schema on error", async () => {
     const env = createEnv();
-    const response = await getStocks(createUrl("/v1/api/get-stocks"), env, createMockLogger());
+    const url = createUrl("/v1/api/get-stocks");
+    const request = createRequest("/v1/api/get-stocks");
+    const response = await getStocks(request, url, env, createMockLogger());
     
     expect(response.status).toBe(400);
     const data = await response.json();
@@ -219,7 +240,9 @@ describe("API Schema Validation - Search Stock", () => {
     } as Response);
 
     const env = createEnv();
-    const response = await searchStock(createUrl("/v1/api/search-stock", { query: "AP" }), env, createMockLogger());
+    const url = createUrl("/v1/api/search-stock", { query: "AP" });
+    const request = createRequest("/v1/api/search-stock", { query: "AP" });
+    const response = await searchStock(request, url, env, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -254,7 +277,9 @@ describe("API Schema Validation - Get Historical", () => {
     });
     env.stockly.prepare = vi.fn().mockReturnValue({ bind });
 
-    const response = await getHistorical(createUrl("/v1/api/get-historical", { symbol: "AAPL", days: "180" }), env, undefined, createMockLogger());
+    const url = createUrl("/v1/api/get-historical", { symbol: "AAPL", days: "180" });
+    const request = createRequest("/v1/api/get-historical", { symbol: "AAPL", days: "180" });
+    const response = await getHistorical(request, url, env, undefined, createMockLogger());
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -267,7 +292,9 @@ describe("API Schema Validation - Get Historical", () => {
 
   it("getHistorical returns valid ErrorResponse schema on error", async () => {
     const env = createEnv();
-    const response = await getHistorical(createUrl("/v1/api/get-historical"), env, undefined, createMockLogger());
+    const url = createUrl("/v1/api/get-historical");
+    const request = createRequest("/v1/api/get-historical");
+    const response = await getHistorical(request, url, env, undefined, createMockLogger());
     
     expect(response.status).toBe(400);
     const data = await response.json();
@@ -282,6 +309,13 @@ describe("API Schema Validation - Get Historical", () => {
 describe("API Schema Validation - Alerts", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    // Reset auth mock to return authenticated user
+    vi.mocked(authenticateRequestWithAdmin).mockResolvedValue({
+      username: "testuser",
+      userId: "user-123",
+      tokenType: "access" as const,
+      isAdmin: false,
+    });
   });
 
   it("listAlerts returns valid AlertsListResponse schema", async () => {

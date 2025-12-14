@@ -13,6 +13,11 @@ const createUrl = (params: Record<string, string> = {}) => {
   return url;
 };
 
+const createRequest = (params: Record<string, string> = {}) => {
+  const url = createUrl(params);
+  return new Request(url.toString());
+};
+
 const createEnv = (options?: {
   selectRow?: { results: string; timestamp: number } | null;
 }) => {
@@ -66,7 +71,9 @@ describe("searchStock handler", () => {
 
   it("returns empty results when query is invalid", async () => {
     const { env } = createEnv();
-    const response = await searchStock(createUrl({ query: "a" }), env, createMockLogger());
+    const url = createUrl({ query: "a" });
+    const request = createRequest({ query: "a" });
+    const response = await searchStock(request, url, env, createMockLogger());
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual([]);
@@ -78,7 +85,9 @@ describe("searchStock handler", () => {
     const fetchSpy = vi.spyOn(globalThis as any, "fetch");
 
     const { env } = createEnv();
-    const response = await searchStock(createUrl({ query: "MS" }), env, createMockLogger());
+    const url = createUrl({ query: "MS" });
+    const request = createRequest({ query: "MS" });
+    const response = await searchStock(request, url, env, createMockLogger());
 
     expect(fetchSpy).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual(cached);
@@ -91,7 +100,9 @@ describe("searchStock handler", () => {
     });
     const fetchSpy = vi.spyOn(globalThis as any, "fetch");
 
-    const response = await searchStock(createUrl({ query: "AA" }), env, createMockLogger());
+    const url = createUrl({ query: "AA" });
+    const request = createRequest({ query: "AA" });
+    const response = await searchStock(request, url, env, createMockLogger());
 
     expect(spies.selectFirst).toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -118,7 +129,9 @@ describe("searchStock handler", () => {
       selectRow: null,
     });
 
-    const response = await searchStock(createUrl({ query: "AA" }), env, createMockLogger());
+    const url = createUrl({ query: "AA" });
+    const request = createRequest({ query: "AA" });
+    const response = await searchStock(request, url, env, createMockLogger());
 
     // The API now calls both search-name and search-symbol endpoints with limit=20
     expect(fetchMock).toHaveBeenCalledWith(
@@ -155,7 +168,9 @@ describe("searchStock handler", () => {
       .spyOn(globalThis as any, "fetch")
       .mockResolvedValue({ json } as Response);
 
-    await searchStock(createUrl({ query: "OL" }), env, createMockLogger());
+    const url = createUrl({ query: "OL" });
+    const request = createRequest({ query: "OL" });
+    await searchStock(request, url, env, createMockLogger());
 
     expect(spies.selectFirst).toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalled();
@@ -170,7 +185,9 @@ describe("searchStock handler", () => {
     // Mock fetch to reject, which will be caught by .catch(() => null)
     vi.spyOn(globalThis as any, "fetch").mockRejectedValue(new Error("Network error"));
 
-    const response = await searchStock(createUrl({ query: "MSFT" }), env, createMockLogger());
+    const url = createUrl({ query: "MSFT" });
+    const request = createRequest({ query: "MSFT" });
+    const response = await searchStock(request, url, env, createMockLogger());
 
     // The API gracefully handles fetch failures by returning empty array (200)
     expect(response.status).toBe(200);

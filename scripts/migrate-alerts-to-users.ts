@@ -53,3 +53,6 @@ console.log("\nTo execute this migration, run:");
 console.log("wrangler d1 execute stockly --command=\"" + SQL_MIGRATION.replace(/\n/g, " ") + "\"");
 console.log("\nOr save the SQL to a file and run:");
 console.log("wrangler d1 execute stockly --file=migration.sql");
+
+
+
