@@ -1,17 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { getGeneralNews, getFavoriteNews } from '../src/api/get-news';
+import { getGeneralNews, getFavoriteNews, getNews } from '../src/api/get-news';
 import { getArchivedNews, toggleArchivedNews } from '../src/api/news-archive';
 import { updateUserPreferences } from '../src/api/user-preferences';
 import { createTestEnv, createTestRequest, createMockLogger } from './test-utils';
 import * as authMiddleware from '../src/auth/middleware';
+import { clearNewsCache } from '../src/api/news-cache';
 
 // Mock fetch
 const fetchMock = vi.fn();
 global.fetch = fetchMock;
 
 vi.mock('../src/auth/middleware', () => ({
-  authenticateRequest: vi.fn(),
-  authenticateRequestWithAdmin: vi.fn(),
+    authenticateRequest: vi.fn(),
+    authenticateRequestWithAdmin: vi.fn(),
 }));
 
 describe('News API', () => {
@@ -21,13 +22,14 @@ describe('News API', () => {
         env = createTestEnv();
         fetchMock.mockReset();
         vi.clearAllMocks();
-        
+        clearNewsCache();
+
         // Default mock for authentication
         vi.mocked(authMiddleware.authenticateRequest).mockResolvedValue({
-          username: "testuser",
-          userId: "user-123",
-          tokenType: "access" as const,
-          isAdmin: false,
+            username: "testuser",
+            userId: "user-123",
+            tokenType: "access" as const,
+            isAdmin: false,
         });
     });
 
@@ -209,7 +211,7 @@ describe('News API', () => {
                         first: vi.fn().mockResolvedValue({ id: 'user-123' }),
                         all: vi.fn().mockResolvedValue({ results: [] }),
                     };
-                    
+
                     if (query.includes('SELECT id FROM users')) {
                         // First call: get user_id from username
                         return stmt;
@@ -273,6 +275,106 @@ describe('News API', () => {
 
             expect(response.status).toBe(200);
             expect(data.success).toBe(true);
+        });
+    });
+
+    describe('getNews', () => {
+        it('should return news for a specific symbol', async () => {
+            const mockNews = [
+                {
+                    symbol: 'AAPL',
+                    publishedDate: '2023-10-27 10:00:00',
+                    title: 'Apple News',
+                    text: 'News text',
+                    url: 'https://example.com',
+                },
+            ];
+
+            fetchMock.mockResolvedValueOnce({
+                ok: true,
+                json: async () => mockNews,
+            });
+
+            const request = createTestRequest('http://localhost/v1/api/news?symbol=AAPL');
+            const url = new URL(request.url);
+            const logger = createMockLogger();
+            const response = await getNews(request, url, env, logger);
+            const data = await response.json();
+
+            expect(response.status).toBe(200);
+            expect(data.symbols).toEqual(['AAPL']);
+            expect(data.news).toHaveLength(1);
+            expect(data.news[0].symbol).toBe('AAPL');
+            expect(fetchMock).toHaveBeenCalledWith(
+                expect.stringContaining('symbols=AAPL'),
+                expect.any(Object)
+            );
+        });
+
+        it('should validate pagination parameters', async () => {
+            const invalidRequests = [
+                'http://localhost/v1/api/news?symbol=AAPL&from=invalid',
+                'http://localhost/v1/api/news?symbol=AAPL&to=invalid',
+                'http://localhost/v1/api/news?symbol=AAPL&page=-1',
+                'http://localhost/v1/api/news?symbol=AAPL&limit=300',
+            ];
+
+            const logger = createMockLogger();
+
+            for (const reqUrl of invalidRequests) {
+                const request = createTestRequest(reqUrl);
+                const url = new URL(request.url);
+                const response = await getNews(request, url, env, logger);
+                expect(response.status).toBe(400);
+            }
+        });
+
+        it('should pass pagination parameters to API', async () => {
+            fetchMock.mockResolvedValueOnce({
+                ok: true,
+                json: async () => [],
+            });
+
+            const request = createTestRequest('http://localhost/v1/api/news?symbol=AAPL&page=2&limit=10&from=2023-01-01');
+            const url = new URL(request.url);
+            const logger = createMockLogger();
+            await getNews(request, url, env, logger);
+
+            expect(fetchMock).toHaveBeenCalledWith(
+                expect.stringContaining('page=2'),
+                expect.any(Object)
+            );
+            expect(fetchMock).toHaveBeenCalledWith(
+                expect.stringContaining('limit=10'),
+                expect.any(Object)
+            );
+            expect(fetchMock).toHaveBeenCalledWith(
+                expect.stringContaining('from=2023-01-01'),
+                expect.any(Object)
+            );
+        });
+
+        it('should flush KV cache pending writes', async () => {
+            const kvs = new Map();
+            env.alertsKv = {
+                get: vi.fn((key) => kvs.get(key)),
+                put: vi.fn(),
+                list: vi.fn().mockResolvedValue({ keys: [] }),
+            };
+
+            const mockNews = [{ symbol: 'AAPL', title: 'Test' }];
+            fetchMock.mockResolvedValue({
+                ok: true,
+                json: async () => mockNews,
+            });
+
+            // First call - Cache Miss
+            const request = createTestRequest('http://localhost/v1/api/news?symbol=AAPL');
+            const logger = createMockLogger();
+            await getNews(request, new URL(request.url), env, logger);
+
+            // Should have tried to get from KV
+            expect(env.alertsKv.get).toHaveBeenCalled();
         });
     });
 });

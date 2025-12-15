@@ -33,7 +33,7 @@ describe("LoggedKVNamespace", () => {
 
       expect(result).toBe("cached-value");
       expect(mockKv.get).toHaveBeenCalledWith("cache:key", "text");
-      
+
       const logs = logger.getLogs();
       expect(logs).toHaveLength(1);
       expect(logs[0]).toMatchObject({
@@ -51,7 +51,7 @@ describe("LoggedKVNamespace", () => {
       const result = await loggedKv.get("cache:key");
 
       expect(result).toBeNull();
-      
+
       const logs = logger.getLogs();
       expect(logs[0]).toMatchObject({
         cacheStatus: "MISS",
@@ -66,7 +66,7 @@ describe("LoggedKVNamespace", () => {
 
       expect(result).toBe(jsonValue);
       expect(mockKv.get).toHaveBeenCalledWith("cache:key", "json");
-      
+
       const logs = logger.getLogs();
       expect(logs[0]).toMatchObject({
         cacheStatus: "HIT",
@@ -79,7 +79,7 @@ describe("LoggedKVNamespace", () => {
       const result = await loggedKv.get("cache:key", "json");
 
       expect(result).toBeNull();
-      
+
       const logs = logger.getLogs();
       expect(logs[0]).toMatchObject({
         cacheStatus: "MISS",
@@ -130,7 +130,7 @@ describe("LoggedKVNamespace", () => {
       await loggedKv.get("cache:key");
 
       const logs = logger.getLogs();
-      expect(logs[0].latencyMs).toBeGreaterThanOrEqual(10);
+      expect(logs[0].latencyMs).toBeGreaterThanOrEqual(5); // Allow for some jitter (setTimeout(10) might run in 9ms)
     });
   });
 
@@ -141,7 +141,7 @@ describe("LoggedKVNamespace", () => {
       await loggedKv.put("cache:key", "value");
 
       expect(mockKv.put).toHaveBeenCalledWith("cache:key", "value", undefined);
-      
+
       const logs = logger.getLogs();
       expect(logs).toHaveLength(1);
       expect(logs[0]).toMatchObject({
@@ -189,7 +189,7 @@ describe("LoggedKVNamespace", () => {
       await loggedKv.delete("cache:key");
 
       expect(mockKv.delete).toHaveBeenCalledWith("cache:key");
-      
+
       const logs = logger.getLogs();
       expect(logs[0]).toMatchObject({
         type: "data_operation",
@@ -224,7 +224,7 @@ describe("LoggedKVNamespace", () => {
 
       expect(result).toBe(mockResult);
       expect(mockKv.list).toHaveBeenCalledWith(undefined);
-      
+
       const logs = logger.getLogs();
       expect(logs[0]).toMatchObject({
         type: "data_operation",
@@ -245,7 +245,7 @@ describe("LoggedKVNamespace", () => {
 
       expect(result).toBe(mockResult);
       expect(mockKv.list).toHaveBeenCalledWith({ prefix: "cache:" });
-      
+
       const logs = logger.getLogs();
       expect(logs[0]).toMatchObject({
         key: "cache:",

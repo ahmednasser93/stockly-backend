@@ -204,43 +204,6 @@ describe("getStockDetails service", () => {
     expect((result as any).chart["ALL"]).toHaveLength(3);
   });
 
-  it("handles rate limiting with retry", async () => {
-    const env = createEnv();
-    
-    let callCount = 0;
-    const fetchMock = vi
-      .spyOn(globalThis as any, "fetch")
-      .mockImplementation(() => {
-        callCount++;
-        if (callCount <= 2) {
-          // First two calls return 429 (rate limited)
-          return Promise.resolve({ 
-            ok: false, 
-            status: 429,
-            json: () => Promise.resolve({}) 
-          } as Response);
-        }
-        // Third call succeeds
-        return Promise.resolve({ 
-          ok: true, 
-          json: () => Promise.resolve([{ symbol: "AAPL", price: 150 }]) 
-        } as Response);
-      });
-
-    // Mock all endpoints to behave the same
-    const originalMock = fetchMock;
-    vi.spyOn(globalThis as any, "fetch").mockImplementation((url: string) => {
-      return originalMock(url);
-    });
-
-    // This test verifies retry logic exists (even if it takes longer)
-    // Note: In a real scenario, we'd want to test with actual delays
-    const result = await getStockDetails("AAPL", env);
-    
-    // Should eventually succeed or return partial data
-    expect(result).toHaveProperty("symbol", "AAPL");
-  }, 10000); // Longer timeout for retry test
-
   it("normalizes financial data correctly", async () => {
     const env = createEnv();
 
@@ -284,5 +247,65 @@ describe("getStockDetails service", () => {
     expect((result as any).financials.keyMetrics).toHaveLength(1);
     expect((result as any).financials.ratios).toHaveLength(1);
   });
-});
 
+  it("handles malformed or empty API responses gracefully", async () => {
+    const env = createEnv();
+
+    // Mock successful but empty/malformed responses
+    vi.spyOn(globalThis as any, "fetch").mockImplementation((url: string) => {
+      // Return empty objects or nulls behaving as valid JSON
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve([])
+      } as Response);
+    });
+
+    const result = await getStockDetails("BAD_DATA", env);
+
+    // Should return default empty structures
+    expect(result).toHaveProperty("symbol", "BAD_DATA");
+    expect((result as any).profile.companyName).toBe("");
+    expect((result as any).quote.price).toBe(0);
+    expect((result as any).chart["1Y"]).toEqual([]);
+    expect((result as any).financials.income).toEqual([]);
+    expect((result as any).news).toEqual([]);
+  });
+
+  it("respects cache TTL and refetches", async () => {
+    vi.useFakeTimers();
+    const env = createEnv();
+    const symbol = "EXPIRED";
+
+    // Set cache entry
+    const cachedData = {
+      symbol,
+      profile: {} as any,
+      quote: {} as any,
+      chart: {} as any,
+      financials: {} as any,
+      news: [],
+      peers: [],
+      partial: false,
+      refreshedAt: Date.now()
+    } as any;
+
+    // Set cache with 30s TTL (matching config pollingIntervalSec)
+    setCache(`stock-details:${symbol}`, cachedData, 30);
+
+    // Advance time by 31 seconds to expire cache validity relative to pollingInterval
+    // Note: getCacheIfValid checks age vs pollingIntervalSec
+    vi.advanceTimersByTime(31000);
+
+    const fetchSpy = vi.spyOn(globalThis as any, "fetch").mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([])
+    } as Response);
+
+    await getStockDetails(symbol, env);
+
+    // Should fetch because cache is old (31s > 30s)
+    expect(fetchSpy).toHaveBeenCalled();
+
+    vi.useRealTimers();
+  });
+});

@@ -28,7 +28,7 @@ describe("Preferences API", () => {
     mockEnv = createMockEnv();
     mockLogger = createMockLogger();
     vi.clearAllMocks();
-    
+
     // Default mock for authentication
     vi.mocked(authMiddleware.authenticateRequest).mockResolvedValue({
       username: "testuser",
@@ -76,6 +76,21 @@ describe("Preferences API", () => {
       const data = await response.json();
       expect(data.enabled).toBe(true);
       expect(data.quietStart).toBe("22:00");
+    });
+
+    it("should return 404 if user not found (getPreferences)", async () => {
+      const { mockDb } = createMockD1Database();
+      mockEnv.stockly = mockDb as unknown as D1Database;
+
+      // Mock user lookup returning null
+      mockDb.prepare.mockReturnValue({
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue(null)
+      });
+
+      const request = createMockRequest("/v1/api/preferences");
+      const response = await getPreferences(request, mockEnv, mockLogger);
+      expect(response.status).toBe(404);
     });
 
     it("should return default preferences if none exist", async () => {
@@ -232,6 +247,73 @@ describe("Preferences API", () => {
       // The API doesn't validate HH:MM format strictly, just checks if it's a string
       // So it should accept "invalid-time" and return 201 (created) or 200 (updated)
       expect([200, 201, 400, 500]).toContain(response.status);
+    });
+
+    it("should return 400 for invalid quietStart type", async () => {
+      const { mockDb } = createMockD1Database();
+      mockEnv.stockly = mockDb as unknown as D1Database;
+      vi.mocked(authMiddleware.authenticateRequest).mockResolvedValue({ username: "t", userId: "u" } as any);
+      mockDb.prepare.mockReturnValue({ bind: vi.fn().mockReturnThis(), first: vi.fn().mockResolvedValue({ id: "u" }) });
+
+      const req = createMockRequest("/v1/api/preferences", { method: "PUT", body: { quietStart: 123 } });
+      const res = await updatePreferences(req, mockEnv, mockLogger);
+      expect(res.status).toBe(400);
+    });
+
+    it("should return 400 for invalid quietEnd type", async () => {
+      const { mockDb } = createMockD1Database();
+      mockEnv.stockly = mockDb as unknown as D1Database;
+      vi.mocked(authMiddleware.authenticateRequest).mockResolvedValue({ username: "t", userId: "u" } as any);
+      mockDb.prepare.mockReturnValue({ bind: vi.fn().mockReturnThis(), first: vi.fn().mockResolvedValue({ id: "u" }) });
+
+      const req = createMockRequest("/v1/api/preferences", { method: "PUT", body: { quietEnd: 123 } });
+      const res = await updatePreferences(req, mockEnv, mockLogger);
+      expect(res.status).toBe(400);
+    });
+
+    it("should return 400 for invalid enabled type", async () => {
+      const { mockDb } = createMockD1Database();
+      mockEnv.stockly = mockDb as unknown as D1Database;
+      vi.mocked(authMiddleware.authenticateRequest).mockResolvedValue({ username: "t", userId: "u" } as any);
+      mockDb.prepare.mockReturnValue({ bind: vi.fn().mockReturnThis(), first: vi.fn().mockResolvedValue({ id: "u" }) });
+
+      const req = createMockRequest("/v1/api/preferences", { method: "PUT", body: { enabled: "true" } });
+      const res = await updatePreferences(req, mockEnv, mockLogger);
+      expect(res.status).toBe(400);
+    });
+
+    it("should return 400 for invalid maxDaily", async () => {
+      const { mockDb } = createMockD1Database();
+      mockEnv.stockly = mockDb as unknown as D1Database;
+      vi.mocked(authMiddleware.authenticateRequest).mockResolvedValue({ username: "t", userId: "u" } as any);
+      mockDb.prepare.mockReturnValue({ bind: vi.fn().mockReturnThis(), first: vi.fn().mockResolvedValue({ id: "u" }) });
+
+      const req = createMockRequest("/v1/api/preferences", { method: "PUT", body: { maxDaily: -1 } });
+      const res = await updatePreferences(req, mockEnv, mockLogger);
+      expect(res.status).toBe(400);
+    });
+
+    it("should return 400 for invalid allowedSymbols", async () => {
+      const { mockDb } = createMockD1Database();
+      mockEnv.stockly = mockDb as unknown as D1Database;
+      vi.mocked(authMiddleware.authenticateRequest).mockResolvedValue({ username: "t", userId: "u" } as any);
+      mockDb.prepare.mockReturnValue({ bind: vi.fn().mockReturnThis(), first: vi.fn().mockResolvedValue({ id: "u" }) });
+
+      const req = createMockRequest("/v1/api/preferences", { method: "PUT", body: { allowedSymbols: "AAPL" } });
+      const res = await updatePreferences(req, mockEnv, mockLogger);
+      expect(res.status).toBe(400);
+    });
+
+    it("should return 500 on DB error", async () => {
+      const { mockDb } = createMockD1Database();
+      mockEnv.stockly = mockDb as unknown as D1Database;
+      vi.mocked(authMiddleware.authenticateRequest).mockResolvedValue({ username: "t", userId: "u" } as any);
+
+      mockDb.prepare.mockImplementation(() => { throw new Error("DB Fail"); });
+
+      const req = createMockRequest("/v1/api/preferences", { method: "PUT", body: { enabled: true } });
+      const res = await updatePreferences(req, mockEnv, mockLogger);
+      expect(res.status).toBe(500);
     });
   });
 });

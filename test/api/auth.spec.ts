@@ -1,345 +1,460 @@
-/**
- * Authentication API Tests
- * 
- * Comprehensive tests for all authentication endpoints:
- * - Google OAuth sign-in
- * - Username availability check
- * - Username setting
- * - Token refresh
- * - Logout
- * - Get current user
- */
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { handleGoogleAuth, setUsername, checkUsernameAvailability, refreshToken, getCurrentUser, logout } from '../../src/api/auth';
+import { createMockLogger } from '../test-utils';
+import { generateAccessToken, generateRefreshToken, verifyToken } from '../../src/auth/jwt';
+import { authenticateRequest } from '../../src/auth/middleware';
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import {
-  handleGoogleAuth,
-  checkUsernameAvailability,
-  setUsername,
-  refreshToken,
-  logout,
-  getCurrentUser,
-} from "../../src/api/auth";
-import type { Env } from "../../src/index";
-import {
-  createMockEnv,
-  createMockRequest,
-  createMockUser,
-  createMockLogger,
-} from "../test-utils";
-import { createMockExecutionContext } from "../utils/helpers";
-import * as authMiddleware from "../../src/auth/middleware";
-
-vi.mock("../../src/auth/middleware", () => ({
-  authenticateRequest: vi.fn(),
-  authenticateRequestWithAdmin: vi.fn(),
-  clearHttpOnlyCookie: vi.fn((response: Response, name: string) => {
-    const cookie = `${name}=; HttpOnly; Secure; SameSite=None; Max-Age=0; Path=/`;
-    const newHeaders = new Headers(response.headers);
-    const existingCookies = newHeaders.get("Set-Cookie");
-    if (existingCookies) {
-      newHeaders.set("Set-Cookie", `${existingCookies}, ${cookie}`);
-    } else {
-      newHeaders.set("Set-Cookie", cookie);
-    }
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: newHeaders,
-    });
-  }),
-  setHttpOnlyCookie: vi.fn((response: Response, name: string, value: string, maxAge: number) => response),
-}));
-
-describe("Authentication API", () => {
-  let mockEnv: Env;
-  let mockLogger: ReturnType<typeof createMockLogger>;
-  let mockCtx: ExecutionContext;
-
-  beforeEach(() => {
-    mockEnv = createMockEnv();
-    mockLogger = createMockLogger();
-    mockCtx = createMockExecutionContext();
-    vi.clearAllMocks();
-  });
-
-  describe("handleGoogleAuth", () => {
-    it("should reject non-POST requests", async () => {
-      const request = createMockRequest("/v1/api/auth/google", { method: "GET" });
-      const response = await handleGoogleAuth(request, mockEnv, mockLogger);
-      
-      expect(response.status).toBe(405);
-      const data = await response.json();
-      expect(data.error).toBe("Method not allowed");
-    });
-
-    it("should reject requests without idToken", async () => {
-      const request = createMockRequest("/v1/api/auth/google", {
-        method: "POST",
-        body: {},
-      });
-      const response = await handleGoogleAuth(request, mockEnv, mockLogger);
-      
-      // handleGoogleAuth returns 401 for missing token (via createErrorResponse)
-      expect([400, 401]).toContain(response.status);
-      const data = await response.json();
-      expect(data.error.code).toBe("AUTH_MISSING_TOKEN");
-    });
-
-    it("should reject invalid JSON payload", async () => {
-      const request = new Request("https://example.com/v1/api/auth/google", {
-        method: "POST",
-        body: "invalid json",
-        headers: { "Content-Type": "application/json" },
-      });
-      const response = await handleGoogleAuth(request, mockEnv, mockLogger);
-      
-      // Invalid JSON might return 400 or 503 depending on error handling
-      expect([400, 503]).toContain(response.status);
-      const data = await response.json();
-      expect(data.error).toBeDefined();
-    });
-
-    // Note: Full Google token verification tests would require mocking Google's API
-    // This is a placeholder for the test structure
-  });
-
-  describe("checkUsernameAvailability", () => {
-    it("should return available for new username", async () => {
-      const username = "newuser123";
-      const { mockDb } = createMockD1Database();
-      mockEnv.stockly = mockDb as unknown as D1Database;
-      
-      const stmt = {
-        bind: vi.fn().mockReturnThis(),
-        first: vi.fn().mockResolvedValue(null), // Username not found
-      };
-      mockDb.prepare.mockReturnValue(stmt);
-
-      const request = createMockRequest(`/v1/api/auth/username/check?username=${username}`);
-      const response = await checkUsernameAvailability(request, mockEnv, mockLogger);
-      
-      expect(response.status).toBe(200);
-      const data = await response.json();
-      expect(data.available).toBe(true);
-    });
-
-    it("should return unavailable for existing username", async () => {
-      const username = "existinguser";
-      const { mockDb } = createMockD1Database();
-      mockEnv.stockly = mockDb as unknown as D1Database;
-      
-      // checkUsernameAvailability uses COUNT(*) query, so it returns { count: number }
-      const stmt = {
-        bind: vi.fn().mockReturnThis(),
-        first: vi.fn().mockResolvedValue({ count: 1 }), // Username found (count > 0)
-      };
-      mockDb.prepare.mockReturnValue(stmt);
-
-      const request = createMockRequest(`/v1/api/auth/username/check?username=${username}`);
-      const response = await checkUsernameAvailability(request, mockEnv, mockLogger);
-      
-      expect(response.status).toBe(200);
-      const data = await response.json();
-      expect(data.available).toBe(false);
-    });
-
-    it("should reject invalid username format", async () => {
-      const username = "ab"; // Too short
-      const request = createMockRequest(`/v1/api/auth/username/check?username=${username}`);
-      const response = await checkUsernameAvailability(request, mockEnv, mockLogger);
-      
-      // checkUsernameAvailability returns 200 with available: false for invalid format
-      expect(response.status).toBe(200);
-      const data = await response.json();
-      expect(data.available).toBe(false);
-      expect(data.message).toBeDefined();
-    });
-
-    it("should reject reserved usernames", async () => {
-      const username = "admin"; // Reserved word
-      const request = createMockRequest(`/v1/api/auth/username/check?username=${username}`);
-      const response = await checkUsernameAvailability(request, mockEnv, mockLogger);
-      
-      // checkUsernameAvailability returns 200 with available: false for reserved usernames
-      expect(response.status).toBe(200);
-      const data = await response.json();
-      expect(data.available).toBe(false);
-      expect(data.message).toBeDefined();
-    });
-  });
-
-  describe("setUsername", () => {
-    it("should set username for authenticated user", async () => {
-      const username = "newuser123";
-      const userId = "user-123";
-      const { mockDb } = createMockD1Database();
-      mockEnv.stockly = mockDb as unknown as D1Database;
-      
-      // Mock user lookup
-      const userStmt = {
-        bind: vi.fn().mockReturnThis(),
-        first: vi.fn().mockResolvedValue({ id: userId }),
-      };
-      
-      // Mock username check
-      const checkStmt = {
-        bind: vi.fn().mockReturnThis(),
-        first: vi.fn().mockResolvedValue(null), // Username available
-      };
-      
-      // Mock username update
-      const updateStmt = {
-        bind: vi.fn().mockReturnThis(),
-        run: vi.fn().mockResolvedValue({ success: true }),
-      };
-      
-      mockDb.prepare
-        .mockReturnValueOnce(userStmt) // User lookup
-        .mockReturnValueOnce(checkStmt) // Username check
-        .mockReturnValueOnce(updateStmt); // Username update
-
-      // Mock authentication
-      vi.mocked(authMiddleware.authenticateRequest).mockResolvedValue({
-        username: null,
-        userId: userId,
-        tokenType: "access" as const,
-        isAdmin: false,
-      });
-
-      const request = createMockRequest("/v1/api/auth/username", {
-        method: "POST",
-        body: { username },
-      });
-      
-      // Note: This test would need proper mocking of authenticateRequest
-      // This is a placeholder for the test structure
-    });
-
-    it("should reject username if already taken", async () => {
-      const username = "takenuser";
-      const { mockDb } = createMockD1Database();
-      mockEnv.stockly = mockDb as unknown as D1Database;
-      
-      const checkStmt = {
-        bind: vi.fn().mockReturnThis(),
-        first: vi.fn().mockResolvedValue({ username }), // Username taken
-      };
-      mockDb.prepare.mockReturnValue(checkStmt);
-
-      const request = createMockRequest("/v1/api/auth/username", {
-        method: "POST",
-        body: { username },
-      });
-      
-      // Note: This test would need proper mocking
-      // This is a placeholder for the test structure
-    });
-  });
-
-  describe("refreshToken", () => {
-    it("should refresh access token with valid refresh token", async () => {
-      const refreshTokenValue = "valid-refresh-token";
-      const userId = "user-123";
-      
-      // Mock token verification
-      vi.mock("../../src/auth/jwt", () => ({
-        verifyToken: vi.fn().mockResolvedValue({
-          userId,
-          username: "testuser",
-          type: "refresh",
-        }),
-        generateAccessToken: vi.fn().mockReturnValue("new-access-token"),
-      }));
-
-      const request = createMockRequest("/v1/api/auth/refresh", {
-        method: "POST",
-        body: { refreshToken: refreshTokenValue },
-      });
-      
-      // Note: This test would need proper mocking
-      // This is a placeholder for the test structure
-    });
-
-    it("should reject invalid refresh token", async () => {
-      vi.mock("../../src/auth/jwt", () => ({
-        verifyToken: vi.fn().mockResolvedValue(null), // Invalid token
-      }));
-
-      const request = createMockRequest("/v1/api/auth/refresh", {
-        method: "POST",
-        body: { refreshToken: "invalid-token" },
-      });
-      
-      // Note: This test would need proper mocking
-      // This is a placeholder for the test structure
-    });
-  });
-
-  describe("getCurrentUser", () => {
-    it("should return current user for authenticated request", async () => {
-      const username = "testuser";
-      const user = createMockUser({ username });
-      const { mockDb } = createMockD1Database();
-      mockEnv.stockly = mockDb as unknown as D1Database;
-      
-      const stmt = {
-        bind: vi.fn().mockReturnThis(),
-        first: vi.fn().mockResolvedValue({
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          picture: user.picture,
-          username: user.username,
-        }),
-      };
-      mockDb.prepare.mockReturnValue(stmt);
-
-      // Mock authentication
-      vi.mocked(authMiddleware.authenticateRequest).mockResolvedValue({
-        username: user.username,
-        userId: user.id,
-        tokenType: "access" as const,
-        isAdmin: false,
-      });
-
-      const request = createMockRequest("/v1/api/auth/me");
-      
-      // Note: This test would need proper mocking
-      // This is a placeholder for the test structure
-    });
-
-    it("should return 401 for unauthenticated request", async () => {
-      vi.mocked(authMiddleware.authenticateRequest).mockResolvedValue(null); // Not authenticated
-
-      const request = createMockRequest("/v1/api/auth/me");
-      const response = await getCurrentUser(request, mockEnv, mockLogger);
-      
-      // getCurrentUser returns 401 when auth is null (AUTH_MISSING_TOKEN)
-      expect(response.status).toBe(401);
-    });
-  });
-
-  describe("logout", () => {
-    it("should clear cookies and return success", async () => {
-      const request = createMockRequest("/v1/api/auth/logout", { method: "POST" });
-      const response = await logout(request, mockEnv, mockLogger);
-      
-      expect(response.status).toBe(200);
-      const data = await response.json();
-      expect(data.success).toBe(true);
-      
-      // Check that cookies are cleared
-      const setCookieHeader = response.headers.get("Set-Cookie");
-      expect(setCookieHeader).toBeTruthy();
-      if (setCookieHeader) {
-        expect(setCookieHeader).toContain("accessToken=;");
-        expect(setCookieHeader).toContain("refreshToken=;");
-      }
-    });
-  });
+// Mock dependencies
+vi.mock('../../src/auth/jwt', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    generateAccessToken: vi.fn().mockResolvedValue('mock-access-token'),
+    generateRefreshToken: vi.fn().mockResolvedValue('mock-refresh-token'),
+    verifyToken: vi.fn(),
+  };
 });
 
-// Import helper functions
-import { createMockD1Database } from "../utils/factories";
+vi.mock('../../src/auth/middleware', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    setHttpOnlyCookie: vi.fn((res, name, value) => {
+      res.headers.append('Set-Cookie', `${name}=${value}`);
+      return res;
+    }),
+    clearHttpOnlyCookie: vi.fn((res, name) => {
+      res.headers.append('Set-Cookie', `${name}=; Max-Age=0`);
+      return res;
+    }),
+    authenticateRequest: vi.fn(),
+  }
+});
+
+// We need to unmock authenticateRequest in the import above if we want to mock it differently per test or use the jwt one
+// Actually, `authenticateRequest` is in middleware.ts, but imported in auth.ts from middleware.ts?
+// Wait, in `src/api/auth.ts`, it imports `authenticateRequest` from `../auth/middleware`.
+// So we should mock `src/auth/middleware`.
+
+describe('Auth API', () => {
+  let env: any;
+  let logger: any;
+
+  // Mock D1 Database
+  const mockD1 = {
+    prepare: vi.fn(() => mockD1),
+    bind: vi.fn(() => mockD1),
+    first: vi.fn(),
+    run: vi.fn(),
+    all: vi.fn(),
+  };
+
+  // Helper to generate a valid-looking Google ID token
+  const validGoogleToken = () => {
+    const header = btoa(JSON.stringify({ kid: 'test-key-id', alg: 'RS256' }));
+    const payload = btoa(JSON.stringify({
+      sub: 'google-user-123',
+      email: 'test@example.com',
+      name: 'Test User',
+      picture: 'http://example.com/pic.jpg',
+      aud: 'test-client-id',
+      iss: 'https://accounts.google.com',
+      exp: Math.floor(Date.now() / 1000) + 3600
+    }));
+    return `${header}.${payload}.signature`;
+  };
+
+  beforeEach(() => {
+    env = {
+      stockly: mockD1,
+      JWT_SECRET: 'test-secret',
+      JWT_REFRESH_SECRET: 'test-refresh-secret',
+      GOOGLE_CLIENT_ID: 'test-client-id',
+    };
+    logger = createMockLogger();
+    vi.clearAllMocks();
+
+    // Default fetch mock for Google Certs
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        keys: [{ kid: 'test-key-id', n: '...' }]
+      })
+    } as any);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe('handleGoogleAuth', () => {
+    it('should return 405 for non-POST requests', async () => {
+      const req = new Request('http://localhost', { method: 'GET' });
+      const res = await handleGoogleAuth(req, env, logger);
+      expect(res.status).toBe(405);
+    });
+
+    it('should return error if idToken is missing', async () => {
+      const req = new Request('http://localhost', {
+        method: 'POST',
+        body: JSON.stringify({})
+      });
+      const res = await handleGoogleAuth(req, env, logger);
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.error.code).toBe("AUTH_MISSING_TOKEN");
+    });
+
+    it('should authenticate existing user', async () => {
+      const token = validGoogleToken();
+      const req = new Request('http://localhost', {
+        method: 'POST',
+        body: JSON.stringify({ idToken: token })
+      });
+
+      mockD1.first.mockResolvedValue({
+        id: 'google-user-123',
+        username: 'existinguser',
+        email: 'test@example.com',
+        name: 'Test User',
+        picture: 'pic.jpg'
+      });
+
+      mockD1.run.mockResolvedValue({ meta: { changes: 1 } });
+
+      const res = await handleGoogleAuth(req, env, logger);
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.user.username).toBe('existinguser');
+      expect(generateAccessToken).toHaveBeenCalled();
+    });
+
+    it('should create new user if not found', async () => {
+      const token = validGoogleToken();
+      const req = new Request('http://localhost', {
+        method: 'POST',
+        body: JSON.stringify({ idToken: token })
+      });
+
+      mockD1.first.mockResolvedValue(null);
+      mockD1.run.mockResolvedValue({ meta: { changes: 1 } });
+
+      const res = await handleGoogleAuth(req, env, logger);
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.user.email).toBe('test@example.com');
+      expect(body.requiresUsername).toBe(true);
+      expect(generateAccessToken).not.toHaveBeenCalled();
+    });
+
+    it('should return 401 if Google token verification fails', async () => {
+      // Create a token that will fail signature/format check in real life,
+      // but here we mock verifyGoogleToken implicitly?
+      // Actually handleGoogleAuth calls verifyGoogleToken.
+      // We can't easily mock verifyGoogleToken because it is not exported.
+      // But verifyGoogleToken uses fetch.
+      // We can mock fetch to return 400 or invalid keys.
+
+      const req = new Request('http://localhost', {
+        method: 'POST',
+        body: JSON.stringify({ idToken: "bad.token.struct" })
+      });
+
+      // verifyGoogleToken will fail to decode and return null
+      const res = await handleGoogleAuth(req, env, logger);
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.error.code).toBe("AUTH_GOOGLE_VERIFICATION_FAILED");
+    });
+
+    it('should return 500 on DB error during user lookup', async () => {
+      const token = validGoogleToken();
+      const req = new Request('http://localhost', {
+        method: 'POST',
+        body: JSON.stringify({ idToken: token })
+      });
+
+      mockD1.first.mockRejectedValue(new Error("DB Error"));
+      const res = await handleGoogleAuth(req, env, logger);
+      expect(res.status).toBe(500);
+    });
+  });
+
+  describe('checkUsernameAvailability', () => {
+    it('should return available true if username not taken', async () => {
+      const req = new Request('http://localhost?username=newuser', { method: 'GET' });
+      mockD1.first.mockResolvedValue({ count: 0 });
+      const res = await checkUsernameAvailability(req, env, logger);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.available).toBe(true);
+    });
+
+    it('should return available false if username taken', async () => {
+      const req = new Request('http://localhost?username=takenuser', { method: 'GET' });
+      mockD1.first.mockResolvedValue({ count: 1 });
+      const res = await checkUsernameAvailability(req, env, logger);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.available).toBe(false);
+    });
+
+    it('should return error for invalid format', async () => {
+      const req = new Request('http://localhost?username=inv@lid', { method: 'GET' });
+      const res = await checkUsernameAvailability(req, env, logger);
+      const body = await res.json();
+      expect(body.available).toBe(false);
+      expect(body.reason).toBeDefined();
+    });
+
+    it('should return 500 on DB error', async () => {
+      const req = new Request('http://localhost?username=newuser', { method: 'GET' });
+      mockD1.first.mockRejectedValue(new Error("DB Error"));
+      const res = await checkUsernameAvailability(req, env, logger);
+      expect(res.status).toBe(500);
+    });
+  });
+
+  describe('setUsername', () => {
+    it('should set username using idToken flow (new user)', async () => {
+      const token = validGoogleToken();
+      const req = new Request('http://localhost', {
+        method: 'POST',
+        body: JSON.stringify({ username: 'finaluser', idToken: token })
+      });
+
+      // 1. Check if user exists (by google id)
+      mockD1.first
+        .mockResolvedValueOnce({ id: 'google-user-123', username: null })
+        // 2. Check availability
+        .mockResolvedValueOnce({ count: 0 })
+        // 3. Return updated user
+        .mockResolvedValueOnce({ id: 'google-user-123', username: 'finaluser', email: '...', name: '...' });
+
+      mockD1.run.mockResolvedValue({ meta: { changes: 1 } });
+
+      const res = await setUsername(req, env, logger);
+
+      expect(res.status).toBe(200);
+      expect(mockD1.run).toHaveBeenCalled();
+      expect(generateAccessToken).toHaveBeenCalled();
+    });
+
+    it('should handle UNIQUE constraint violation', async () => {
+      const token = validGoogleToken();
+      const req = new Request('http://localhost', {
+        method: 'POST',
+        body: JSON.stringify({ username: 'taken', idToken: token })
+      });
+
+      // Mock auth part (user lookup)
+      mockD1.first
+        .mockResolvedValueOnce({ id: 'google-user-123', username: null })
+        .mockResolvedValueOnce({ count: 0 }); // Check says available (mock race condition or initial check pass)
+
+      // Simulate DB error on update
+      mockD1.run.mockRejectedValue(new Error('UNIQUE constraint failed: users.username'));
+
+      const res = await setUsername(req, env, logger);
+      expect(res.status).toBe(400); // USERNAME_TAKEN maps to 400
+      const body = await res.json() as any;
+      expect(body.error.code).toBe('USERNAME_TAKEN');
+    });
 
 
+    it('should handle race condition (changes=0)', async () => {
+      const token = validGoogleToken();
+      const req = new Request('http://localhost', {
+        method: 'POST',
+        body: JSON.stringify({ username: 'raceuser', idToken: token })
+      });
+
+      mockD1.first
+        .mockResolvedValueOnce({ id: 'uid', username: null }) // User lookup
+        .mockResolvedValueOnce({ count: 0 }); // Availability check passes
+
+      mockD1.run.mockResolvedValue({ meta: { changes: 0 } }); // Update fails (race)
+
+      const res = await setUsername(req, env, logger);
+      expect(res.status).toBe(400);
+      const body = await res.json() as any;
+      expect(body.error.code).toBe('USERNAME_TAKEN');
+    });
+
+    it('should return 500 if updated user cannot be fetched', async () => {
+      const token = validGoogleToken();
+      const req = new Request('http://localhost', {
+        method: 'POST',
+        body: JSON.stringify({ username: 'okuser', idToken: token })
+      });
+
+      mockD1.first
+        .mockResolvedValueOnce({ id: 'uid', username: null })
+        .mockResolvedValueOnce({ count: 0 }); // Availability
+
+      mockD1.run.mockResolvedValue({ meta: { changes: 1 } });
+
+      // Fetch updated user returns null
+      mockD1.first.mockResolvedValueOnce(null);
+
+      const res = await setUsername(req, env, logger);
+      expect(res.status).toBe(500);
+    });
+
+    it('should return 400 if user already has username', async () => {
+      const token = validGoogleToken();
+      const req = new Request('http://localhost', {
+        method: 'POST',
+        body: JSON.stringify({ username: 'newname', idToken: token })
+      });
+
+      // Lookup returns user WITH username
+      mockD1.first.mockResolvedValueOnce({ id: 'uid', username: 'existing' });
+
+      const res = await setUsername(req, env, logger);
+      expect(res.status).toBe(409);
+      const body = await res.json() as any;
+      expect(body.error.code).toBe('USERNAME_ALREADY_SET');
+    });
+  });
+
+  describe('refreshToken', () => {
+    it('should return 405 for non-POST requests', async () => {
+      const req = new Request('http://localhost', { method: 'GET' });
+      const res = await refreshToken(req, env, logger);
+      expect(res.status).toBe(405);
+    });
+
+    it('should extract token from cookie', async () => {
+      const req = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'Cookie': 'refreshToken=valid-refresh-token' }
+      });
+
+      (verifyToken as any).mockResolvedValue({ username: 'testuser', type: 'refresh' });
+      (generateAccessToken as any).mockResolvedValue('new-access-token');
+
+      const res = await refreshToken(req, env, logger);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Set-Cookie')).toContain('accessToken=new-access-token');
+    });
+
+    it('should extract token from body (mobile)', async () => {
+      const req = new Request('http://localhost', {
+        method: 'POST',
+        headers: { 'User-Agent': 'Mobile' },
+        body: JSON.stringify({ refreshToken: 'valid-refresh-token' })
+      });
+
+      (verifyToken as any).mockResolvedValue({ username: 'testuser', type: 'refresh' });
+      (generateAccessToken as any).mockResolvedValue('new-access-token');
+
+      const res = await refreshToken(req, env, logger);
+      expect(res.status).toBe(200);
+      const body = await res.json() as any;
+      expect(body.accessToken).toBe('new-access-token');
+    });
+
+    it('should return 400 if token missing', async () => {
+      const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({}) });
+      const res = await refreshToken(req, env, logger);
+      expect(res.status).toBe(401); // AUTH_MISSING_TOKEN maps to 401
+    });
+
+    it('should return 401 if token invalid', async () => {
+      const req = new Request('http://localhost', {
+        method: 'POST',
+        body: JSON.stringify({ refreshToken: 'invalid' })
+      });
+      (verifyToken as any).mockResolvedValue(null);
+      const res = await refreshToken(req, env, logger);
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe('getCurrentUser', () => {
+    it('should return 405 for non-GET requests', async () => {
+      const req = new Request('http://localhost', { method: 'POST' });
+      const res = await getCurrentUser(req, env, logger);
+      expect(res.status).toBe(405);
+    });
+
+    it('should return 401 if not authenticated', async () => {
+      const req = new Request('http://localhost', { method: 'GET' });
+      // We need to mock authenticateRequest which calls verifyToken
+      // But verifyToken is mocked above.
+      // authenticateRequest calls verifyToken.
+      // If we mock authenticateRequest directly (in middleware mock), we can control it.
+      const mw = await import('../../src/auth/middleware');
+      (mw.authenticateRequest as any).mockResolvedValue(null);
+
+      const res = await getCurrentUser(req, env, logger);
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.error.code).toBe("AUTH_MISSING_TOKEN");
+    });
+
+    it('should return user info if authenticated', async () => {
+      const req = new Request('http://localhost', {
+        method: 'GET',
+        headers: { 'Authorization': 'Bearer valid-token' }
+      });
+
+      const mw = await import('../../src/auth/middleware');
+      (mw.authenticateRequest as any).mockResolvedValue({ username: 'testuser', type: 'access' });
+
+      mockD1.prepare.mockReturnValue(mockD1);
+      mockD1.bind.mockReturnValue(mockD1);
+      mockD1.first.mockResolvedValue({
+        id: 'user-123',
+        email: 'test@example.com',
+        username: 'testuser',
+        name: 'Test Name',
+        picture: 'pic.jpg'
+      });
+
+      const res = await getCurrentUser(req, env, logger);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.user.username).toBe('testuser');
+    });
+
+    it('should return 404 if user not found in DB', async () => {
+      const req = new Request('http://localhost', {
+        method: 'GET',
+        headers: { 'Authorization': 'Bearer valid-token' }
+      });
+
+      const mw = await import('../../src/auth/middleware');
+      (mw.authenticateRequest as any).mockResolvedValue({ username: 'testuser', type: 'access' });
+
+      mockD1.first.mockResolvedValue(null);
+
+      const res = await getCurrentUser(req, env, logger);
+      expect(res.status).toBe(404); // USER_NOT_FOUND now maps to 404
+      const body = await res.json();
+      expect(body.error.code).toBe("USER_NOT_FOUND");
+    });
+  });
+
+  describe('logout', () => {
+    it('should return 405 for non-POST requests', async () => {
+      const req = new Request('http://localhost', { method: 'GET' });
+      const res = await logout(req, env, logger);
+      expect(res.status).toBe(405);
+    });
+
+    it('should clear cookies and log event', async () => {
+      const req = new Request('http://localhost', { method: 'POST' });
+
+      const mw = await import('../../src/auth/middleware');
+      (mw.authenticateRequest as any).mockResolvedValue({ userId: 'user-123', type: 'access' });
+
+      const res = await logout(req, env, logger);
+      expect(res.status).toBe(200);
+    });
+  });
+
+});

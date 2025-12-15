@@ -191,5 +191,55 @@ describe("Settings API", () => {
       const response = await updateSettings(request, mockEnv, mockLogger);
       expect(response.status).toBe(201); // 201 Created for new settings
     });
+
+    it("should return 400 for invalid refreshIntervalMinutes", async () => {
+      const { mockDb } = createMockD1Database();
+      mockEnv.stockly = mockDb as unknown as D1Database;
+
+      vi.mock("../../src/auth/middleware", () => ({
+        authenticateRequest: vi.fn().mockResolvedValue({
+          username: "testuser",
+          userId: "user-123",
+          tokenType: "access" as const,
+        }),
+      }));
+
+      // Mock user lookup
+      const userStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue({ id: "user-123" }),
+      };
+      mockDb.prepare.mockReturnValue(userStmt);
+
+      const request = createMockRequest("/v1/api/settings", {
+        method: "PUT",
+        body: { refreshIntervalMinutes: 9999 }, // Too high
+      });
+
+      const response = await updateSettings(request, mockEnv, mockLogger);
+      expect(response.status).toBe(400);
+    });
+
+    it("should return 500 on DB error during update", async () => {
+      const { mockDb } = createMockD1Database();
+      mockEnv.stockly = mockDb as unknown as D1Database;
+
+      vi.mock("../../src/auth/middleware", () => ({
+        authenticateRequest: vi.fn().mockResolvedValue({
+          username: "testuser",
+          userId: "user-123",
+        }),
+      }));
+
+      mockDb.prepare.mockImplementation(() => { throw new Error("DB Fail"); });
+
+      const request = createMockRequest("/v1/api/settings", {
+        method: "PUT",
+        body: { refreshIntervalMinutes: 60 },
+      });
+
+      const response = await updateSettings(request, mockEnv, mockLogger);
+      expect(response.status).toBe(500);
+    });
   });
 });

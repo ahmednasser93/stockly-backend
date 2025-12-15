@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   getRecentNotifications,
   getFailedNotifications,
+  getFilteredNotifications,
   retryNotification,
 } from "../../src/api/admin";
 import { sendFCMNotificationWithLogs } from "../../src/notifications/fcm-sender";
@@ -41,7 +42,7 @@ describe("Admin API", () => {
 
     mockLogger = createMockLogger();
     vi.clearAllMocks();
-    
+
     // Default mock for admin authentication
     vi.mocked(authMiddleware.authenticateRequestWithAdmin).mockResolvedValue({
       username: "admin",
@@ -246,6 +247,89 @@ describe("Admin API", () => {
     });
   });
 
+  describe("getFilteredNotifications", () => {
+    it("should return filtered notifications", async () => {
+      const mockNotifications = [
+        {
+          id: "log-1",
+          alert_id: "alert-1",
+          symbol: "AAPL",
+          threshold: 200,
+          price: 205,
+          direction: "above",
+          push_token: "fcm-token-1",
+          status: "success",
+          error_message: null,
+          attempt_count: 1,
+          sent_at: "2025-01-01T00:00:00Z",
+          username: "testuser",
+        },
+      ];
+
+      const mockStmt = {
+        bind: vi.fn().mockReturnThis(),
+        all: vi.fn().mockResolvedValue({ results: mockNotifications }),
+      };
+
+      mockDb.prepare.mockReturnValue(mockStmt);
+
+      const request = new Request("https://example.com/v1/api/notifications/filter?symbol=AAPL&status=success");
+      const response = await getFilteredNotifications(
+        request,
+        "AAPL",
+        "success",
+        undefined,
+        undefined,
+        mockEnv
+      );
+
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.notifications).toHaveLength(1);
+      expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining("WHERE 1=1 AND symbol = ? AND status = ?"));
+      expect(mockStmt.bind).toHaveBeenCalledWith("AAPL", "success");
+    });
+
+    it("should filter by date range", async () => {
+      const mockStmt = {
+        bind: vi.fn().mockReturnThis(),
+        all: vi.fn().mockResolvedValue({ results: [] }),
+      };
+      mockDb.prepare.mockReturnValue(mockStmt);
+
+      const request = new Request("https://example.com/v1/api/notifications/filter");
+      await getFilteredNotifications(
+        request,
+        undefined,
+        undefined,
+        "2023-01-01",
+        "2023-01-31",
+        mockEnv
+      );
+
+      expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining("AND sent_at >= ? AND sent_at <= ?"));
+      expect(mockStmt.bind).toHaveBeenCalledWith("2023-01-01", "2023-01-31");
+    });
+
+    it("should fail if env not provided", async () => {
+      const request = new Request("https://example.com/v1/api/notifications/filter");
+      const response = await getFilteredNotifications(request);
+      expect(response.status).toBe(500);
+    });
+
+    it("should handle db errors", async () => {
+      mockDb.prepare.mockImplementation(() => {
+        throw new Error("DB Error");
+      });
+
+      const request = new Request("https://example.com/v1/api/notifications/filter");
+      const response = await getFilteredNotifications(request, undefined, undefined, undefined, undefined, mockEnv);
+
+      expect(response.status).toBe(500);
+    });
+  });
+
   describe("retryNotification", () => {
     it("should retry failed notification successfully", async () => {
       const mockLog = {
@@ -375,7 +459,7 @@ describe("Admin API", () => {
       expect(response.status).toBe(200);
       expect(data.success).toBe(false);
       expect(data.errorMessage).toContain("Token invalid");
-      
+
       // Should create new log entry for retry
       expect(mockDb.prepare).toHaveBeenCalledWith(
         expect.stringContaining("INSERT INTO notifications_log")

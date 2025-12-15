@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   getConfig,
   updateConfig,
+  getConfigEndpoint,
+  updateConfigEndpoint,
   simulateProviderFailureEndpoint,
   disableProviderFailureEndpoint,
   clearConfigCache,
@@ -15,7 +17,7 @@ const createEnv = (): Env => {
     kvMap.set(key, value);
     return Promise.resolve();
   });
-  
+
   return {
     stockly: {} as any,
     alertsKv: {
@@ -44,14 +46,14 @@ describe("Config System", () => {
     it("returns default config when KV is not available", async () => {
       const envWithoutKv: Env = { stockly: {} as any };
       const config = await getConfig(envWithoutKv);
-      
+
       expect(config.featureFlags.simulateProviderFailure).toBe(false);
       expect(config.pollingIntervalSec).toBe(30);
     });
 
     it("returns default config when no stored config exists", async () => {
       const config = await getConfig(env);
-      
+
       expect(config.featureFlags.simulateProviderFailure).toBe(false);
       expect(config.pollingIntervalSec).toBe(30);
     });
@@ -68,10 +70,10 @@ describe("Config System", () => {
           simulateProviderFailure: true,
         },
       };
-      
+
       await env.alertsKv!.put("admin:config", JSON.stringify(storedConfig));
       const config = await getConfig(env);
-      
+
       expect(config.featureFlags.simulateProviderFailure).toBe(true);
       expect(config.pollingIntervalSec).toBe(60);
     });
@@ -82,10 +84,10 @@ describe("Config System", () => {
           simulateProviderFailure: true,
         },
       };
-      
+
       await env.alertsKv!.put("admin:config", JSON.stringify(partialConfig));
       const config = await getConfig(env);
-      
+
       expect(config.featureFlags.simulateProviderFailure).toBe(true);
       expect(config.pollingIntervalSec).toBe(30); // Default value
     });
@@ -99,9 +101,9 @@ describe("Config System", () => {
           simulateProviderFailure: true,
         },
       };
-      
+
       const updated = await updateConfig(env, updates);
-      
+
       expect(updated.pollingIntervalSec).toBe(45);
       expect(updated.featureFlags.simulateProviderFailure).toBe(true);
     });
@@ -114,17 +116,17 @@ describe("Config System", () => {
           simulateProviderFailure: false,
         },
       };
-      
+
       await env.alertsKv!.put("admin:config", JSON.stringify(initialConfig));
-      
+
       const updates = {
         featureFlags: {
           simulateProviderFailure: true,
         },
       };
-      
+
       const updated = await updateConfig(env, updates);
-      
+
       expect(updated.featureFlags.simulateProviderFailure).toBe(true);
       expect(updated.featureFlags.alerting).toBe(true); // Preserved
       expect(updated.featureFlags.sandboxMode).toBe(false); // Preserved
@@ -136,17 +138,17 @@ describe("Config System", () => {
       const request = new Request("http://example.com/v1/api/simulate-provider-failure", {
         method: "POST",
       });
-      
+
       const response = await simulateProviderFailureEndpoint(env);
       const data = await response.json();
-      
+
       expect(data.featureFlags.simulateProviderFailure).toBe(true);
       expect(response.status).toBe(200);
     });
 
     it("persists the config change", async () => {
       await simulateProviderFailureEndpoint(env);
-      
+
       const config = await getConfig(env);
       expect(config.featureFlags.simulateProviderFailure).toBe(true);
     });
@@ -160,10 +162,10 @@ describe("Config System", () => {
           simulateProviderFailure: true,
         },
       });
-      
+
       const response = await disableProviderFailureEndpoint(env);
       const data = await response.json();
-      
+
       expect(data.featureFlags.simulateProviderFailure).toBe(false);
       expect(response.status).toBe(200);
     });
@@ -175,11 +177,50 @@ describe("Config System", () => {
           simulateProviderFailure: true,
         },
       });
-      
+
       await disableProviderFailureEndpoint(env);
-      
+
       const config = await getConfig(env);
       expect(config.featureFlags.simulateProviderFailure).toBe(false);
+    });
+  });
+
+  describe("Error Handling", () => {
+    it("getConfig catches errors and returns default", async () => {
+      // Mock KV get to throw
+      env.alertsKv!.get = vi.fn().mockRejectedValue(new Error("KV Error"));
+
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+      const config = await getConfig(env);
+
+      expect(config).toBeDefined();
+      expect(config.pollingIntervalSec).toBe(30); // Default
+      expect(consoleSpy).toHaveBeenCalledWith("Failed to get config:", expect.any(Error));
+      consoleSpy.mockRestore();
+    });
+
+    it("updateConfig throws on error", async () => {
+      // Mock KV put to throw
+      env.alertsKv!.put = vi.fn().mockRejectedValue(new Error("Write Error"));
+
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+
+      await expect(updateConfig(env, { pollingIntervalSec: 10 }))
+        .rejects.toThrow("Write Error");
+
+      expect(consoleSpy).toHaveBeenCalledWith("Failed to update config:", expect.any(Error));
+      consoleSpy.mockRestore();
+    });
+
+    it("updateConfig warns when KV is missing", async () => {
+      const envNoKv = { stockly: {} as any } as Env;
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => { });
+
+      const updated = await updateConfig(envNoKv, { pollingIntervalSec: 100 });
+
+      expect(updated.pollingIntervalSec).toBe(100);
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("alertsKv not available"));
+      consoleSpy.mockRestore();
     });
   });
 });

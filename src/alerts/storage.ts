@@ -50,13 +50,13 @@ export async function listAlerts(env: Env, username: string | null): Promise<Ale
   const statement = env.stockly.prepare(`${SELECT_BASE} WHERE username = ? ORDER BY created_at DESC`);
   const result = await statement.bind(username).all<AlertRow>();
   const alerts = (result.results ?? []).map(mapRow);
-  
+
   // Log for debugging - check if any alerts have null username
   const nullUsernameCount = alerts.filter(a => a.username === null).length;
   if (nullUsernameCount > 0) {
     console.warn(`Warning: Found ${nullUsernameCount} alerts with null username for username ${username}`);
   }
-  
+
   return alerts;
 }
 
@@ -100,14 +100,14 @@ export async function createAlert(env: Env, draft: AlertDraft, username: string)
   if (!username || username.trim().length === 0) {
     throw new Error("username is required and cannot be null or empty");
   }
-  
+
   try {
     const now = new Date().toISOString();
     const id = crypto.randomUUID();
     const notes = draft.notes?.trim() ?? null;
-    
+
     console.log(`Creating alert with username: ${username}, symbol: ${draft.symbol}`);
-    
+
     await env.stockly
       .prepare(
         `INSERT INTO alerts (id, symbol, direction, threshold, status, channel, target, notes, username, created_at, updated_at)
@@ -120,13 +120,13 @@ export async function createAlert(env: Env, draft: AlertDraft, username: string)
     if (!created) {
       throw new Error("failed to load created alert after creation");
     }
-    
+
     // Verify the created alert has the correct username
     if (created.username !== username) {
       console.error(`Alert created with mismatched username! Expected: ${username}, Got: ${created.username}, AlertId: ${id}`);
       throw new Error(`Alert created with incorrect username: expected ${username}, got ${created.username}`);
     }
-    
+
     console.log(`Alert created successfully: id=${id}, username=${created.username}, symbol=${created.symbol}`);
     return created;
   } catch (error) {
@@ -136,11 +136,11 @@ export async function createAlert(env: Env, draft: AlertDraft, username: string)
       if (errorMsg.includes('unique constraint') || errorMsg.includes('unique')) {
         throw new Error("An alert already exists for this symbol and threshold");
       }
-      if (errorMsg.includes('check constraint') || errorMsg.includes('constraint')) {
-        throw new Error("Invalid alert data: validation constraint failed");
-      }
       if (errorMsg.includes('not null') || errorMsg.includes('null')) {
         throw new Error("Missing required alert data");
+      }
+      if (errorMsg.includes('check constraint') || errorMsg.includes('constraint')) {
+        throw new Error("Invalid alert data: validation constraint failed");
       }
       // Re-throw with original message for other errors
       throw new Error(`Database error: ${error.message}`);
@@ -195,7 +195,7 @@ export async function updateAlert(
     fields.push("updated_at = ?");
     const updatedAt = new Date().toISOString();
     values.push(updatedAt, id);
-    
+
     if (username === null) {
       // Admin: update without user filter
       const sql = `UPDATE alerts SET ${fields.join(", ")} WHERE id = ?`;
@@ -211,11 +211,11 @@ export async function updateAlert(
     if (error instanceof Error) {
       // Check for common database errors
       const errorMsg = error.message.toLowerCase();
-      if (errorMsg.includes('check constraint') || errorMsg.includes('constraint')) {
-        throw new Error("Invalid alert data: validation constraint failed");
-      }
       if (errorMsg.includes('not null') || errorMsg.includes('null')) {
         throw new Error("Missing required alert data");
+      }
+      if (errorMsg.includes('check constraint') || errorMsg.includes('constraint')) {
+        throw new Error("Invalid alert data: validation constraint failed");
       }
       // Re-throw with original message for other errors
       throw new Error(`Database error: ${error.message}`);

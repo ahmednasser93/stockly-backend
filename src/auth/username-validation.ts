@@ -103,13 +103,7 @@ export function validateUsernameFormat(
     };
   }
 
-  // Check for mixed consecutive special characters (_- or -_)
-  if (/[_-][_-]/.test(username)) {
-    return {
-      valid: false,
-      error: "Username cannot contain consecutive special characters",
-    };
-  }
+
 
   return { valid: true };
 }

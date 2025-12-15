@@ -265,7 +265,7 @@ describe("FCM Sender", () => {
       );
 
       expect(result.success).toBe(false);
-      
+
       // Check that logger was called with FCM error
       const logs = mockLogger.getLogs();
       const fcmErrorLog = logs.find((log: any) => log.type === "fcm_error");
@@ -276,6 +276,81 @@ describe("FCM Sender", () => {
         isPermanent: true,
         shouldCleanupToken: true,
       });
+    });
+
+    it('should handle "Permission Denied" error', async () => {
+      vi.mocked(global.fetch).mockResolvedValue({
+        ok: false,
+        status: 403,
+        json: async () => ({
+          error: {
+            code: 7,
+            message: 'Permission denied',
+            status: 'PERMISSION_DENIED',
+          }
+        })
+      } as Response);
+
+      const result = await sendFCMNotificationWithLogs(
+        validToken,
+        title,
+        body,
+        data,
+        mockEnv,
+        mockLogger
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.errorType).toBe('PERMISSION_DENIED');
+      expect(result.shouldCleanupToken).toBe(false);
+    });
+
+    it('should handle "Resource Exhausted" error', async () => {
+      vi.mocked(global.fetch).mockResolvedValue({
+        ok: false,
+        status: 429,
+        json: async () => ({
+          error: {
+            code: 8,
+            message: 'Quota exceeded',
+            status: 'RESOURCE_EXHAUSTED',
+          }
+        })
+      } as Response);
+
+      const result = await sendFCMNotificationWithLogs(
+        validToken,
+        title,
+        body,
+        data,
+        mockEnv,
+        mockLogger
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.errorType).toBe('RESOURCE_EXHAUSTED');
+    });
+
+    it('should handle invalid JSON response from FCM', async () => {
+      vi.mocked(global.fetch).mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        json: async () => { throw new Error('Invalid JSON'); }
+      } as Response);
+
+      const result = await sendFCMNotificationWithLogs(
+        validToken,
+        title,
+        body,
+        data,
+        mockEnv,
+        mockLogger
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.finalError).toBe('Internal Server Error');
+      // Logic falls back to statusText if JSON parse fails
     });
 
     it("should convert data values to strings", async () => {

@@ -211,7 +211,7 @@ describe("getStock handler", () => {
     const url = createUrl({ symbol: "AAPL" });
     const request = createRequest({ symbol: "AAPL" });
     const response = await getStock(request, url, env, undefined, createMockLogger());
-    
+
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
       error: "no_price_available",
@@ -275,7 +275,7 @@ describe("getStock handler", () => {
         featureFlags: { simulateProviderFailure: false },
       })
     );
-    
+
     // Mock KV for config and notification throttling
     let notificationThrottleCalled = false;
     env.alertsKv = {
@@ -323,7 +323,7 @@ describe("getStock handler", () => {
       }
       return { first: vi.fn().mockResolvedValue(null) };
     });
-    
+
     const prepare = vi.fn().mockReturnValue({ bind: bindDb });
     env.stockly = { prepare } as any;
 
@@ -363,7 +363,7 @@ describe("getStock handler", () => {
         featureFlags: { simulateProviderFailure: false },
       })
     );
-    
+
     let queryCount = 0;
     env.alertsKv = {
       get: vi.fn((key: string) => {
@@ -433,7 +433,7 @@ describe("getStock handler", () => {
         featureFlags: { simulateProviderFailure: false },
       })
     );
-    
+
     let queryCount = 0;
     env.alertsKv = {
       get: vi.fn((key: string) => {
@@ -490,5 +490,167 @@ describe("getStock handler", () => {
     expect(data.stale_reason).toBe("provider_network_error");
     expect(data.price).toBe(380.0);
     expect(waitUntilSpy).toHaveBeenCalled();
+  });
+
+  it("tries alternative profile endpoints if first one fails", async () => {
+    const env = createEnv();
+    clearConfigCache();
+
+    // Mock fetch to simulate failure on first profile endpoint, success on second
+    const quoteJson = vi.fn().mockResolvedValue([{ symbol: "NVDA", price: 400 }]);
+    const profileSuccessJson = vi.fn().mockResolvedValue([{ symbol: "NVDA", description: "Graphics cards" }]);
+
+    // Config KV mock
+    const kvMap = new Map<string, string>();
+    kvMap.set("admin:config", JSON.stringify({ featureFlags: {} }));
+    env.alertsKv = {
+      get: vi.fn((key) => Promise.resolve(kvMap.get(key) ?? null)),
+      put: vi.fn().mockResolvedValue(undefined),
+    } as any;
+
+    const fetchMock = vi.spyOn(globalThis as any, "fetch")
+      .mockImplementation((url: string) => {
+        if (url.includes("/quote?")) {
+          return Promise.resolve({ ok: true, json: quoteJson } as Response);
+        }
+        // First profile endpoint fails
+        if (url.includes("/profile?symbol=")) {
+          return Promise.resolve({ ok: false, status: 404 } as Response);
+        }
+        // Second endpoint (path based) succeeds
+        if (url.includes("/profile/NVDA?")) {
+          return Promise.resolve({ ok: true, json: profileSuccessJson } as Response);
+        }
+        return Promise.resolve({ ok: false } as Response);
+      });
+
+    const url = createUrl({ symbol: "NVDA" });
+    const request = createRequest({ symbol: "NVDA" });
+    const response = await getStock(request, url, env, undefined, createMockLogger());
+
+    const data = await response.json();
+    expect(data.description).toBe("Graphics cards");
+    // Should have called at least 3 endpoints: Quote, Profile1 (fail), Profile2 (success)
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("fetches description from Wikipedia if profile description is missing", async () => {
+    const env = createEnv();
+    clearConfigCache();
+
+    const quoteJson = vi.fn().mockResolvedValue([{ symbol: "TSLA", price: 200, companyName: "Tesla Inc" }]);
+    // Profile succeeds but has no description
+    const profileJson = vi.fn().mockResolvedValue([{ symbol: "TSLA", image: "img.png" }]);
+    const wikiJson = vi.fn().mockResolvedValue({ extract: "Electric vehicle manufacturer." });
+
+    const kvMap = new Map<string, string>();
+    kvMap.set("admin:config", JSON.stringify({ featureFlags: {} }));
+    env.alertsKv = {
+      get: vi.fn((key) => Promise.resolve(kvMap.get(key) ?? null)),
+      put: vi.fn().mockResolvedValue(undefined),
+    } as any;
+
+    const fetchMock = vi.spyOn(globalThis as any, "fetch")
+      .mockImplementation((url: string) => {
+        if (url.includes("/quote?")) return Promise.resolve({ ok: true, json: quoteJson } as Response);
+        // All profile endpoints work but return no description
+        if (url.includes("favorite")) return Promise.resolve({ ok: false } as Response); // unrelated
+        if (url.includes("wikipedia")) return Promise.resolve({ ok: true, json: wikiJson } as Response);
+        // Profile endpoint matches
+        return Promise.resolve({ ok: true, json: profileJson } as Response);
+      });
+
+    const url = createUrl({ symbol: "TSLA" });
+    const request = createRequest({ symbol: "TSLA" });
+    const response = await getStock(request, url, env, undefined, createMockLogger());
+
+    const data = await response.json();
+    expect(data.description).toBe("Electric vehicle manufacturer.");
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("wikipedia"));
+  });
+
+  it("throttles provider failure notifications", async () => {
+    const env = createEnv();
+    clearConfigCache();
+
+    // Config allowing simulation = false
+    const kvMap = new Map<string, string>();
+    kvMap.set("admin:config", JSON.stringify({ featureFlags: { simulateProviderFailure: false } }));
+
+    // Track KV puts for throttling
+    const kvPuts: string[] = [];
+    env.alertsKv = {
+      get: vi.fn((key) => Promise.resolve(kvMap.get(key) ?? null)),
+      put: vi.fn((key, val) => {
+        kvPuts.push(key);
+        return Promise.resolve();
+      }),
+    } as any;
+
+    const dbRecord = {
+      symbol: "THROTTLE_TEST", price: 300, timestamp: Math.floor(Date.now() / 1000)
+    };
+
+    // Mock DB queries
+    // 1. Get cached price (first call)
+    // 2. Get tokens (first failure)
+    // 3. Get cached price (second call)
+    // 4. Get tokens (second failure - SHOULD BE SKIPPED due to throttling, but let's see implementation)
+    // Actually throttling is in-memory (throttle-cache.ts) AND possibly KV.
+    // The implementation imports `isThrottled` from `throttle-cache`.
+    // We need to ensure we are testing the `notifyUsersOfProviderFailure` logic.
+
+    const prepare = vi.fn((sql: string) => {
+      const stmt: any = {
+        first: vi.fn().mockResolvedValue(dbRecord),
+        all: vi.fn().mockResolvedValue({ results: [{ user_id: "u1", push_token: "t1" }] })
+      };
+      stmt.bind = vi.fn().mockReturnValue(stmt);
+      return stmt;
+    });
+    env.stockly = { prepare } as any;
+
+    // Fail fetch always
+    vi.spyOn(globalThis as any, "fetch").mockResolvedValue({ ok: false, status: 503 });
+
+    const waitUntilSpy = vi.fn();
+    const ctx = { waitUntil: waitUntilSpy } as ExecutionContext;
+
+    // We need to mock the dynamic import of throttle-cache inside get-stock.ts?
+    // It uses `await import("./throttle-cache")`.
+    // Vitest mocking might struggle with dynamic imports if not handled.
+    // But `throttle-cache.ts` is simple map.
+    // Let's rely on actual in-memory behavior: First call not throttled, second call (immediate) throttled.
+
+    // 1. First failure
+    const url = createUrl({ symbol: "THROTTLE_TEST" });
+    const request = createRequest({ symbol: "THROTTLE_TEST" });
+    await getStock(request, url, env, ctx, createMockLogger());
+
+    // 2. Second failure (immediate)
+    await getStock(request, url, env, ctx, createMockLogger());
+
+    // Wait for async notifications
+    // Each getStock calls ctx.waitUntil once if failure treated.
+    // Inside notifyUsersOfProviderFailure, it calls DB to get tokens.
+    // If throttled, it returns early.
+
+    // We need to await the background tasks passed to waitUntil
+    await Promise.all(waitUntilSpy.mock.calls.map(args => args[0]));
+
+    // Check DB calls.
+    // The `prepare` spy is what we can check.
+    // Call 1: selects price (1), selects tokens (2).
+    // Call 2: selects price (3). Should NOT select tokens if throttled.
+
+    // Note: getStock calls `handleProviderFailure` -> `notifyUsersOfProviderFailure`
+    // `notifyUsersOfProviderFailure` calls `env.stockly.prepare` for tokens.
+
+    // Filter prepare calls to see if tokens were requested
+    const prepareCalls = prepare.mock.calls.map(c => c[0]); // sql strings
+    const tokenQueries = prepareCalls.filter((sql: any) => sql.includes("user_push_tokens"));
+
+    // Should be exactly 1 token query (from first call)
+    expect(tokenQueries.length).toBe(1);
   });
 });

@@ -19,3 +19,44 @@ describe("json utility", () => {
     await expect(response.json()).resolves.toEqual({ message: "nope" });
   });
 });
+
+describe("CORS headers", () => {
+  it("returns wildcard for unknown origin", () => {
+    const response = json({ ok: true });
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
+  });
+
+  it("returns specific origin for allowed domain", () => {
+    const request = new Request("https://api.stockly.com", {
+      headers: { "Origin": "https://stockly-webapp.pages.dev" }
+    });
+    const response = json({ ok: true }, 200, request);
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://stockly-webapp.pages.dev");
+    expect(response.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+  });
+
+  it("allows localhost", () => {
+    const request = new Request("http://localhost:8787", {
+      headers: { "Origin": "http://localhost:3000" }
+    });
+    const response = json({ ok: true }, 200, request);
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("http://localhost:3000");
+  });
+
+  it("allows localhost with random port", () => {
+    const request = new Request("http://localhost:8787", {
+      headers: { "Origin": "http://localhost:9999" }
+    });
+    const response = json({ ok: true }, 200, request);
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("http://localhost:9999");
+  });
+
+  it("falls back to * if origin not allowed", () => {
+    const request = new Request("https://api.stockly.com", {
+      headers: { "Origin": "https://evil.com" }
+    });
+    const response = json({ ok: true }, 200, request);
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
+    expect(response.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+  });
+});

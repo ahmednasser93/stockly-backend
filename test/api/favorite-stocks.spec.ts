@@ -20,9 +20,10 @@ import { createMockD1Database } from "../utils/factories";
 
 vi.mock("../../src/auth/middleware", () => ({
   authenticateRequest: vi.fn(),
+  authenticateRequestWithAdmin: vi.fn(),
 }));
 
-import { authenticateRequest } from "../../src/auth/middleware";
+import { authenticateRequest, authenticateRequestWithAdmin } from "../../src/auth/middleware";
 
 describe("Favorite Stocks API", () => {
   let mockEnv: Env;
@@ -144,7 +145,7 @@ describe("Favorite Stocks API", () => {
       // Mock delete - returns meta with changes > 0 to indicate success
       const deleteStmt = {
         bind: vi.fn().mockReturnThis(),
-        run: vi.fn().mockResolvedValue({ 
+        run: vi.fn().mockResolvedValue({
           success: true,
           meta: { changes: 1 }
         }),
@@ -163,6 +164,79 @@ describe("Favorite Stocks API", () => {
         mockLogger
       );
       expect(response.status).toBe(200);
+    });
+  });
+
+  describe("getAllUsersFavoriteStocks", () => {
+    it("should return all favorite stocks for admin", async () => {
+      const { getAllUsersFavoriteStocks } = await import("../../src/api/favorite-stocks");
+
+      // Setup Admin Auth Mock
+      vi.mocked(authenticateRequestWithAdmin).mockResolvedValue({
+        username: "adminUser",
+        userId: "admin-123",
+        tokenType: "access",
+        isAdmin: true,
+      });
+
+      // Mock DB interactions for getting users with stocks and news lookup
+      const { mockDb } = createMockD1Database();
+      mockEnv.stockly = mockDb as unknown as D1Database;
+
+      // 1. Mock fetch all users with stocks
+      const usersRows = [
+        { user_id: "u1", username: "alice", symbol: "AAPL" },
+        { user_id: "u2", username: "bob", symbol: "TSLA" }
+      ];
+
+      const usersStmt = {
+        all: vi.fn().mockResolvedValue({ results: usersRows }),
+      };
+
+      // 2. Mock news lookup for symbols (batch)
+      const newsRows = [{ symbol: "TSLA" }]; // Only TSLA has news
+      const newsStmt = {
+        bind: vi.fn().mockReturnThis(),
+        all: vi.fn().mockResolvedValue({ results: newsRows }),
+      };
+
+      mockDb.prepare
+        .mockReturnValueOnce(usersStmt) // Select users query
+        .mockReturnValueOnce(newsStmt); // Select news query
+
+      const request = createMockRequest("/v1/api/favorite-stocks/all");
+      const response = await getAllUsersFavoriteStocks(request, mockEnv, mockLogger);
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.users).toHaveLength(2);
+
+      // Check Alice (AAPL - no news)
+      const alice = data.users.find((u: any) => u.username === "alice");
+      expect(alice.stocks).toContain("AAPL");
+      expect(alice.stocksWithNews[0].hasNews).toBe(false);
+
+      // Check Bob (TSLA - has news)
+      const bob = data.users.find((u: any) => u.username === "bob");
+      expect(bob.stocks).toContain("TSLA");
+      expect(bob.stocksWithNews[0].hasNews).toBe(true);
+    });
+
+    it("should deny non-admin access", async () => {
+      const { getAllUsersFavoriteStocks } = await import("../../src/api/favorite-stocks");
+
+      // Non-admin auth
+      vi.mocked(authenticateRequestWithAdmin).mockResolvedValue({
+        username: "regularUser",
+        userId: "u1",
+        tokenType: "access",
+        isAdmin: false,
+      });
+
+      const request = createMockRequest("/v1/api/favorite-stocks/all");
+      const response = await getAllUsersFavoriteStocks(request, mockEnv, mockLogger);
+
+      expect(response.status).toBe(403);
     });
   });
 });

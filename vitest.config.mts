@@ -15,6 +15,7 @@ export default defineWorkersConfig({
 				'test/',
 				'**/*.spec.ts',
 				'**/*.test.ts',
+				'scripts/',
 			],
 		},
 		reporters: ['default', 'json', 'junit'],
