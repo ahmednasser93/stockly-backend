@@ -123,7 +123,7 @@ export async function getStock(
         statusCode: quoteRes.status,
         apiProvider: "FMP",
       });
-      return await handleProviderFailure(normalizedSymbol, env, ctx, "provider_api_error", logger);
+      return await handleProviderFailure(normalizedSymbol, env, ctx, "provider_api_error", logger, request);
     }
     
     const quoteData = await quoteRes.json();
@@ -134,7 +134,7 @@ export async function getStock(
       logger.warn(`Provider API returned invalid data for ${symbol}`, {
         apiProvider: "FMP",
       });
-      return await handleProviderFailure(normalizedSymbol, env, ctx, "provider_invalid_data", logger);
+      return await handleProviderFailure(normalizedSymbol, env, ctx, "provider_invalid_data", logger, request);
     }
 
     // Fetch profile data to get image, description, and additional fields

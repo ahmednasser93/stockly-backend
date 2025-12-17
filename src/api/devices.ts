@@ -6,7 +6,7 @@ import { sendFCMNotification } from "../notifications/fcm-sender";
 import type { Logger } from "../logging/logger";
 
 export interface Device {
-  userId: string;
+  userId: string | null; // Can be null for unregistered devices
   username: string | null;
   pushToken: string;
   deviceInfo: string | null;
@@ -62,7 +62,8 @@ export async function getAllDevices(
 
     let rows: { results?: Array<any> } | null = null;
     if (username === null) {
-      // Admin: get all devices with usernames
+      // Admin: get all devices including those without usernames (unregistered devices)
+      // LEFT JOIN ensures devices with null user_id or users without username are included
       // Note: upt.username column may not exist in production, so we only use u.username from JOIN
       try {
         rows = await env.stockly
@@ -80,7 +81,7 @@ export async function getAllDevices(
              ORDER BY upt.updated_at DESC`
           )
           .all<{
-            user_id: string;
+            user_id: string | null;
             push_token: string;
             device_info: string | null;
             device_type: string | null;
@@ -106,7 +107,7 @@ export async function getAllDevices(
                  ORDER BY upt.updated_at DESC`
               )
               .all<{
-                user_id: string;
+                user_id: string | null;
                 push_token: string;
                 device_info: string | null;
                 created_at: string;
@@ -173,7 +174,7 @@ export async function getAllDevices(
           )
           .bind(username)
           .all<{
-            user_id: string;
+            user_id: string | null;
             push_token: string;
             device_info: string | null;
             device_type: string | null;
@@ -202,7 +203,7 @@ export async function getAllDevices(
               )
               .bind(username)
               .all<{
-                user_id: string;
+                user_id: string | null;
                 push_token: string;
                 device_info: string | null;
                 created_at: string;
@@ -250,29 +251,35 @@ export async function getAllDevices(
 
     const devices: Device[] = await Promise.all(
       rows.results.map(async (row) => {
-        // Count total alerts for this push token
+        // Count total alerts for this device's user (alerts are now associated with username, not target)
         let totalAlertsResult, activeAlertsResult;
         if (username === null) {
-          // Admin: count all alerts for this push token
-          totalAlertsResult = await env.stockly
-            .prepare(`SELECT COUNT(*) as count FROM alerts WHERE target = ?`)
-            .bind(row.push_token)
-            .first<{ count: number }>();
+          // Admin: count all alerts for this device's username
+          if (row.username) {
+            totalAlertsResult = await env.stockly
+              .prepare(`SELECT COUNT(*) as count FROM alerts WHERE username = ?`)
+              .bind(row.username)
+              .first<{ count: number }>();
 
-          activeAlertsResult = await env.stockly
-            .prepare(`SELECT COUNT(*) as count FROM alerts WHERE target = ? AND status = 'active'`)
-            .bind(row.push_token)
-            .first<{ count: number }>();
+            activeAlertsResult = await env.stockly
+              .prepare(`SELECT COUNT(*) as count FROM alerts WHERE username = ? AND status = 'active'`)
+              .bind(row.username)
+              .first<{ count: number }>();
+          } else {
+            // Device has no username, so no alerts
+            totalAlertsResult = { count: 0 };
+            activeAlertsResult = { count: 0 };
+          }
         } else {
-          // Regular user: count alerts for this push token and username
+          // Regular user: count alerts for this username (device username should match authenticated username)
           totalAlertsResult = await env.stockly
-            .prepare(`SELECT COUNT(*) as count FROM alerts WHERE target = ? AND username = ?`)
-            .bind(row.push_token, username)
+            .prepare(`SELECT COUNT(*) as count FROM alerts WHERE username = ?`)
+            .bind(username)
             .first<{ count: number }>();
 
           activeAlertsResult = await env.stockly
-            .prepare(`SELECT COUNT(*) as count FROM alerts WHERE target = ? AND username = ? AND status = 'active'`)
-            .bind(row.push_token, username)
+            .prepare(`SELECT COUNT(*) as count FROM alerts WHERE username = ? AND status = 'active'`)
+            .bind(username)
             .first<{ count: number }>();
         }
 

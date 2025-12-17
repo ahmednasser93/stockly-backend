@@ -64,7 +64,6 @@ describe("alerts handler", () => {
       direction: "above",
       threshold: 200,
       channel: "notification",
-      target: "dXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
     };
 
     const response = await handleAlertsRequest(
@@ -77,7 +76,7 @@ describe("alerts handler", () => {
     await expect(response.json()).resolves.toEqual(created);
     expect(createAlert).toHaveBeenCalledWith(
       expect.anything(), 
-      expect.objectContaining({ ...body, symbol: "AAPL" }), 
+      expect.objectContaining({ symbol: "AAPL", direction: "above", threshold: 200, channel: "notification" }), 
       "testuser"
     );
   });

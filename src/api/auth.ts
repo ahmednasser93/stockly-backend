@@ -320,7 +320,7 @@ async function verifyGoogleToken(
       return null;
     }
 
-    const jwks = await keysResponse.json();
+    const jwks = await keysResponse.json() as { keys?: Array<{ kid: string }> };
 
     // Decode token header to get key ID
     const [headerB64] = idToken.split(".");
@@ -332,7 +332,7 @@ async function verifyGoogleToken(
       new TextDecoder().decode(
         Uint8Array.from(atob(headerB64), (c) => c.charCodeAt(0))
       )
-    );
+    ) as { kid: string };
 
     // Find the matching key
     const key = jwks.keys?.find((k: { kid: string }) => k.kid === header.kid);
@@ -826,7 +826,6 @@ export async function refreshToken(
   // Log token refresh event
   logAuthEvent(logger, {
     type: "token_refresh",
-    username: result.username,
     success: true,
     ipAddress: extractIpAddress(request) || undefined,
     userAgent: extractUserAgent(request) || undefined,
@@ -941,12 +940,11 @@ export async function logout(
     env.JWT_REFRESH_SECRET
   );
   
-  logger.info("User logged out", { userId: auth?.userId });
+  logger.info("User logged out", { username: auth?.username });
   
   // Log logout event
   logAuthEvent(logger, {
     type: "sign_out",
-    userId: auth?.userId || null,
     success: true,
     ipAddress: extractIpAddress(request) || undefined,
     userAgent: extractUserAgent(request) || undefined,

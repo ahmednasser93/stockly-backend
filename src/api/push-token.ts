@@ -340,7 +340,8 @@ export async function registerPushToken(
 /**
  * Get a user's push tokens (all devices)
  * GET /v1/api/push-token
- * GET /v1/api/push-token?check=true (quick check mode - returns { registered: boolean })
+ * GET /v1/api/push-token?check=true&token=<pushToken> (quick check mode - returns { registered: boolean })
+ *   - Checks if the specific push token is registered for the authenticated user
  * username from JWT authentication
  */
 export async function getPushToken(
@@ -386,17 +387,31 @@ export async function getPushToken(
     const url = new URL(request.url);
     const isQuickCheck = url.searchParams.get("check") === "true";
     if (isQuickCheck) {
-      // Quick check mode: just return whether user has any devices registered
-      const deviceCount = await env.stockly
-        .prepare(
-          `SELECT COUNT(*) as count 
-           FROM user_push_tokens 
-           WHERE user_id = ?`
-        )
-        .bind(userId)
-        .first<{ count: number }>();
+      // Quick check mode: check if specific token is registered for this user
+      const pushToken = url.searchParams.get("token");
+      
+      if (!pushToken) {
+        return json({ error: "token parameter required for check mode" }, 400, request);
+      }
 
-      const registered = (deviceCount?.count || 0) > 0;
+      // Check if this specific token is registered for this user
+      const device = await env.stockly
+        .prepare(
+          `SELECT user_id FROM user_push_tokens WHERE push_token = ? AND user_id = ?`
+        )
+        .bind(pushToken, userId)
+        .first<{ user_id: string }>();
+
+      // If device is found, it means the token is registered for this user
+      // (query already filtered by user_id, so device.user_id === userId is always true if device is not null)
+      const registered = device !== null;
+
+      logger.debug("Device registration check", {
+        username,
+        userId,
+        pushToken: pushToken.substring(0, 20) + "...",
+        registered,
+      });
 
       return json({
         registered,

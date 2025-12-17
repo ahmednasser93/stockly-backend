@@ -8,7 +8,6 @@ describe("alert validation", () => {
       direction: "below",
       threshold: 150,
       channel: "notification",
-      target: "dXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
       notes: "watch closely",
     });
 
@@ -27,7 +26,6 @@ describe("alert validation", () => {
       direction: "above",
       threshold: 100,
       channel: "notification",
-      target: "token",
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -44,7 +42,7 @@ describe("alert validation", () => {
       expect(result.errors).toContain("threshold must be a positive number");
       expect(result.errors).toContain("direction must be 'above' or 'below'");
       expect(result.errors).toContain("channel must be 'notification'");
-      expect(result.errors).toContain("target is required");
+      // Note: target is now optional, so it's not required
     }
   });
 
@@ -54,7 +52,6 @@ describe("alert validation", () => {
       direction: "sideways",
       threshold: 100,
       channel: "sms",
-      target: "token",
     });
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -77,7 +74,6 @@ describe("alert validation", () => {
       symbol: "GOOGL",
       direction: "above",
       channel: "notification",
-      target: "newToken",
       threshold: 1500
     });
     expect(result.ok).toBe(true);
@@ -85,7 +81,6 @@ describe("alert validation", () => {
       expect(result.data.symbol).toBe("GOOGL");
       expect(result.data.direction).toBe("above");
       expect(result.data.channel).toBe("notification");
-      expect(result.data.target).toBe("newToken");
       expect(result.data.threshold).toBe(1500);
     }
   });
@@ -118,7 +113,6 @@ describe("alert validation", () => {
       channel: "wrong",
       status: "wrong",
       threshold: -10,
-      target: "", // empty target
       notes: 123 // invalid type
     });
 
@@ -128,7 +122,6 @@ describe("alert validation", () => {
       expect(result.errors).toContain("channel must be 'notification'");
       expect(result.errors).toContain("status must be 'active' or 'paused'");
       expect(result.errors).toContain("threshold must be a positive number");
-      expect(result.errors).toContain("target is required");
       expect(result.errors).toContain("notes must be a string");
     }
   });

@@ -95,6 +95,12 @@ wrangler d1 execute stockly --remote --yes --file=./migrations/018_populate_user
 echo "Migration 19/19: 019_make_username_required.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/019_make_username_required.sql || echo "⚠️  Migration 19 already applied or failed"
 
+echo "Migration 20/21: 020_remove_target_from_alerts.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/020_remove_target_from_alerts.sql || echo "⚠️  Migration 20 already applied or failed"
+
+echo "Migration 21/21: 021_fix_user_push_tokens_username.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/021_fix_user_push_tokens_username.sql || echo "⚠️  Migration 21 already applied or failed"
+
 echo ""
 echo "✅ Database migrations complete"
 echo ""

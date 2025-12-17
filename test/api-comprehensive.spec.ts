@@ -494,7 +494,7 @@ describe("API - Push Token", () => {
     const env = createEnv();
     let callCount = 0;
     env.stockly.prepare = vi.fn().mockImplementation((query: string) => {
-      const bind = vi.fn().mockReturnValue({
+    const bind = vi.fn().mockReturnValue({
         first: vi.fn().mockImplementation(() => {
           const result = callCount === 0 
             ? { id: "user-123", username: "testuser" } // User lookup
@@ -504,8 +504,8 @@ describe("API - Push Token", () => {
           callCount++;
           return Promise.resolve(result);
         }),
-        run: vi.fn().mockResolvedValue(undefined),
-      });
+      run: vi.fn().mockResolvedValue(undefined),
+    });
       return { bind };
     });
 
@@ -532,7 +532,7 @@ describe("API - Push Token", () => {
     const env = createEnv();
     let callCount = 0;
     env.stockly.prepare = vi.fn().mockImplementation((query: string) => {
-      const bind = vi.fn().mockReturnValue({
+    const bind = vi.fn().mockReturnValue({
         first: vi.fn().mockImplementation(() => {
           const result = callCount === 0 
             ? { id: "user-123", username: "testuser" } // User lookup
@@ -542,8 +542,8 @@ describe("API - Push Token", () => {
           callCount++;
           return Promise.resolve(result);
         }),
-        run: vi.fn().mockResolvedValue(undefined),
-      });
+      run: vi.fn().mockResolvedValue(undefined),
+    });
       return { bind };
     });
 
@@ -589,18 +589,18 @@ describe("API - Push Token", () => {
   it("GET /v1/api/push-token gets a user's push token", async () => {
     const mockTokens = [
       {
-        push_token: "fcm-token-12345678901234567890",
-        device_info: "iPhone 14 Pro",
+      push_token: "fcm-token-12345678901234567890",
+      device_info: "iPhone 14 Pro",
         device_type: "ios",
-        created_at: "2025-01-01T00:00:00Z",
-        updated_at: "2025-01-01T00:00:00Z",
+      created_at: "2025-01-01T00:00:00Z",
+      updated_at: "2025-01-01T00:00:00Z",
       },
     ];
 
     const env = createEnv();
     let callCount = 0;
     env.stockly.prepare = vi.fn().mockImplementation((query: string) => {
-      const bind = vi.fn().mockReturnValue({
+    const bind = vi.fn().mockReturnValue({
         first: vi.fn().mockResolvedValue(
           callCount++ === 0 
             ? { id: "user-123" } // User lookup
@@ -625,7 +625,7 @@ describe("API - Push Token", () => {
     const env = createEnv();
     let callCount = 0;
     env.stockly.prepare = vi.fn().mockImplementation((query: string) => {
-      const bind = vi.fn().mockReturnValue({
+    const bind = vi.fn().mockReturnValue({
         first: vi.fn().mockResolvedValue(
           callCount++ === 0 
             ? { id: "user-123" } // User lookup
@@ -642,6 +642,72 @@ describe("API - Push Token", () => {
     expect(response.status).toBe(404);
     const data = await response.json();
     expect(data.error).toContain("not found");
+  });
+
+  it("GET /v1/api/push-token?check=true&token=XXX returns registered status for specific token", async () => {
+    const testToken = "fcm-token-12345678901234567890";
+    const env = createEnv();
+    let callCount = 0;
+    env.stockly.prepare = vi.fn().mockImplementation((query: string) => {
+      const bind = vi.fn().mockReturnValue({
+        first: vi.fn().mockResolvedValue(
+          callCount++ === 0 
+            ? { id: "user-123" } // User lookup
+            : { user_id: "user-123" } // Token check - token is registered
+        ),
+        all: vi.fn().mockResolvedValue({ results: [] }),
+      });
+      return { bind };
+    });
+
+    const request = new Request(`https://example.com/v1/api/push-token?check=true&token=${encodeURIComponent(testToken)}`);
+    const response = await getPushToken(request, env, createMockLogger());
+    
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.registered).toBe(true);
+  });
+
+  it("GET /v1/api/push-token?check=true&token=XXX returns registered=false when token not found", async () => {
+    const testToken = "fcm-token-unregistered";
+    const env = createEnv();
+    let callCount = 0;
+    env.stockly.prepare = vi.fn().mockImplementation((query: string) => {
+      const bind = vi.fn().mockReturnValue({
+        first: vi.fn().mockResolvedValue(
+          callCount++ === 0 
+            ? { id: "user-123" } // User lookup
+            : null // Token check - token not found
+        ),
+        all: vi.fn().mockResolvedValue({ results: [] }),
+      });
+      return { bind };
+    });
+
+    const request = new Request(`https://example.com/v1/api/push-token?check=true&token=${encodeURIComponent(testToken)}`);
+    const response = await getPushToken(request, env, createMockLogger());
+    
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.registered).toBe(false);
+  });
+
+  it("GET /v1/api/push-token?check=true returns 400 when token parameter missing", async () => {
+    const env = createEnv();
+    env.stockly.prepare = vi.fn().mockImplementation((query: string) => {
+      const bind = vi.fn().mockReturnValue({
+        first: vi.fn().mockResolvedValue({ id: "user-123" }), // User lookup
+        all: vi.fn().mockResolvedValue({ results: [] }),
+      });
+      return { bind };
+    });
+
+    const request = new Request("https://example.com/v1/api/push-token?check=true");
+    const response = await getPushToken(request, env, createMockLogger());
+    
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.error).toContain("token parameter required");
   });
 });
 
@@ -672,13 +738,13 @@ describe("API - Preferences", () => {
     const env = createEnv();
     let callCount = 0;
     env.stockly.prepare = vi.fn().mockImplementation((query: string) => {
-      const bind = vi.fn().mockReturnValue({
+    const bind = vi.fn().mockReturnValue({
         first: vi.fn().mockResolvedValue(
           callCount++ === 0 
             ? { id: "user-123" } // User lookup
             : mockPreferences // Preferences
         ),
-      });
+    });
       return { bind };
     });
 
@@ -695,13 +761,13 @@ describe("API - Preferences", () => {
     const env = createEnv();
     let callCount = 0;
     env.stockly.prepare = vi.fn().mockImplementation((query: string) => {
-      const bind = vi.fn().mockReturnValue({
+    const bind = vi.fn().mockReturnValue({
         first: vi.fn().mockResolvedValue(
           callCount++ === 0 
             ? { id: "user-123" } // User lookup
             : null // No preferences found
         ),
-      });
+    });
       return { bind };
     });
 
@@ -726,14 +792,14 @@ describe("API - Preferences", () => {
     const env = createEnv();
     let callCount = 0;
     env.stockly.prepare = vi.fn().mockImplementation((query: string) => {
-      const bind = vi.fn().mockReturnValue({
+    const bind = vi.fn().mockReturnValue({
         first: vi.fn().mockResolvedValue(
           callCount++ === 0 
             ? { id: "user-123" } // User lookup
             : null // No existing preferences
         ),
-        run: vi.fn().mockResolvedValue(undefined),
-      });
+      run: vi.fn().mockResolvedValue(undefined),
+    });
       return { bind };
     });
 
@@ -796,13 +862,13 @@ describe("API - Settings", () => {
     const logger = createMockLogger();
     let callCount = 0;
     env.stockly.prepare = vi.fn().mockImplementation((query: string) => {
-      const bind = vi.fn().mockReturnValue({
+    const bind = vi.fn().mockReturnValue({
         first: vi.fn().mockResolvedValue(
           callCount++ === 0 
             ? null // No settings found
             : { id: "user-123" } // User lookup for default
         ),
-      });
+    });
       return { bind };
     });
 
@@ -828,14 +894,14 @@ describe("API - Settings", () => {
     const logger = createMockLogger();
     let callCount = 0;
     env.stockly.prepare = vi.fn().mockImplementation((query: string) => {
-      const bind = vi.fn().mockReturnValue({
+    const bind = vi.fn().mockReturnValue({
         first: vi.fn().mockResolvedValue(
           callCount++ === 0 
             ? { id: "user-123" } // User lookup
             : null // No existing settings
         ),
-        run: vi.fn().mockResolvedValue(undefined),
-      });
+      run: vi.fn().mockResolvedValue(undefined),
+    });
       return { bind };
     });
 

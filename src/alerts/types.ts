@@ -9,7 +9,6 @@ export interface AlertRecord {
   threshold: number;
   status: AlertStatus;
   channel: AlertChannel;
-  target: string;
   notes: string | null;
   username: string | null;
   createdAt: string;
@@ -21,7 +20,6 @@ export interface AlertDraft {
   direction: AlertDirection;
   threshold: number;
   channel: AlertChannel;
-  target: string;
   notes?: string;
 }
 
@@ -31,7 +29,6 @@ export interface AlertUpdate {
   threshold?: number;
   status?: AlertStatus;
   channel?: AlertChannel;
-  target?: string;
   notes?: string | null;
 }
 

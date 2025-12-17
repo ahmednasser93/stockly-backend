@@ -377,7 +377,7 @@ export async function retryNotification(request: Request, logId: string, env: En
     let errorMessage: string | null = null;
 
     try {
-      const result = await sendFCMNotificationWithLogs(push_token, title, body, pushData, env);
+      const result = await sendFCMNotificationWithLogs(push_token, title, body, pushData, env, logger);
       
       // Add all detailed logs from the send function
       retryLogs.push(...result.logs);

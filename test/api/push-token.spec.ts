@@ -450,5 +450,122 @@ describe("Push Token API", () => {
       const data = await response.json();
       expect(data.devices[0].pushToken).toBe("t");
     });
+
+    it("should return registered=true when token is registered for user (check mode)", async () => {
+      const { mockDb } = createMockD1Database();
+      mockEnv.stockly = mockDb as unknown as D1Database;
+      vi.mocked(authMiddleware.authenticateRequest).mockResolvedValue({ username: "testuser", userId: "user-123" } as any);
+
+      const testToken = "fcm-token-12345678901234567890";
+
+      // Mock user lookup
+      const userStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue({ id: "user-123" }),
+      };
+
+      // Mock token check query (for check mode)
+      const tokenCheckStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue({ user_id: "user-123" }),
+      };
+
+      mockDb.prepare
+        .mockReturnValueOnce(userStmt)
+        .mockReturnValueOnce(tokenCheckStmt);
+
+      const request = createMockRequest(`/v1/api/push-token?check=true&token=${encodeURIComponent(testToken)}`);
+      const response = await getPushToken(request, mockEnv, mockLogger);
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.registered).toBe(true);
+      
+      // Verify the query was correct
+      expect(tokenCheckStmt.bind).toHaveBeenCalledWith(testToken, "user-123");
+    });
+
+    it("should return registered=false when token is not registered for user (check mode)", async () => {
+      const { mockDb } = createMockD1Database();
+      mockEnv.stockly = mockDb as unknown as D1Database;
+      vi.mocked(authMiddleware.authenticateRequest).mockResolvedValue({ username: "testuser", userId: "user-123" } as any);
+
+      const testToken = "fcm-token-unregistered";
+
+      // Mock user lookup
+      const userStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue({ id: "user-123" }),
+      };
+
+      // Mock token check query - returns null (not found)
+      const tokenCheckStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue(null),
+      };
+
+      mockDb.prepare
+        .mockReturnValueOnce(userStmt)
+        .mockReturnValueOnce(tokenCheckStmt);
+
+      const request = createMockRequest(`/v1/api/push-token?check=true&token=${encodeURIComponent(testToken)}`);
+      const response = await getPushToken(request, mockEnv, mockLogger);
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.registered).toBe(false);
+    });
+
+    it("should return 400 when check=true but token parameter is missing", async () => {
+      const { mockDb } = createMockD1Database();
+      mockEnv.stockly = mockDb as unknown as D1Database;
+      vi.mocked(authMiddleware.authenticateRequest).mockResolvedValue({ username: "testuser", userId: "user-123" } as any);
+
+      // Mock user lookup
+      const userStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue({ id: "user-123" }),
+      };
+
+      mockDb.prepare.mockReturnValueOnce(userStmt);
+
+      const request = createMockRequest("/v1/api/push-token?check=true");
+      const response = await getPushToken(request, mockEnv, mockLogger);
+
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data.error).toContain("token parameter required");
+    });
+
+    it("should return registered=false when token belongs to different user (check mode)", async () => {
+      const { mockDb } = createMockD1Database();
+      mockEnv.stockly = mockDb as unknown as D1Database;
+      vi.mocked(authMiddleware.authenticateRequest).mockResolvedValue({ username: "testuser", userId: "user-123" } as any);
+
+      const testToken = "fcm-token-other-user";
+
+      // Mock user lookup
+      const userStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue({ id: "user-123" }),
+      };
+
+      // Mock token check query - token exists but for different user (should not match due to AND user_id = ?)
+      const tokenCheckStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue(null), // Query with AND user_id = ? won't match if token belongs to different user
+      };
+
+      mockDb.prepare
+        .mockReturnValueOnce(userStmt)
+        .mockReturnValueOnce(tokenCheckStmt);
+
+      const request = createMockRequest(`/v1/api/push-token?check=true&token=${encodeURIComponent(testToken)}`);
+      const response = await getPushToken(request, mockEnv, mockLogger);
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.registered).toBe(false);
+    });
   });
 });

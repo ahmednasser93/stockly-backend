@@ -63,6 +63,8 @@ describe("Devices API", () => {
           user_id: "user-1",
           push_token: "dXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
           device_info: "Android Device",
+          device_type: "Android",
+          username: "testuser",
           created_at: "2025-11-14T10:30:00.000Z",
           updated_at: "2025-11-14T10:30:00.000Z",
         },
@@ -70,6 +72,8 @@ describe("Devices API", () => {
           user_id: "user-2",
           push_token: "eYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY",
           device_info: null,
+          device_type: null,
+          username: "testuser2",
           created_at: "2025-11-13T08:20:00.000Z",
           updated_at: "2025-11-14T12:00:00.000Z",
         },
@@ -80,7 +84,8 @@ describe("Devices API", () => {
         all: vi.fn().mockResolvedValue({ results: mockDevices }),
       };
 
-      // Mock the alert count queries (called for each device)
+      // Mock the alert count queries (called for each device with username)
+      // For admin, alerts are counted by device's username
       const alertCountStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({ count: 5 }),
@@ -90,7 +95,7 @@ describe("Devices API", () => {
       mockDb.prepare.mockImplementation((query: string) => {
         if (query.includes("user_push_tokens")) {
           return mainQueryStmt;
-        } else if (query.includes("alerts") && query.includes("COUNT")) {
+        } else if (query.includes("alerts") && query.includes("COUNT") && query.includes("username")) {
           return alertCountStmt;
         }
         return {

@@ -15,7 +15,6 @@ type AlertRow = {
   threshold: number;
   status: AlertStatus;
   channel: AlertChannel;
-  target: string;
   notes: string | null;
   username: string | null;
   created_at: string;
@@ -29,14 +28,13 @@ const mapRow = (row: AlertRow): AlertRecord => ({
   threshold: row.threshold,
   status: row.status,
   channel: row.channel,
-  target: row.target,
   notes: row.notes,
   username: row.username,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
 
-const SELECT_BASE = `SELECT id, symbol, direction, threshold, status, channel, target, notes, username, created_at, updated_at FROM alerts`;
+const SELECT_BASE = `SELECT id, symbol, direction, threshold, status, channel, notes, username, created_at, updated_at FROM alerts`;
 
 export async function listAlerts(env: Env, username: string | null): Promise<AlertRecord[]> {
   if (username === null) {
@@ -110,10 +108,10 @@ export async function createAlert(env: Env, draft: AlertDraft, username: string)
 
     await env.stockly
       .prepare(
-        `INSERT INTO alerts (id, symbol, direction, threshold, status, channel, target, notes, username, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO alerts (id, symbol, direction, threshold, status, channel, notes, username, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`
       )
-      .bind(id, draft.symbol, draft.direction, draft.threshold, draft.channel, draft.target, notes, username, now, now)
+      .bind(id, draft.symbol, draft.direction, draft.threshold, draft.channel, notes, username, now, now)
       .run();
 
     const created = await getAlert(env, id, username);
@@ -178,10 +176,6 @@ export async function updateAlert(
     if (updates.channel) {
       fields.push("channel = ?");
       values.push(updates.channel);
-    }
-    if (updates.target) {
-      fields.push("target = ?");
-      values.push(updates.target);
     }
     if (updates.notes !== undefined) {
       fields.push("notes = ?");

@@ -35,11 +35,6 @@ export function validateNewAlert(payload: unknown): ValidationResult<AlertDraft>
     errors.push("channel must be 'notification'");
   }
 
-  const target = coerceString(data.target);
-  if (!target) {
-    errors.push("target is required");
-  }
-
   if (errors.length) {
     return { ok: false, errors };
   }
@@ -49,7 +44,6 @@ export function validateNewAlert(payload: unknown): ValidationResult<AlertDraft>
     direction: rawDirection as AlertDirection,
     threshold,
     channel: rawChannel as AlertChannel,
-    target,
   };
 
   if (typeof data.notes === "string" && data.notes.trim().length) {
@@ -95,14 +89,7 @@ export function validateAlertUpdate(payload: unknown): ValidationResult<AlertUpd
     }
   }
 
-  if (typeof data.target === "string") {
-    const target = data.target.trim();
-    if (target) {
-      update.target = target;
-    } else {
-      errors.push("target is required");
-    }
-  }
+  // Target field has been removed - notifications now use username to find all user devices
 
   if (data.status !== undefined) {
     const normalized = typeof data.status === "string" ? data.status.trim().toLowerCase() : "";

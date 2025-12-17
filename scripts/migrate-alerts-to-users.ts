@@ -56,3 +56,4 @@ console.log("wrangler d1 execute stockly --file=migration.sql");
 
 
 
+

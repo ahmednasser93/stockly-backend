@@ -386,7 +386,8 @@ describe("Admin API", () => {
         expect.stringContaining("AAPL"),
         expect.stringContaining("205"),
         expect.any(Object),
-        mockEnv
+        mockEnv,
+        mockLogger
       );
     });
 

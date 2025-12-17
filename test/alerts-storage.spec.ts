@@ -82,7 +82,6 @@ describe("alerts storage queries", () => {
       threshold: 200,
       status: "active",
       channel: "notification",
-      target: "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]",
       notes: null,
       username: "testuser",
       created_at: "now",
@@ -110,7 +109,6 @@ describe("alerts storage queries", () => {
       direction: "above",
       threshold: 200,
       channel: "notification",
-      target: "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]",
     }, "testuser");
 
     expect(alert.id).toBe("generated-id");
@@ -132,7 +130,6 @@ describe("alerts storage queries", () => {
       direction: "above",
       threshold: -1,
       channel: "notification",
-      target: "t"
     }, "u")).rejects.toThrow("Invalid alert data");
   });
 
@@ -150,7 +147,6 @@ describe("alerts storage queries", () => {
       direction: "above",
       threshold: 10,
       channel: "notification",
-      target: "t"
     }, "u")).rejects.toThrow("Missing required alert data");
   });
 
@@ -169,7 +165,7 @@ describe("alerts storage queries", () => {
     vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("id");
 
     await expect(createAlert(env, {
-      symbol: "A", direction: "above", threshold: 1, channel: "notification", target: "t"
+      symbol: "A", direction: "above", threshold: 1, channel: "notification"
     }, "u")).rejects.toThrow("failed to load created alert");
   });
 
@@ -185,7 +181,7 @@ describe("alerts storage queries", () => {
         stmt.first.mockResolvedValue({
           id: "id", symbol: "A", username: "other", direction: "above",
           threshold: 1, status: "active", channel: "notification",
-          target: "t", created_at: "now", updated_at: "now"
+          notes: null, created_at: "now", updated_at: "now"
         });
       }
       return stmt as any;
@@ -194,7 +190,7 @@ describe("alerts storage queries", () => {
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => { });
 
     await expect(createAlert(env, {
-      symbol: "A", direction: "above", threshold: 1, channel: "notification", target: "t"
+      symbol: "A", direction: "above", threshold: 1, channel: "notification"
     }, "me")).rejects.toThrow("incorrect username");
 
     consoleSpy.mockRestore();
@@ -209,7 +205,6 @@ describe("alerts storage queries", () => {
       threshold: 150,
       status: "paused",
       channel: "notification",
-      target: "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]",
       notes: "",
       username: "testuser",
       created_at: "now",
@@ -283,7 +278,6 @@ describe("alerts storage queries", () => {
         threshold: 200,
         status: "active",
         channel: "notification",
-        target: "dXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
         notes: null,
         username: "testuser",
         created_at: "now",
@@ -311,7 +305,6 @@ describe("alerts storage queries", () => {
         threshold: 200,
         status: "active",
         channel: "notification",
-        target: "token1",
         notes: null,
         username: "user1",
         created_at: "now",
@@ -324,7 +317,6 @@ describe("alerts storage queries", () => {
         threshold: 100,
         status: "active",
         channel: "notification",
-        target: "token2",
         notes: null,
         username: "user2",
         created_at: "now",
@@ -368,7 +360,6 @@ describe("alerts storage queries", () => {
       direction: "above",
       threshold: 200,
       channel: "notification",
-      target: "token",
     }, "testuser")).rejects.toThrow("An alert already exists for this symbol and threshold");
   });
   it("lists active alerts for specific user", async () => {
@@ -441,7 +432,6 @@ describe("alerts storage queries", () => {
       threshold: 100,
       status: "active",
       channel: "webhook",
-      target: "url",
       notes: "note"
     }, "user");
 
@@ -451,7 +441,6 @@ describe("alerts storage queries", () => {
     expect(updateStmt?.sql).toContain("threshold = ?");
     expect(updateStmt?.sql).toContain("status = ?");
     expect(updateStmt?.sql).toContain("channel = ?");
-    expect(updateStmt?.sql).toContain("target = ?");
     expect(updateStmt?.sql).toContain("notes = ?");
   });
 });

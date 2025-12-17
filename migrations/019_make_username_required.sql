@@ -62,3 +62,4 @@ UPDATE user_saved_news SET username = 'unknown' WHERE username IS NULL;
 -- Instead, we rely on application-level validation and the data migration above
 
 
+

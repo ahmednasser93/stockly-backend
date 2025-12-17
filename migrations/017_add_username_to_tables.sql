@@ -40,3 +40,4 @@ CREATE INDEX IF NOT EXISTS idx_user_saved_news_username ON user_saved_news(usern
 CREATE INDEX IF NOT EXISTS idx_user_push_tokens_device_type ON user_push_tokens(device_type);
 
 
+

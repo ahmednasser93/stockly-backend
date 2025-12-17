@@ -171,7 +171,7 @@ export async function updateConfigEndpoint(
   logger: Logger
 ): Promise<Response> {
   try {
-    const body = await request.json();
+    const body = await request.json() as Partial<AdminConfig>;
     const config = await updateConfig(env, body);
     return json(config);
   } catch (error) {
@@ -187,8 +187,10 @@ export async function simulateProviderFailureEndpoint(
   env: Env,
   logger?: Logger
 ): Promise<Response> {
+  const current = await getConfig(env);
   const config = await updateConfig(env, {
     featureFlags: {
+      ...current.featureFlags,
       simulateProviderFailure: true,
     },
   });
@@ -202,8 +204,10 @@ export async function disableProviderFailureEndpoint(
   env: Env,
   logger?: Logger
 ): Promise<Response> {
+  const current = await getConfig(env);
   const config = await updateConfig(env, {
     featureFlags: {
+      ...current.featureFlags,
       simulateProviderFailure: false,
     },
   });
