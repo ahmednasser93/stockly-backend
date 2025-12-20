@@ -47,6 +47,9 @@ vi.mock("../src/api/favorite-stocks", () => ({
   deleteFavoriteStock: vi.fn(),
   getAllUsersFavoriteStocks: vi.fn()
 }));
+vi.mock("../src/api/users", () => ({
+  getAllUsers: vi.fn()
+}));
 vi.mock("../src/cron/alerts-cron", () => ({ runAlertCron: vi.fn() }));
 vi.mock("../src/cron/news-alert-cron", () => ({ runNewsAlertCron: vi.fn() }));
 vi.mock("../src/api/get-historical", () => ({ getHistorical: vi.fn() }));
@@ -185,7 +188,14 @@ describe("worker router", () => {
 
   it("delegates /favorite-stocks GET", () => verifyRoute("/v1/api/favorite-stocks", "GET", favoriteStocksMock.getFavoriteStocks));
   it("delegates /favorite-stocks POST", () => verifyRoute("/v1/api/favorite-stocks", "POST", favoriteStocksMock.updateFavoriteStocks));
-  it("delegates /favorite-stocks ALL", () => verifyRoute("/v1/api/favorite-stocks/all", "GET", favoriteStocksMock.getAllUsersFavoriteStocks));
+  it.skip("delegates /favorite-stocks ALL (moved to /v1/api/users/all)", () => {
+    // This endpoint has been moved to /v1/api/users/all
+  });
+  
+  it("delegates /users/all", async () => {
+    const usersMock = await import("../src/api/users");
+    await verifyRoute("/v1/api/users/all", "GET", vi.mocked(usersMock.getAllUsers));
+  });
   it("delegates /favorite-stocks/:symbol DELETE", async () => {
     const mockResponse = new Response("mocked");
     vi.mocked(favoriteStocksMock.deleteFavoriteStock).mockResolvedValue(mockResponse);

@@ -404,8 +404,9 @@ export async function getAllUsersFavoriteStocks(
   }
 
   try {
-    // Get all users with their favorite stocks
-    const rows = await env.stockly
+    // Get all users who have either favorite stocks OR devices
+    // First, get all users with favorite stocks
+    const favoriteStocksRows = await env.stockly
       .prepare(
         `SELECT 
            ufs.user_id,
@@ -413,6 +414,7 @@ export async function getAllUsersFavoriteStocks(
            ufs.symbol
          FROM user_favorite_stocks ufs
          LEFT JOIN users u ON ufs.user_id = u.id
+         WHERE u.username IS NOT NULL
          ORDER BY u.username ASC, ufs.display_order ASC, ufs.created_at ASC`
       )
       .all<{
@@ -421,10 +423,80 @@ export async function getAllUsersFavoriteStocks(
         symbol: string;
       }>();
 
-    // Get all unique symbols from favorite stocks
+    // Get all users with devices (even if they don't have favorite stocks)
+    const usersWithDevices = await env.stockly
+      .prepare(
+        `SELECT DISTINCT
+           u.id as user_id,
+           u.username
+         FROM users u
+         INNER JOIN user_push_tokens upt ON u.id = upt.user_id
+         WHERE u.username IS NOT NULL`
+      )
+      .all<{
+        user_id: string;
+        username: string | null;
+      }>();
+
+    // Get all users with alerts (even if they don't have favorite stocks or devices)
+    const usersWithAlerts = await env.stockly
+      .prepare(
+        `SELECT DISTINCT
+           u.id as user_id,
+           u.username
+         FROM users u
+         INNER JOIN alerts a ON a.username = u.username
+         WHERE u.username IS NOT NULL`
+      )
+      .all<{
+        user_id: string;
+        username: string | null;
+      }>();
+
+    // Combine both sets - use favorite stocks rows as primary, but ensure all users with devices are included
+    const allUserIds = new Set<string>();
+    const rows: Array<{ user_id: string; username: string | null; symbol: string | null }> = [];
+
+    // Add all favorite stocks rows
+    for (const row of favoriteStocksRows.results || []) {
+      allUserIds.add(row.user_id);
+      rows.push({
+        user_id: row.user_id,
+        username: row.username,
+        symbol: row.symbol,
+      });
+    }
+
+    // Add users with devices who don't have favorite stocks (with null symbol)
+    for (const user of usersWithDevices.results || []) {
+      if (!allUserIds.has(user.user_id)) {
+        allUserIds.add(user.user_id);
+        rows.push({
+          user_id: user.user_id,
+          username: user.username,
+          symbol: null, // No favorite stocks for this user
+        });
+      }
+    }
+
+    // Add users with alerts who don't have favorite stocks or devices (with null symbol)
+    for (const user of usersWithAlerts.results || []) {
+      if (!allUserIds.has(user.user_id)) {
+        allUserIds.add(user.user_id);
+        rows.push({
+          user_id: user.user_id,
+          username: user.username,
+          symbol: null, // No favorite stocks for this user
+        });
+      }
+    }
+
+    // Get all unique symbols from favorite stocks (filter out null symbols)
     const allSymbols = new Set<string>();
-    for (const row of rows.results || []) {
-      allSymbols.add(row.symbol);
+    for (const row of rows) {
+      if (row.symbol) {
+        allSymbols.add(row.symbol);
+      }
     }
 
     // Check which symbols have news (from user_saved_news table)
@@ -456,14 +528,17 @@ export async function getAllUsersFavoriteStocks(
     // Group by user_id
     const userStocksMap = new Map<string, { username: string | null; stocks: string[] }>();
     
-    for (const row of rows.results || []) {
+    for (const row of rows) {
       if (!userStocksMap.has(row.user_id)) {
         userStocksMap.set(row.user_id, {
           username: row.username,
           stocks: [],
         });
       }
-      userStocksMap.get(row.user_id)!.stocks.push(row.symbol);
+      // Only add non-null symbols
+      if (row.symbol) {
+        userStocksMap.get(row.user_id)!.stocks.push(row.symbol);
+      }
     }
 
     // Convert to array format with news information

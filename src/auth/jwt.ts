@@ -15,13 +15,13 @@ export interface TokenPayload extends JWTPayload {
  * Generate JWT access token
  * @param username - Username (unique identifier for the user)
  * @param secret - JWT secret from environment
- * @param expiresIn - Token expiration time (default: 15 minutes)
+ * @param expiresIn - Token expiration time (default: 1 hour)
  * @returns JWT access token string
  */
 export async function generateAccessToken(
   username: string,
   secret: string,
-  expiresIn: string = "15m"
+  expiresIn: string = "1h"
 ): Promise<string> {
   const secretKey = new TextEncoder().encode(secret);
 

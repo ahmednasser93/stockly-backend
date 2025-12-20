@@ -185,7 +185,7 @@ function parseCookies(cookieHeader: string): Record<string, string> {
  * @param response - Response object to modify
  * @param name - Cookie name
  * @param value - Cookie value
- * @param maxAge - Max age in seconds (default: 7 days for refresh, 15 minutes for access)
+ * @param maxAge - Max age in seconds (default: 7 days for refresh, 1 hour for access)
  * @returns Modified response
  */
 export function setHttpOnlyCookie(

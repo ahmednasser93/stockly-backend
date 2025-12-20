@@ -14,7 +14,8 @@ import { getRecentNotifications, getFailedNotifications, retryNotification } fro
 import { getAllDevices, sendTestNotification, deleteDevice } from "./api/devices";
 import { updateUserPreferences } from "./api/user-preferences";
 import { getArchivedNews, toggleArchivedNews } from "./api/news-archive";
-import { getFavoriteStocks, updateFavoriteStocks, deleteFavoriteStock, getAllUsersFavoriteStocks } from "./api/favorite-stocks";
+import { getFavoriteStocks, updateFavoriteStocks, deleteFavoriteStock } from "./api/favorite-stocks";
+import { getAllUsers, getUserByUsername, getUserDevices, getUserAlerts, getUserFavoriteStocks } from "./api/users";
 import { runAlertCron } from "./cron/alerts-cron";
 import { runNewsAlertCron } from "./cron/news-alert-cron";
 import { getHistorical } from "./api/get-historical";
@@ -176,8 +177,32 @@ export default {
       } else if (pathname.startsWith("/v1/api/favorite-stocks/") && request.method === "DELETE") {
         const symbol = pathname.split("/v1/api/favorite-stocks/")[1];
         response = await deleteFavoriteStock(request, symbol, loggedEnv, logger);
-      } else if (pathname === "/v1/api/favorite-stocks/all" && request.method === "GET") {
-        response = await getAllUsersFavoriteStocks(request, loggedEnv, logger);
+      } else if (pathname === "/v1/api/users/all" && request.method === "GET") {
+        response = await getAllUsers(request, loggedEnv, logger);
+      } else if (pathname.startsWith("/v1/api/users/") && request.method === "GET") {
+        // Handle /v1/api/users/:username and nested routes
+        const userPath = pathname.replace("/v1/api/users/", "");
+        const pathParts = userPath.split("/");
+        const username = decodeURIComponent(pathParts[0]);
+        
+        if (pathParts.length === 1) {
+          // /v1/api/users/:username
+          response = await getUserByUsername(request, username, loggedEnv, logger);
+        } else if (pathParts.length === 2) {
+          // /v1/api/users/:username/:resource
+          const resource = pathParts[1];
+          if (resource === "devices") {
+            response = await getUserDevices(request, username, loggedEnv, logger);
+          } else if (resource === "alerts") {
+            response = await getUserAlerts(request, username, loggedEnv, logger);
+          } else if (resource === "favorite-stocks") {
+            response = await getUserFavoriteStocks(request, username, loggedEnv, logger);
+          } else {
+            response = json({ error: "Invalid resource" }, 404, request);
+          }
+        } else {
+          response = json({ error: "Invalid path" }, 404, request);
+        }
       } else if (pathname === "/v1/api/notifications/recent") {
         response = await getRecentNotifications(request, loggedEnv, logger);
       } else if (pathname === "/v1/api/notifications/failed") {

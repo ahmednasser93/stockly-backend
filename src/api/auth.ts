@@ -184,7 +184,7 @@ export async function handleGoogleAuth(
       const accessToken = await generateAccessToken(
         existingUser.username!,
         env.JWT_SECRET || "",
-        "15m"
+        "1h"
       );
       const refreshToken = await generateRefreshToken(
         existingUser.username!,
@@ -207,7 +207,7 @@ export async function handleGoogleAuth(
       let response = json(responseData, 200, request);
 
       // Set httpOnly cookies for webapp
-      response = setHttpOnlyCookie(response, "accessToken", accessToken, 900); // 15 minutes
+      response = setHttpOnlyCookie(response, "accessToken", accessToken, 3600); // 1 hour
       response = setHttpOnlyCookie(response, "refreshToken", refreshToken, 604800); // 7 days
 
       // For mobile app, include tokens in response body
@@ -659,7 +659,7 @@ export async function setUsername(
     const accessToken = await generateAccessToken(
       normalized,
       env.JWT_SECRET || "",
-      "15m"
+      "1h"
     );
     const refreshToken = await generateRefreshToken(
       normalized,
@@ -688,7 +688,7 @@ export async function setUsername(
     }, 200, request);
 
     // Set httpOnly cookies for webapp
-    response = setHttpOnlyCookie(response, "accessToken", accessToken, 900); // 15 minutes
+    response = setHttpOnlyCookie(response, "accessToken", accessToken, 3600); // 1 hour
     response = setHttpOnlyCookie(response, "refreshToken", refreshToken, 604800); // 7 days
 
     // For mobile app, include tokens in response body
@@ -803,12 +803,12 @@ export async function refreshToken(
   const newAccessToken = await generateAccessToken(
     result.username,
     env.JWT_SECRET || "",
-    "15m"
+    "1h"
   );
 
   // For webapp, set new cookie
   let response = json({ success: true }, 200, request);
-  response = setHttpOnlyCookie(response, "accessToken", newAccessToken, 900);
+  response = setHttpOnlyCookie(response, "accessToken", newAccessToken, 3600); // 1 hour
 
   // For mobile app, return token in body
   const isMobile = request.headers.get("User-Agent")?.includes("Mobile") || 

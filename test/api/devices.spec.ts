@@ -498,7 +498,7 @@ describe("Devices API", () => {
       mockDb.prepare.mockImplementation((query: string) => {
         if (query.includes("SELECT user_id, push_token FROM user_push_tokens WHERE push_token")) {
           return deviceStmt;
-        } else if (query.includes("SELECT u.username")) {
+        } else if (query.includes("SELECT username") && query.includes("FROM user_push_tokens")) {
           return deviceUserStmt;
         } else if (query.includes("DELETE FROM user_push_tokens")) {
           return deleteStmt;
@@ -566,7 +566,7 @@ describe("Devices API", () => {
       mockDb.prepare.mockImplementation((query: string) => {
         if (query.includes("SELECT user_id, push_token FROM user_push_tokens WHERE push_token")) {
           return deviceStmt;
-        } else if (query.includes("SELECT u.username")) {
+        } else if (query.includes("SELECT username") && query.includes("FROM user_push_tokens")) {
           return deviceUserStmt;
         } else if (query.includes("DELETE FROM user_push_tokens")) {
           return deleteStmt;
@@ -618,7 +618,7 @@ describe("Devices API", () => {
       mockDb.prepare.mockImplementation((query: string) => {
         if (query.includes("SELECT user_id, push_token FROM user_push_tokens WHERE push_token")) {
           return deviceStmt;
-        } else if (query.includes("SELECT u.username")) {
+        } else if (query.includes("SELECT username") && query.includes("FROM user_push_tokens")) {
           return deviceUserStmt;
         }
         return {
