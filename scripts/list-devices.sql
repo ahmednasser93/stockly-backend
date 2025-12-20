@@ -8,14 +8,18 @@
 -- Or use the shell script: ./scripts/list-devices.sh [--remote|--local]
 
 SELECT 
-    upt.user_id, 
-    upt.push_token, 
-    upt.device_info,
-    upt.device_type,
-    COALESCE(upt.username, u.username) as username,
-    upt.created_at, 
-    upt.updated_at
-FROM user_push_tokens upt
-LEFT JOIN users u ON upt.user_id = u.id
-ORDER BY upt.updated_at DESC;
+    d.id as device_id,
+    d.user_id,
+    d.device_info,
+    d.device_type,
+    u.username,
+    dpt.push_token,
+    d.created_at,
+    d.updated_at,
+    d.is_active
+FROM devices d
+INNER JOIN device_push_tokens dpt ON d.id = dpt.device_id
+LEFT JOIN users u ON d.user_id = u.id
+WHERE d.is_active = 1 AND dpt.is_active = 1
+ORDER BY d.updated_at DESC;
 

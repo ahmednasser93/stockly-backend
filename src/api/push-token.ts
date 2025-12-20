@@ -11,6 +11,20 @@ interface PushTokenPayload {
 }
 
 /**
+ * Generate device identifier from user_id and device_info
+ * Uses SHA-256 hash for consistent device identification
+ */
+async function generateDeviceIdentifier(userId: string, deviceInfo: string | null | undefined): Promise<string> {
+  const input = `${userId}|${deviceInfo || 'unknown'}`;
+  const encoder = new TextEncoder();
+  const data = encoder.encode(input);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return hashHex.substring(0, 32); // Use first 32 chars (64 hex chars = 256 bits)
+}
+
+/**
  * Register or update a user's push token
  * POST /v1/api/push-token
  * username is extracted from JWT authentication
@@ -128,209 +142,162 @@ export async function registerPushToken(
 
     const now = new Date().toISOString();
 
+    // Generate device identifier for device matching
+    const deviceIdentifier = await generateDeviceIdentifier(userId, deviceInfo);
 
-    // Check if this exact token already exists (same device re-registering)
+    // Step 1: Find or create device
+    // Check if device exists by device_identifier OR (user_id + device_info)
+    let device = await env.stockly
+      .prepare(
+        `SELECT id, user_id, device_info, device_type, is_active 
+         FROM devices 
+         WHERE device_identifier = ? OR (user_id = ? AND device_info = ?)`
+      )
+      .bind(deviceIdentifier, userId, deviceInfo || null)
+      .first<{ id: number; user_id: string; device_info: string | null; device_type: string | null; is_active: number }>();
+
+    let deviceId: number;
+    if (device) {
+      // Device exists - update it
+      deviceId = device.id;
+      logger.info("Updating existing device", {
+        username,
+        userId,
+        deviceId,
+        deviceType: normalizedDeviceType,
+      });
+
+      await env.stockly
+        .prepare(
+          `UPDATE devices 
+           SET device_info = ?, device_type = ?, last_seen_at = ?, is_active = 1, updated_at = ?
+           WHERE id = ?`
+        )
+        .bind(deviceInfo || null, normalizedDeviceType, now, now, deviceId)
+        .run();
+    } else {
+      // Device doesn't exist - create new device
+      logger.info("Creating new device", {
+        username,
+        userId,
+        deviceType: normalizedDeviceType,
+        deviceIdentifier: deviceIdentifier.substring(0, 16) + "...",
+      });
+
+      const result = await env.stockly
+        .prepare(
+          `INSERT INTO devices (user_id, device_identifier, device_info, device_type, is_active, last_seen_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 1, ?, ?, ?)`
+        )
+        .bind(userId, deviceIdentifier, deviceInfo || null, normalizedDeviceType, now, now, now)
+        .run();
+
+      deviceId = result.meta.last_row_id!;
+    }
+
+    // Step 2: Find or create push token
+    // Check if push token exists
     const existingToken = await env.stockly
-      .prepare("SELECT id, user_id FROM user_push_tokens WHERE push_token = ?")
+      .prepare(
+        `SELECT id, device_id, is_active 
+         FROM device_push_tokens 
+         WHERE push_token = ?`
+      )
       .bind(token)
-      .first<{ id: number; user_id: string | null }>();
+      .first<{ id: number; device_id: number; is_active: number }>();
 
     if (existingToken) {
-      // Token already exists - update it (device info and device_type might have changed)
-      if (existingToken.user_id !== userId) {
-        // Token belongs to a different user - update to current user
-        // Store username directly to avoid JOIN dependency
-        logger.info("Reassigning push token to different user", {
+      // Token exists
+      if (existingToken.device_id !== deviceId) {
+        // Token is linked to different device - update to current device
+        logger.info("Reassigning push token to different device", {
           username,
           userId,
-          previousUserId: existingToken.user_id,
-          deviceType: normalizedDeviceType,
+          deviceId,
+          previousDeviceId: existingToken.device_id,
         });
 
-        // Try to update device_type if column exists, otherwise skip it
-        try {
-          await env.stockly
-            .prepare(
-              `UPDATE user_push_tokens 
-               SET user_id = ?, username = ?, device_info = ?, device_type = ?, updated_at = ?
-               WHERE push_token = ?`
-            )
-            .bind(userId, username, deviceInfo || null, normalizedDeviceType, now, token)
-            .run();
-        } catch (error) {
-          // If device_type column doesn't exist, update without it
-          if (error instanceof Error && error.message.includes('device_type')) {
-            await env.stockly
-              .prepare(
-                `UPDATE user_push_tokens 
-                 SET user_id = ?, username = ?, device_info = ?, updated_at = ?
-                 WHERE push_token = ?`
-              )
-              .bind(userId, username, deviceInfo || null, now, token)
-              .run();
-          } else {
-            throw error;
-          }
-        }
-
-        // Verify device was updated correctly
-        const updatedDevice = await env.stockly
-          .prepare("SELECT user_id, username, push_token, device_info, device_type FROM user_push_tokens WHERE push_token = ?")
-          .bind(token)
-          .first<{ user_id: string; username: string | null; push_token: string; device_info: string | null; device_type: string | null }>();
-
-        if (!updatedDevice || updatedDevice.user_id !== userId || updatedDevice.username !== username) {
-          logger.error("Device update verification failed", {
-            username,
-            userId,
-            device: updatedDevice
-          });
-          return json({ error: "Failed to verify device update" }, 500, request);
-        }
-
-        logger.info("Push token reassigned successfully", { username, userId, deviceType: normalizedDeviceType });
-
-        return json({
-          success: true,
-          message: "Push token reassigned to current user",
-          username,
-          device: {
-            pushToken: updatedDevice.push_token,
-            deviceInfo: updatedDevice.device_info,
-            deviceType: updatedDevice.device_type,
-          },
-        }, 200, request);
+        await env.stockly
+          .prepare(
+            `UPDATE device_push_tokens 
+             SET device_id = ?, is_active = 1, updated_at = ?
+             WHERE push_token = ?`
+          )
+          .bind(deviceId, now, token)
+          .run();
       } else {
-        // Same user, same token - just update device info, device_type and timestamp
-        // Ensure username is also updated (in case username changed)
+        // Token is linked to same device - just update timestamp and ensure active
         logger.info("Updating existing push token", {
           username,
           userId,
-          deviceType: normalizedDeviceType,
+          deviceId,
         });
 
-        // Try to update device_type if column exists, otherwise skip it
-        try {
-          await env.stockly
-            .prepare(
-              `UPDATE user_push_tokens 
-               SET username = ?, device_info = ?, device_type = ?, updated_at = ?
-               WHERE push_token = ?`
-            )
-            .bind(username, deviceInfo || null, normalizedDeviceType, now, token)
-            .run();
-        } catch (error) {
-          // If device_type column doesn't exist, update without it
-          if (error instanceof Error && error.message.includes('device_type')) {
-            await env.stockly
-              .prepare(
-                `UPDATE user_push_tokens 
-                 SET username = ?, device_info = ?, updated_at = ?
-                 WHERE push_token = ?`
-              )
-              .bind(username, deviceInfo || null, now, token)
-              .run();
-          } else {
-            throw error;
-          }
-        }
-
-        // Verify device was updated correctly
-        const updatedDevice = await env.stockly
-          .prepare("SELECT user_id, username, push_token, device_info, device_type FROM user_push_tokens WHERE push_token = ?")
-          .bind(token)
-          .first<{ user_id: string; username: string | null; push_token: string; device_info: string | null; device_type: string | null }>();
-
-        if (!updatedDevice || updatedDevice.username !== username) {
-          logger.error("Device update verification failed", {
-            username,
-            userId,
-            device: updatedDevice
-          });
-          return json({ error: "Failed to verify device update" }, 500, request);
-        }
-
-        logger.info("Push token updated successfully", { username, userId, deviceType: normalizedDeviceType });
-
-        return json({
-          success: true,
-          message: "Push token updated",
-          username,
-          device: {
-            pushToken: updatedDevice.push_token,
-            deviceInfo: updatedDevice.device_info,
-            deviceType: updatedDevice.device_type,
-          },
-        }, 200, request);
+        await env.stockly
+          .prepare(
+            `UPDATE device_push_tokens 
+             SET is_active = 1, updated_at = ?
+             WHERE push_token = ?`
+          )
+          .bind(now, token)
+          .run();
       }
     } else {
-      // New token - insert as new device for this user
-      // Store username directly to avoid JOIN dependency and ensure data consistency
-      logger.info("Registering new push token", {
+      // Token doesn't exist - create new push token
+      logger.info("Creating new push token", {
         username,
         userId,
-        deviceType: normalizedDeviceType,
+        deviceId,
         tokenPreview: token.substring(0, 20) + "...",
       });
 
-      // Try to insert with device_type if column exists, otherwise insert without it
-      try {
-        await env.stockly
-          .prepare(
-            `INSERT INTO user_push_tokens (user_id, username, push_token, device_info, device_type, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`
-          )
-          .bind(userId, username, token, deviceInfo || null, normalizedDeviceType, now, now)
-          .run();
-      } catch (error) {
-        // If device_type column doesn't exist, insert without it
-        if (error instanceof Error && error.message.includes('device_type')) {
-          await env.stockly
-            .prepare(
-              `INSERT INTO user_push_tokens (user_id, username, push_token, device_info, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?)`
-            )
-            .bind(userId, username, token, deviceInfo || null, now, now)
-            .run();
-        } else {
-          logger.error("Failed to insert push token", error, { username, userId, deviceType: normalizedDeviceType });
-          throw error;
-        }
-      }
+      await env.stockly
+        .prepare(
+          `INSERT INTO device_push_tokens (device_id, push_token, is_active, created_at, updated_at)
+           VALUES (?, ?, 1, ?, ?)`
+        )
+        .bind(deviceId, token, now, now)
+        .run();
+    }
 
-      // Verify device was created correctly
-      const newDevice = await env.stockly
-        .prepare("SELECT user_id, username, push_token, device_info, device_type FROM user_push_tokens WHERE push_token = ?")
-        .bind(token)
-        .first<{ user_id: string; username: string | null; push_token: string; device_info: string | null; device_type: string | null }>();
+    // Step 3: Verify and return response
+    const deviceRecord = await env.stockly
+      .prepare(
+        `SELECT d.id, d.user_id, d.device_info, d.device_type, dpt.push_token
+         FROM devices d
+         INNER JOIN device_push_tokens dpt ON d.id = dpt.device_id
+         WHERE dpt.push_token = ?`
+      )
+      .bind(token)
+      .first<{ id: number; user_id: string; device_info: string | null; device_type: string | null; push_token: string }>();
 
-      if (!newDevice || newDevice.user_id !== userId || newDevice.username !== username) {
-        logger.error("Device creation verification failed", {
-          username,
-          userId,
-          device: newDevice
-        });
-        return json({ error: "Failed to verify device creation" }, 500, request);
-      }
-
-      logger.info("Push token registered successfully", {
+    if (!deviceRecord || deviceRecord.user_id !== userId) {
+      logger.error("Device verification failed", {
         username,
         userId,
-        deviceType: normalizedDeviceType,
-        deviceId: newDevice.push_token.substring(0, 20) + "...",
+        device: deviceRecord,
       });
-
-      return json({
-        success: true,
-        message: "Push token registered",
-        username,
-        device: {
-          pushToken: newDevice.push_token,
-          deviceInfo: newDevice.device_info,
-          deviceType: newDevice.device_type,
-        },
-      }, 201, request);
+      return json({ error: "Failed to verify device registration" }, 500, request);
     }
+
+    logger.info("Push token registered successfully", {
+      username,
+      userId,
+      deviceId: deviceRecord.id,
+      deviceType: deviceRecord.device_type,
+    });
+
+    return json({
+      success: true,
+      message: existingToken ? "Push token updated" : "Push token registered",
+      username,
+      device: {
+        deviceId: deviceRecord.id,
+        pushToken: deviceRecord.push_token,
+        deviceInfo: deviceRecord.device_info,
+        deviceType: deviceRecord.device_type,
+      },
+    }, existingToken ? 200 : 201, request);
   } catch (error) {
     logger.error("Failed to register push token", error, { username, userId });
     return json({ error: "Failed to register push token" }, 500, request);
@@ -395,16 +362,17 @@ export async function getPushToken(
       }
 
       // Check if this specific token is registered for this user
-      const device = await env.stockly
+      const tokenRecord = await env.stockly
         .prepare(
-          `SELECT user_id FROM user_push_tokens WHERE push_token = ? AND user_id = ?`
+          `SELECT d.user_id 
+           FROM device_push_tokens dpt
+           INNER JOIN devices d ON dpt.device_id = d.id
+           WHERE dpt.push_token = ? AND d.user_id = ? AND dpt.is_active = 1`
         )
         .bind(pushToken, userId)
         .first<{ user_id: string }>();
 
-      // If device is found, it means the token is registered for this user
-      // (query already filtered by user_id, so device.user_id === userId is always true if device is not null)
-      const registered = device !== null;
+      const registered = tokenRecord !== null;
 
       logger.debug("Device registration check", {
         username,
@@ -418,61 +386,67 @@ export async function getPushToken(
       }, 200, request);
     }
 
-    // Full mode: return all devices
-    // Try to select device_type if column exists, otherwise select without it
-    let rows;
-    try {
-      rows = await env.stockly
-        .prepare(
-          `SELECT push_token, device_info, device_type, created_at, updated_at 
-           FROM user_push_tokens 
-           WHERE user_id = ?
-           ORDER BY updated_at DESC`
-        )
-        .bind(userId)
-        .all<{
-          push_token: string;
-          device_info: string | null;
-          device_type: string | null;
-          created_at: string;
-          updated_at: string;
-        }>();
-    } catch (error) {
-      // If device_type column doesn't exist, select without it
-      if (error instanceof Error && error.message.includes('device_type')) {
-        rows = await env.stockly
-          .prepare(
-            `SELECT push_token, device_info, created_at, updated_at 
-             FROM user_push_tokens 
-             WHERE user_id = ?
-             ORDER BY updated_at DESC`
-          )
-          .bind(userId)
-          .all<{
-            push_token: string;
-            device_info: string | null;
-            created_at: string;
-            updated_at: string;
-          }>();
-      } else {
-        throw error;
-      }
-    }
+    // Full mode: return all devices with their push tokens
+    const rows = await env.stockly
+      .prepare(
+        `SELECT 
+           d.id as device_id,
+           d.device_info,
+           d.device_type,
+           dpt.push_token,
+           dpt.created_at,
+           dpt.updated_at
+         FROM devices d
+         INNER JOIN device_push_tokens dpt ON d.id = dpt.device_id
+         WHERE d.user_id = ? AND dpt.is_active = 1
+         ORDER BY dpt.updated_at DESC`
+      )
+      .bind(userId)
+      .all<{
+        device_id: number;
+        device_info: string | null;
+        device_type: string | null;
+        push_token: string;
+        created_at: string;
+        updated_at: string;
+      }>();
 
     if (!rows.results || rows.results.length === 0) {
       return json({ error: "Push tokens not found" }, 404, request);
     }
 
+    // Group by device and return all push tokens per device
+    const devicesMap = new Map<number, {
+      deviceId: number;
+      deviceInfo: string | null;
+      deviceType: string | null;
+      pushTokens: Array<{
+        pushToken: string;
+        createdAt: string;
+        updatedAt: string;
+      }>;
+    }>();
+
+    for (const row of rows.results) {
+      if (!devicesMap.has(row.device_id)) {
+        devicesMap.set(row.device_id, {
+          deviceId: row.device_id,
+          deviceInfo: row.device_info,
+          deviceType: row.device_type,
+          pushTokens: [],
+        });
+      }
+      devicesMap.get(row.device_id)!.pushTokens.push({
+        pushToken: row.push_token,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      });
+    }
+
     // Return all devices for this username
     return json({
       username,
-      devices: rows.results.map(row => ({
-        pushToken: row.push_token,
-        deviceInfo: row.device_info,
-        deviceType: 'device_type' in row ? (row as any).device_type : null,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      })),
+      devices: Array.from(devicesMap.values()),
     }, 200, request);
   } catch (error) {
     logger.error("Failed to get push tokens", error, { username, userId });

@@ -430,7 +430,7 @@ export async function getAllUsersFavoriteStocks(
            u.id as user_id,
            u.username
          FROM users u
-         INNER JOIN user_push_tokens upt ON u.id = upt.user_id
+         INNER JOIN devices d ON u.id = d.user_id AND d.is_active = 1
          WHERE u.username IS NOT NULL`
       )
       .all<{

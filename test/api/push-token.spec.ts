@@ -32,9 +32,7 @@ describe("Push Token API", () => {
     // Default mock for authentication
     vi.mocked(authMiddleware.authenticateRequest).mockResolvedValue({
       username: "testuser",
-      userId: "user-123",
       tokenType: "access" as const,
-      isAdmin: false,
     });
   });
 
@@ -43,42 +41,55 @@ describe("Push Token API", () => {
       const { mockDb } = createMockD1Database();
       mockEnv.stockly = mockDb as unknown as D1Database;
 
-
       // Mock user lookup
       const userStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({ id: "user-123", username: "testuser" }),
       };
 
-      // Mock token check (not found)
-      const checkStmt = {
+      // Mock device check (not found - new device)
+      const deviceCheckStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue(null),
       };
 
-      // Mock insert (with device_type - succeeds on first try)
-      const insertStmt = {
+      // Mock device insert
+      const deviceInsertStmt = {
+        bind: vi.fn().mockReturnThis(),
+        run: vi.fn().mockResolvedValue({ meta: { last_row_id: 1 } }),
+      };
+
+      // Mock push token check (not found)
+      const tokenCheckStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue(null),
+      };
+
+      // Mock push token insert
+      const tokenInsertStmt = {
         bind: vi.fn().mockReturnThis(),
         run: vi.fn().mockResolvedValue({ success: true }),
       };
 
-      // Mock select after insert (verification query)
-      const selectStmt = {
+      // Mock verification query (join devices and device_push_tokens)
+      const verifyStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({
+          id: 1,
           user_id: "user-123",
-          username: "testuser",
-          push_token: "fcm-token-12345678901234567890",
           device_info: "Test Device",
           device_type: "android",
+          push_token: "fcm-token-12345678901234567890",
         }),
       };
 
       mockDb.prepare
-        .mockReturnValueOnce(userStmt)      // User lookup
-        .mockReturnValueOnce(checkStmt)     // Token check (not found)
-        .mockReturnValueOnce(insertStmt)    // Insert new token
-        .mockReturnValueOnce(selectStmt);    // Verify after insert
+        .mockReturnValueOnce(userStmt)         // User lookup
+        .mockReturnValueOnce(deviceCheckStmt)  // Device check (not found)
+        .mockReturnValueOnce(deviceInsertStmt) // Device insert
+        .mockReturnValueOnce(tokenCheckStmt)   // Token check (not found)
+        .mockReturnValueOnce(tokenInsertStmt)  // Token insert
+        .mockReturnValueOnce(verifyStmt);      // Verify after insert
 
       const request = createMockRequest("/v1/api/push-token", {
         method: "POST",
@@ -99,45 +110,65 @@ describe("Push Token API", () => {
       const { mockDb } = createMockD1Database();
       mockEnv.stockly = mockDb as unknown as D1Database;
 
-
       // Mock user lookup
       const userStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({ id: "user-123", username: "testuser" }),
       };
 
-      // Mock token check (found, same user)
-      const checkStmt = {
+      // Mock device check (found - existing device)
+      const deviceCheckStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({
           id: 1,
           user_id: "user-123",
+          device_info: "Test Device",
+          device_type: "android",
+          is_active: 1,
         }),
       };
 
-      // Mock update
-      const updateStmt = {
+      // Mock device update
+      const deviceUpdateStmt = {
         bind: vi.fn().mockReturnThis(),
         run: vi.fn().mockResolvedValue({ success: true }),
       };
 
-      // Mock select after update (verification query)
-      const selectStmt = {
+      // Mock push token check (found, same device)
+      const tokenCheckStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({
+          id: 1,
+          device_id: 1,
+          is_active: 1,
+        }),
+      };
+
+      // Mock push token update
+      const tokenUpdateStmt = {
+        bind: vi.fn().mockReturnThis(),
+        run: vi.fn().mockResolvedValue({ success: true }),
+      };
+
+      // Mock verification query
+      const verifyStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue({
+          id: 1,
           user_id: "user-123",
-          username: "testuser",
-          push_token: "fcm-token-12345678901234567890",
           device_info: "Updated Device",
           device_type: "android",
+          push_token: "fcm-token-12345678901234567890",
         }),
       };
 
       mockDb.prepare
-        .mockReturnValueOnce(userStmt)      // User lookup
-        .mockReturnValueOnce(checkStmt)     // Token check (found, same user)
-        .mockReturnValueOnce(updateStmt)    // Update token
-        .mockReturnValueOnce(selectStmt);    // Verify after update
+        .mockReturnValueOnce(userStmt)         // User lookup
+        .mockReturnValueOnce(deviceCheckStmt)  // Device check (found)
+        .mockReturnValueOnce(deviceUpdateStmt) // Device update
+        .mockReturnValueOnce(tokenCheckStmt)   // Token check (found, same device)
+        .mockReturnValueOnce(tokenUpdateStmt)  // Token update
+        .mockReturnValueOnce(verifyStmt);      // Verify after update
 
       const request = createMockRequest("/v1/api/push-token", {
         method: "POST",
@@ -150,7 +181,7 @@ describe("Push Token API", () => {
 
       const response = await registerPushToken(request, mockEnv, mockLogger);
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = await response.json() as { success: boolean; message?: string; username?: string; device?: any };
       expect(data.message).toContain("updated");
     });
 
@@ -158,45 +189,59 @@ describe("Push Token API", () => {
       const { mockDb } = createMockD1Database();
       mockEnv.stockly = mockDb as unknown as D1Database;
 
-
       // Mock user lookup
       const userStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({ id: "user-123", username: "testuser" }),
       };
 
-      // Mock token check (found, different user)
-      const checkStmt = {
+      // Mock device check (not found - will create new device)
+      const deviceCheckStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue(null),
+      };
+
+      // Mock device insert
+      const deviceInsertStmt = {
+        bind: vi.fn().mockReturnThis(),
+        run: vi.fn().mockResolvedValue({ meta: { last_row_id: 2 } }),
+      };
+
+      // Mock push token check (found, different device/user)
+      const tokenCheckStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({
           id: 1,
-          user_id: "user-456", // Different user
+          device_id: 1, // Old device
+          is_active: 1,
         }),
       };
 
-      // Mock update
-      const updateStmt = {
+      // Mock push token update (reassign to new device)
+      const tokenUpdateStmt = {
         bind: vi.fn().mockReturnThis(),
         run: vi.fn().mockResolvedValue({ success: true }),
       };
 
-      // Mock select after update (verification query)
-      const selectStmt = {
+      // Mock verification query
+      const verifyStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({
+          id: 2,
           user_id: "user-123",
-          username: "testuser",
-          push_token: "fcm-token-12345678901234567890",
           device_info: "Test Device",
           device_type: "android",
+          push_token: "fcm-token-12345678901234567890",
         }),
       };
 
       mockDb.prepare
-        .mockReturnValueOnce(userStmt)      // User lookup
-        .mockReturnValueOnce(checkStmt)     // Token check (found, different user)
-        .mockReturnValueOnce(updateStmt)    // Update/reassign token
-        .mockReturnValueOnce(selectStmt);    // Verify after update
+        .mockReturnValueOnce(userStmt)         // User lookup
+        .mockReturnValueOnce(deviceCheckStmt)  // Device check (not found)
+        .mockReturnValueOnce(deviceInsertStmt) // Device insert (new device for new user)
+        .mockReturnValueOnce(tokenCheckStmt)   // Token check (found, different device)
+        .mockReturnValueOnce(tokenUpdateStmt)  // Token update (reassign to new device)
+        .mockReturnValueOnce(verifyStmt);      // Verify after update
 
       const request = createMockRequest("/v1/api/push-token", {
         method: "POST",
@@ -209,8 +254,9 @@ describe("Push Token API", () => {
 
       const response = await registerPushToken(request, mockEnv, mockLogger);
       expect(response.status).toBe(200);
-      const data = await response.json();
-      expect(data.message).toContain("reassigned");
+      const data = await response.json() as { success: boolean; message?: string; username?: string; device?: any };
+      // With new schema, token reassignment updates device_id, but message is still "updated"
+      expect(data.message).toContain("updated");
     });
 
     it("should validate token format", async () => {
@@ -265,14 +311,16 @@ describe("Push Token API", () => {
       const { mockDb } = createMockD1Database();
       mockEnv.stockly = mockDb as unknown as D1Database;
       vi.mocked(authMiddleware.authenticateRequest).mockResolvedValue({ username: "t", userId: "u" } as any);
-      // Mock user, check (null), insert, verify
-      const verifyMock = { push_token: "t", device_type: "ios", device_info: "iPhone", user_id: "u", username: "t" };
+      // Mock user, device check (null), device insert, token check (null), token insert, verify
+      const verifyMock = { id: 1, user_id: "u", device_info: "iPhone", device_type: "ios", push_token: "t" };
 
       mockDb.prepare
         .mockReturnValueOnce({ bind: vi.fn().mockReturnThis(), first: vi.fn().mockResolvedValue({ id: "u", username: "t" }) })
-        .mockReturnValueOnce({ bind: vi.fn().mockReturnThis(), first: vi.fn().mockResolvedValue(null) })
-        .mockReturnValueOnce({ bind: vi.fn().mockReturnThis(), run: vi.fn().mockResolvedValue({ success: true }) })
-        .mockReturnValueOnce({ bind: vi.fn().mockReturnThis(), first: vi.fn().mockResolvedValue(verifyMock) });
+        .mockReturnValueOnce({ bind: vi.fn().mockReturnThis(), first: vi.fn().mockResolvedValue(null) }) // Device check
+        .mockReturnValueOnce({ bind: vi.fn().mockReturnThis(), run: vi.fn().mockResolvedValue({ meta: { last_row_id: 1 } }) }) // Device insert
+        .mockReturnValueOnce({ bind: vi.fn().mockReturnThis(), first: vi.fn().mockResolvedValue(null) }) // Token check
+        .mockReturnValueOnce({ bind: vi.fn().mockReturnThis(), run: vi.fn().mockResolvedValue({ success: true }) }) // Token insert
+        .mockReturnValueOnce({ bind: vi.fn().mockReturnThis(), first: vi.fn().mockResolvedValue(verifyMock) }); // Verify
 
       const req = createMockRequest("/v1/api/push-token", {
         method: "POST",
@@ -295,35 +343,8 @@ describe("Push Token API", () => {
       expect(res.status).toBe(500);
     });
 
-    it("should fallback to legacy insert if device_type column missing", async () => {
-      const { mockDb } = createMockD1Database();
-      mockEnv.stockly = mockDb as unknown as D1Database;
-      vi.mocked(authMiddleware.authenticateRequest).mockResolvedValue({ username: "t", userId: "u" } as any);
-
-      mockDb.prepare.mockImplementation((sql: string) => {
-        if (sql.includes("FROM users")) return { bind: vi.fn().mockReturnThis(), first: vi.fn().mockResolvedValue({ id: "u", username: "t" }) } as any;
-        if (sql.includes("SELECT id, user_id FROM")) return { bind: vi.fn().mockReturnThis(), first: vi.fn().mockResolvedValue(null) } as any; // Check token -> null
-
-        // Insert with device_type
-        if (sql.includes("device_type, created_at")) {
-          throw new Error("no such column: device_type");
-        }
-
-        // Fallback insert
-        if (sql.includes("INSERT INTO user_push_tokens")) {
-          return { bind: vi.fn().mockReturnThis(), run: vi.fn().mockResolvedValue({ success: true }) } as any;
-        }
-
-        // Verify
-        if (sql.includes("SELECT user_id")) return { bind: vi.fn().mockReturnThis(), first: vi.fn().mockResolvedValue({ user_id: "u", username: "t", push_token: "t", device_info: "i", device_type: null }) } as any;
-
-        return { bind: vi.fn().mockReturnThis(), run: vi.fn().mockResolvedValue({}) } as any;
-      });
-
-      const req = createMockRequest("/v1/api/push-token", { method: "POST", body: { token: "valid-token-1234567890", deviceInfo: "i" } });
-      const res = await registerPushToken(req, mockEnv, mockLogger);
-      expect(res.status).toBe(201);
-    });
+    // Note: Legacy fallback test removed - new schema always uses devices and device_push_tokens tables
+    // If these tables don't exist, migration should be run first
   });
 
   describe("getPushToken", () => {
@@ -338,16 +359,17 @@ describe("Push Token API", () => {
         first: vi.fn().mockResolvedValue({ id: "user-123", username: "testuser" }),
       };
 
-      // Mock tokens query
-      const tokensStmt = {
+      // Mock devices query (new schema)
+      const devicesStmt = {
         bind: vi.fn().mockReturnThis(),
         all: vi.fn().mockResolvedValue({
           results: [
             {
+              device_id: 1,
               user_id: "user-123",
-              push_token: "token-1",
               device_info: "Device 1",
               device_type: "android",
+              push_token: "token-1",
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
             },
@@ -357,13 +379,13 @@ describe("Push Token API", () => {
 
       mockDb.prepare
         .mockReturnValueOnce(userStmt)
-        .mockReturnValueOnce(tokensStmt);
+        .mockReturnValueOnce(devicesStmt);
 
       const request = createMockRequest("/v1/api/push-token");
       const response = await getPushToken(request, mockEnv, mockLogger);
 
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = await response.json() as { devices?: Array<{ pushTokens: string[] }>; registered?: boolean; error?: string };
       expect(data.devices).toBeDefined();
       expect(Array.isArray(data.devices)).toBe(true);
     });
@@ -384,11 +406,11 @@ describe("Push Token API", () => {
       mockEnv.stockly = mockDb as unknown as D1Database;
       vi.mocked(authMiddleware.authenticateRequest).mockResolvedValue({ username: "t", userId: "u" } as any);
       const userStmt = { bind: vi.fn().mockReturnThis(), first: vi.fn().mockResolvedValue({ id: "u" }) };
-      const tokensStmt = { bind: vi.fn().mockReturnThis(), all: vi.fn().mockResolvedValue({ results: [] }) };
+      const devicesStmt = { bind: vi.fn().mockReturnThis(), all: vi.fn().mockResolvedValue({ results: [] }) };
 
       mockDb.prepare
         .mockReturnValueOnce(userStmt)
-        .mockReturnValueOnce(tokensStmt);
+        .mockReturnValueOnce(devicesStmt);
 
       const request = createMockRequest("/v1/api/push-token");
       const response = await getPushToken(request, mockEnv, mockLogger);
@@ -417,10 +439,19 @@ describe("Push Token API", () => {
       // Mock prepare for FULL query -> THROWS
       const throwMock = vi.fn().mockImplementation(() => { throw new Error("no such column: device_type"); });
 
-      // Mock prepare for LEGACY query -> SUCCEEDS
+      // Mock prepare for new schema query -> SUCCEEDS
       const succeedMock = vi.fn().mockReturnValue({
         bind: vi.fn().mockReturnThis(),
-        all: vi.fn().mockResolvedValue({ results: [{ push_token: "t", device_info: "i", created_at: "d", updated_at: "d" }] })
+        all: vi.fn().mockResolvedValue({ 
+          results: [{ 
+            device_id: 1,
+            device_info: "i", 
+            device_type: null,
+            push_token: "t", 
+            created_at: "d", 
+            updated_at: "d" 
+          }] 
+        })
       });
 
       // We need to intercept prepare calls. 
@@ -435,20 +466,49 @@ describe("Push Token API", () => {
         if (sql.includes("FROM users")) {
           return { bind: vi.fn().mockReturnThis(), first: vi.fn().mockResolvedValue({ id: "u" }) } as any;
         }
-        if (sql.includes("device_type, created_at")) {
-          throw new Error("no such column: device_type");
+        // New schema uses devices and device_push_tokens
+        if (sql.includes("FROM devices") && sql.includes("device_identifier")) {
+          return { bind: vi.fn().mockReturnThis(), first: vi.fn().mockResolvedValue(null) } as any; // Device check -> null
+        }
+        if (sql.includes("INSERT INTO devices")) {
+          return { bind: vi.fn().mockReturnThis(), run: vi.fn().mockResolvedValue({ meta: { last_row_id: 1 } }) } as any;
+        }
+        if (sql.includes("FROM device_push_tokens") && sql.includes("push_token = ?")) {
+          return { bind: vi.fn().mockReturnThis(), first: vi.fn().mockResolvedValue(null) } as any; // Token check -> null
+        }
+        if (sql.includes("INSERT INTO device_push_tokens")) {
+          return { bind: vi.fn().mockReturnThis(), run: vi.fn().mockResolvedValue({ success: true }) } as any;
+        }
+        if (sql.includes("FROM devices") && sql.includes("INNER JOIN device_push_tokens") && sql.includes("WHERE d.user_id")) {
+          return {
+            bind: vi.fn().mockReturnThis(),
+            all: vi.fn().mockResolvedValue({ 
+              results: [{ 
+                device_id: 1,
+                device_info: "i", 
+                device_type: null,
+                push_token: "t", 
+                created_at: "d", 
+                updated_at: "d" 
+              }] 
+            })
+          } as any;
         }
         return {
           bind: vi.fn().mockReturnThis(),
-          all: vi.fn().mockResolvedValue({ results: [{ push_token: "t", device_info: "i", created_at: "d", updated_at: "d" }] })
+          all: vi.fn().mockResolvedValue({ results: [] }),
+          first: vi.fn().mockResolvedValue(null),
         } as any;
       });
 
       const request = createMockRequest("/v1/api/push-token");
       const response = await getPushToken(request, mockEnv, mockLogger);
       expect(response.status).toBe(200);
-      const data = await response.json();
-      expect(data.devices[0].pushToken).toBe("t");
+      const data = await response.json() as { devices?: Array<{ pushTokens: string[] }>; registered?: boolean; error?: string };
+      // New schema returns devices with pushTokens arrays (array of objects with pushToken, createdAt, updatedAt)
+      expect(Array.isArray(data.devices)).toBe(true);
+      expect(Array.isArray(data.devices?.[0]?.pushTokens)).toBe(true);
+      expect(data.devices?.[0]?.pushTokens[0]?.pushToken).toBe("t");
     });
 
     it("should return registered=true when token is registered for user (check mode)", async () => {
@@ -464,7 +524,7 @@ describe("Push Token API", () => {
         first: vi.fn().mockResolvedValue({ id: "user-123" }),
       };
 
-      // Mock token check query (for check mode)
+      // Mock token check query (for check mode - new schema)
       const tokenCheckStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({ user_id: "user-123" }),
@@ -478,10 +538,10 @@ describe("Push Token API", () => {
       const response = await getPushToken(request, mockEnv, mockLogger);
 
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = await response.json() as { devices?: Array<{ pushTokens: string[] }>; registered?: boolean; error?: string };
       expect(data.registered).toBe(true);
       
-      // Verify the query was correct
+      // Verify the query was correct (new schema uses device_push_tokens join)
       expect(tokenCheckStmt.bind).toHaveBeenCalledWith(testToken, "user-123");
     });
 

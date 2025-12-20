@@ -58,34 +58,48 @@ describe("Devices API", () => {
 
   describe("getAllDevices", () => {
     it("should return list of devices", async () => {
-      const mockDevices = [
+      // Mock devices query (new schema)
+      const mockDeviceRows = [
         {
+          device_id: 1,
           user_id: "user-1",
-          push_token: "dXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
           device_info: "Android Device",
           device_type: "Android",
-          username: "testuser",
           created_at: "2025-11-14T10:30:00.000Z",
           updated_at: "2025-11-14T10:30:00.000Z",
+          username: "testuser",
         },
         {
+          device_id: 2,
           user_id: "user-2",
-          push_token: "eYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY",
           device_info: null,
           device_type: null,
-          username: "testuser2",
           created_at: "2025-11-13T08:20:00.000Z",
           updated_at: "2025-11-14T12:00:00.000Z",
+          username: "testuser2",
         },
       ];
 
-      // Mock the main query (SELECT user_id, push_token, device_info FROM user_push_tokens)
-      const mainQueryStmt = {
-        all: vi.fn().mockResolvedValue({ results: mockDevices }),
+      // Mock devices query
+      const devicesStmt = {
+        bind: vi.fn().mockReturnThis(),
+        all: vi.fn().mockResolvedValue({ results: mockDeviceRows }),
+      };
+
+      // Mock push tokens query (called for each device)
+      let tokenCallCount = 0;
+      const pushTokensStmt = {
+        bind: vi.fn().mockReturnThis(),
+        all: vi.fn().mockImplementation(() => {
+          const tokens = tokenCallCount === 0 
+            ? [{ push_token: "dXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" }]
+            : [{ push_token: "eYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY" }];
+          tokenCallCount++;
+          return Promise.resolve({ results: tokens });
+        }),
       };
 
       // Mock the alert count queries (called for each device with username)
-      // For admin, alerts are counted by device's username
       const alertCountStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({ count: 5 }),
@@ -93,8 +107,10 @@ describe("Devices API", () => {
 
       // Mock prepare to return different statements based on query
       mockDb.prepare.mockImplementation((query: string) => {
-        if (query.includes("user_push_tokens")) {
-          return mainQueryStmt;
+        if (query.includes("FROM devices") && query.includes("LEFT JOIN users")) {
+          return devicesStmt;
+        } else if (query.includes("SELECT push_token") && query.includes("FROM device_push_tokens")) {
+          return pushTokensStmt;
         } else if (query.includes("alerts") && query.includes("COUNT") && query.includes("username")) {
           return alertCountStmt;
         }
@@ -106,7 +122,7 @@ describe("Devices API", () => {
 
       const request = new Request("https://example.com/v1/api/devices");
       const response = await getAllDevices(request, mockEnv, createMockLogger());
-      const data = await response.json();
+      const data = await response.json() as { devices: any[] };
 
       // The query includes JOIN with users table, so just check for SELECT
       expect(mockDb.prepare).toHaveBeenCalledWith(
@@ -114,7 +130,8 @@ describe("Devices API", () => {
       );
       expect(data.devices).toHaveLength(2);
       expect(data.devices[0].userId).toBe("user-1");
-      expect(data.devices[0].pushToken).toBe("dXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX");
+      expect(Array.isArray(data.devices[0].pushTokens)).toBe(true);
+      expect(data.devices[0].pushTokens).toContain("dXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX");
       expect(data.devices[0].deviceInfo).toBe("Android Device");
       expect(data.devices[0].alertCount).toBe(5);
       expect(data.devices[0].activeAlertCount).toBe(5);
@@ -130,7 +147,7 @@ describe("Devices API", () => {
 
       const request = new Request("https://example.com/v1/api/devices");
       const response = await getAllDevices(request, mockEnv, createMockLogger());
-      const data = await response.json();
+      const data = await response.json() as { devices: any[] };
 
       expect(data.devices).toEqual([]);
     });
@@ -144,7 +161,7 @@ describe("Devices API", () => {
 
       const request = new Request("https://example.com/v1/api/devices");
       const response = await getAllDevices(request, mockEnv, createMockLogger());
-      const data = await response.json();
+      const data = await response.json() as { error: string };
 
       expect(response.status).toBe(500);
       expect(data.error).toBe("Failed to get devices");
@@ -153,21 +170,38 @@ describe("Devices API", () => {
 
   describe("sendTestNotification", () => {
     it("should send test notification successfully", async () => {
-      const mockDevice = {
-        user_id: "user-1",
+      // Mock token record (new schema)
+      const mockTokenRecord = {
         push_token: "dXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+        user_id: "user-1",
         device_info: "Android Device",
       };
 
-      const mockStmt = {
+      const mockTokenStmt = {
         bind: vi.fn().mockReturnThis(),
-        first: vi.fn().mockResolvedValue(mockDevice),
+        first: vi.fn().mockResolvedValue(mockTokenRecord),
       };
 
-      mockDb.prepare.mockReturnValue(mockStmt);
+      // Mock user lookup for sendTestNotification
+      const mockUserStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue({ id: "user-1" }),
+      };
+
+      mockDb.prepare.mockImplementation((query: string) => {
+        if (query.includes("SELECT id FROM users")) {
+          return mockUserStmt;
+        } else if (query.includes("SELECT dpt.push_token") && query.includes("FROM device_push_tokens")) {
+          return mockTokenStmt;
+        }
+        return {
+          bind: vi.fn().mockReturnThis(),
+          first: vi.fn().mockResolvedValue(null),
+        };
+      });
 
       // Mock fetch for Google OAuth token endpoint and FCM API
-      global.fetch = vi.fn()
+      globalThis.fetch = vi.fn()
         .mockResolvedValueOnce({
           ok: true,
           json: async () => ({ access_token: "mock-google-access-token" }),
@@ -179,26 +213,13 @@ describe("Devices API", () => {
 
       // Mock crypto.subtle for JWT signing
       const mockCryptoKey = {} as CryptoKey;
-      global.crypto = {
+      (globalThis as any).crypto = {
         subtle: {
           importKey: vi.fn().mockResolvedValue(mockCryptoKey),
           sign: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3, 4, 5])),
         } as unknown as SubtleCrypto,
         getRandomValues: vi.fn(),
-      } as Crypto;
-
-      // Mock user lookup for sendTestNotification
-      const mockUserStmt = {
-        bind: vi.fn().mockReturnThis(),
-        first: vi.fn().mockResolvedValue({ id: "user-1" }),
-      };
-
-      mockDb.prepare.mockImplementation((query: string) => {
-        if (query.includes("SELECT id FROM users")) {
-          return mockUserStmt;
-        }
-        return mockStmt;
-      });
+      } as unknown as Crypto;
 
       const request = new Request("http://localhost/v1/api/devices/user-1/test", {
         method: "POST",
@@ -210,10 +231,10 @@ describe("Devices API", () => {
       });
 
       const response = await sendTestNotification(request, mockEnv, createMockLogger());
-      const data = await response.json();
+      const data = await response.json() as { success: boolean; message: string; userId: string };
 
       expect(mockDb.prepare).toHaveBeenCalledWith(
-        expect.stringContaining("SELECT user_id, push_token, device_info")
+        expect.stringContaining("SELECT dpt.push_token")
       );
       expect(data.success).toBe(true);
       expect(data.message).toBe("Test notification sent successfully");
@@ -221,21 +242,26 @@ describe("Devices API", () => {
     });
 
     it("should use default message when no custom message provided", async () => {
-      const mockDevice = {
-        user_id: "user-1",
+      // Mock token record (new schema)
+      const mockTokenRecord = {
         push_token: "dXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+        user_id: "user-1",
         device_info: null,
       };
 
-      const mockStmt = {
+      // Mock user lookup for sendTestNotification
+      const mockUserStmt = {
         bind: vi.fn().mockReturnThis(),
-        first: vi.fn().mockResolvedValue(mockDevice),
+        first: vi.fn().mockResolvedValue({ id: "user-1" }),
       };
 
-      mockDb.prepare.mockReturnValue(mockStmt);
+      const mockTokenStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue(mockTokenRecord),
+      };
 
       // Mock fetch for Google OAuth token endpoint and FCM API
-      global.fetch = vi.fn()
+      globalThis.fetch = vi.fn()
         .mockResolvedValueOnce({
           ok: true,
           json: async () => ({ access_token: "mock-google-access-token" }),
@@ -247,25 +273,24 @@ describe("Devices API", () => {
 
       // Mock crypto.subtle for JWT signing
       const mockCryptoKey = {} as CryptoKey;
-      global.crypto = {
+      (globalThis as any).crypto = {
         subtle: {
           importKey: vi.fn().mockResolvedValue(mockCryptoKey),
           sign: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3, 4, 5])),
         } as unknown as SubtleCrypto,
         getRandomValues: vi.fn(),
-      } as Crypto;
-
-      // Mock user lookup
-      const mockUserStmt = {
-        bind: vi.fn().mockReturnThis(),
-        first: vi.fn().mockResolvedValue({ id: "user-1" }),
-      };
+      } as unknown as Crypto;
 
       mockDb.prepare.mockImplementation((query: string) => {
         if (query.includes("SELECT id FROM users")) {
           return mockUserStmt;
+        } else if (query.includes("SELECT dpt.push_token") && query.includes("FROM device_push_tokens")) {
+          return mockTokenStmt;
         }
-        return mockStmt;
+        return {
+          bind: vi.fn().mockReturnThis(),
+          first: vi.fn().mockResolvedValue(null),
+        };
       });
 
       const request = new Request("http://localhost/v1/api/devices/user-1/test", {
@@ -277,7 +302,7 @@ describe("Devices API", () => {
       });
 
       const response = await sendTestNotification(request, mockEnv, createMockLogger());
-      const data = await response.json();
+      const data = await response.json() as { success: boolean };
 
       expect(data.success).toBe(true);
     });
@@ -296,11 +321,21 @@ describe("Devices API", () => {
         first: vi.fn().mockResolvedValue({ id: "user-1" }),
       };
 
+      const mockTokenStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue(null),
+      };
+
       mockDb.prepare.mockImplementation((query: string) => {
         if (query.includes("SELECT id FROM users")) {
           return mockUserStmt;
+        } else if (query.includes("SELECT dpt.push_token") && query.includes("FROM device_push_tokens")) {
+          return mockTokenStmt;
         }
-        return mockStmt;
+        return {
+          bind: vi.fn().mockReturnThis(),
+          first: vi.fn().mockResolvedValue(null),
+        };
       });
 
       const request = new Request("http://localhost/v1/api/devices/user-1/test", {
@@ -312,10 +347,10 @@ describe("Devices API", () => {
       });
 
       const response = await sendTestNotification(request, mockEnv, createMockLogger());
-      const data = await response.json();
+      const data = await response.json() as { error: string };
 
       expect(response.status).toBe(404);
-      expect(data.error).toBe("Device not found");
+      expect(data.error).toMatch(/Device not found/);
     });
 
     it("should return 400 when userId is missing", async () => {
@@ -342,8 +377,8 @@ describe("Devices API", () => {
         first: vi.fn().mockResolvedValue({ id: "user-1" }),
       };
 
-      // Mock device lookup to return null (no device found)
-      const mockDeviceStmt = {
+      // Mock token lookup to return null (no device found - new schema)
+      const mockTokenStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue(null),
       };
@@ -351,12 +386,17 @@ describe("Devices API", () => {
       mockDb.prepare.mockImplementation((query: string) => {
         if (query.includes("SELECT id FROM users")) {
           return mockUserStmt;
+        } else if (query.includes("SELECT dpt.push_token") && query.includes("FROM device_push_tokens")) {
+          return mockTokenStmt;
         }
-        return mockDeviceStmt;
+        return {
+          bind: vi.fn().mockReturnThis(),
+          first: vi.fn().mockResolvedValue(null),
+        };
       });
 
       const response = await sendTestNotification(request, mockEnv, createMockLogger());
-      const data = await response.json();
+      const data = await response.json() as { error?: string };
 
       // Should return 404 when device not found (no pushToken in body means use first device, but none exists)
       expect([400, 404]).toContain(response.status);
@@ -368,28 +408,27 @@ describe("Devices API", () => {
       });
 
       const response = await sendTestNotification(request, mockEnv, createMockLogger());
-      const data = await response.json();
+      const data = await response.json() as { error: string };
 
       expect(response.status).toBe(405);
       expect(data.error).toBe("Method not allowed");
     });
 
     it("should handle FCM send failures", async () => {
-      const mockDevice = {
-        user_id: "user-1",
+      // Mock token record (new schema)
+      const mockTokenRecord = {
         push_token: "invalid-token",
+        user_id: "user-1",
         device_info: null,
       };
 
-      const mockStmt = {
+      const mockTokenStmt = {
         bind: vi.fn().mockReturnThis(),
-        first: vi.fn().mockResolvedValue(mockDevice),
+        first: vi.fn().mockResolvedValue(mockTokenRecord),
       };
 
-      mockDb.prepare.mockReturnValue(mockStmt);
-
       // Mock fetch for FCM API to return error
-      global.fetch = vi.fn().mockResolvedValue({
+      globalThis.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 400,
         json: async () => ({
@@ -402,13 +441,13 @@ describe("Devices API", () => {
       });
 
       // Mock crypto.subtle for JWT signing
-      global.crypto = {
+      (globalThis as any).crypto = {
         subtle: {
           importKey: vi.fn().mockResolvedValue({}),
           sign: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
         } as unknown as SubtleCrypto,
         getRandomValues: vi.fn(),
-      } as Crypto;
+      } as unknown as Crypto;
 
       // Mock user lookup
       const mockUserStmt = {
@@ -419,8 +458,13 @@ describe("Devices API", () => {
       mockDb.prepare.mockImplementation((query: string) => {
         if (query.includes("SELECT id FROM users")) {
           return mockUserStmt;
+        } else if (query.includes("SELECT dpt.push_token") && query.includes("FROM device_push_tokens")) {
+          return mockTokenStmt;
         }
-        return mockStmt;
+        return {
+          bind: vi.fn().mockReturnThis(),
+          first: vi.fn().mockResolvedValue(null),
+        };
       });
 
       const request = new Request("http://localhost/v1/api/devices/user-1/test", {
@@ -432,7 +476,7 @@ describe("Devices API", () => {
       });
 
       const response = await sendTestNotification(request, mockEnv, createMockLogger());
-      const data = await response.json();
+      const data = await response.json() as { success?: boolean; error?: string };
 
       // FCM errors might return 400 (invalid token) or 500 (other errors)
       expect([400, 500]).toContain(response.status);

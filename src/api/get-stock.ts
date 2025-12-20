@@ -445,9 +445,11 @@ async function notifyUsersOfProviderFailure(
     // Get all registered push tokens
     const rows = await env.stockly
       .prepare(
-        `SELECT user_id, push_token 
-         FROM user_push_tokens 
-         WHERE push_token IS NOT NULL AND push_token != ''`
+        `SELECT d.user_id, dpt.push_token 
+         FROM device_push_tokens dpt
+         INNER JOIN devices d ON dpt.device_id = d.id
+         INNER JOIN users u ON d.user_id = u.id
+         WHERE dpt.is_active = 1 AND d.is_active = 1 AND dpt.push_token IS NOT NULL AND dpt.push_token != ''`
       )
       .all<{
         user_id: string;

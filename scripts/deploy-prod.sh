@@ -6,7 +6,7 @@
 # Runs tests, then database migrations, and deploys the API (non-interactive)
 # ==============================================================================
 # NOTE: This script is kept for backward compatibility.
-#       For unified deployment (API + Webapp), use: ../../scripts/deploy-prod.sh
+#       For unified deployment (API + Webapp), use: ../../scripts/deploy-to-prod.sh
 # ==============================================================================
 
 set -e
@@ -98,8 +98,14 @@ wrangler d1 execute stockly --remote --yes --file=./migrations/019_make_username
 echo "Migration 20/21: 020_remove_target_from_alerts.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/020_remove_target_from_alerts.sql || echo "⚠️  Migration 20 already applied or failed"
 
-echo "Migration 21/21: 021_fix_user_push_tokens_username.sql"
+echo "Migration 21/23: 021_fix_user_push_tokens_username.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/021_fix_user_push_tokens_username.sql || echo "⚠️  Migration 21 already applied or failed"
+
+echo "Migration 22/23: 022_create_devices_and_device_push_tokens.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/022_create_devices_and_device_push_tokens.sql || echo "⚠️  Migration 22 already applied or failed"
+
+echo "Migration 23/23: 023_migrate_user_push_tokens_to_devices.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/023_migrate_user_push_tokens_to_devices.sql || echo "⚠️  Migration 23 already applied or failed"
 
 echo ""
 echo "✅ Database migrations complete"

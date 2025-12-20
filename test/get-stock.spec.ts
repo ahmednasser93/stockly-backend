@@ -648,7 +648,7 @@ describe("getStock handler", () => {
 
     // Filter prepare calls to see if tokens were requested
     const prepareCalls = prepare.mock.calls.map(c => c[0]); // sql strings
-    const tokenQueries = prepareCalls.filter((sql: any) => sql.includes("user_push_tokens"));
+    const tokenQueries = prepareCalls.filter((sql: any) => sql.includes("device_push_tokens"));
 
     // Should be exactly 1 token query (from first call)
     expect(tokenQueries.length).toBe(1);

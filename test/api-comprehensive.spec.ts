@@ -499,12 +499,14 @@ describe("API - Push Token", () => {
           const result = callCount === 0 
             ? { id: "user-123", username: "testuser" } // User lookup
             : callCount === 1
-            ? null // No existing token
-            : { push_token: "fcm-token-12345678901234567890", device_info: "iPhone 14 Pro", device_type: "ios", user_id: "user-123", username: "testuser" }; // Verification query
+            ? null // Device check (not found)
+            : callCount === 2
+            ? null // Token check (not found)
+            : { id: 1, user_id: "user-123", device_info: "iPhone 14 Pro", device_type: "ios", push_token: "fcm-token-12345678901234567890" }; // Verification query
           callCount++;
           return Promise.resolve(result);
         }),
-      run: vi.fn().mockResolvedValue(undefined),
+      run: vi.fn().mockResolvedValue({ meta: { last_row_id: callCount === 2 ? 1 : undefined } }),
     });
       return { bind };
     });
@@ -537,8 +539,10 @@ describe("API - Push Token", () => {
           const result = callCount === 0 
             ? { id: "user-123", username: "testuser" } // User lookup
             : callCount === 1
-            ? { id: 1, user_id: "user-123" } // Existing token
-            : { push_token: "fcm-token-12345678901234567890", device_info: "iPhone 15 Pro", device_type: "ios", user_id: "user-123", username: "testuser" }; // Verification query
+            ? { id: 1, user_id: "user-123", device_info: "iPhone 14 Pro", device_type: "ios", is_active: 1 } // Device check (found)
+            : callCount === 2
+            ? { id: 1, device_id: 1, is_active: 1 } // Token check (found, same device)
+            : { id: 1, user_id: "user-123", device_info: "iPhone 15 Pro", device_type: "ios", push_token: "fcm-token-12345678901234567890" }; // Verification query
           callCount++;
           return Promise.resolve(result);
         }),
@@ -587,26 +591,28 @@ describe("API - Push Token", () => {
   });
 
   it("GET /v1/api/push-token gets a user's push token", async () => {
-    const mockTokens = [
+    // Mock devices query (new schema) - returns rows with device_id, device_info, device_type, push_token
+    const mockDevices = [
       {
-      push_token: "fcm-token-12345678901234567890",
-      device_info: "iPhone 14 Pro",
+        device_id: 1,
+        device_info: "iPhone 14 Pro",
         device_type: "ios",
-      created_at: "2025-01-01T00:00:00Z",
-      updated_at: "2025-01-01T00:00:00Z",
+        push_token: "fcm-token-12345678901234567890",
+        created_at: "2025-01-01T00:00:00Z",
+        updated_at: "2025-01-01T00:00:00Z",
       },
     ];
 
     const env = createEnv();
     let callCount = 0;
     env.stockly.prepare = vi.fn().mockImplementation((query: string) => {
-    const bind = vi.fn().mockReturnValue({
+      const bind = vi.fn().mockReturnValue({
         first: vi.fn().mockResolvedValue(
           callCount++ === 0 
             ? { id: "user-123" } // User lookup
             : null
         ),
-        all: vi.fn().mockResolvedValue({ results: mockTokens }), // Push tokens
+        all: vi.fn().mockResolvedValue({ results: mockDevices }), // Devices with push tokens
       });
       return { bind };
     });
@@ -618,7 +624,9 @@ describe("API - Push Token", () => {
     const data = await response.json();
     expect(data.username).toBe("testuser");
     expect(Array.isArray(data.devices)).toBe(true);
-    expect(data.devices[0].pushToken).toBe("fcm-token-12345678901234567890");
+    // New schema returns devices with pushTokens arrays (array of objects with pushToken, createdAt, updatedAt)
+    expect(Array.isArray(data.devices[0].pushTokens)).toBe(true);
+    expect(data.devices[0].pushTokens[0].pushToken).toBe("fcm-token-12345678901234567890");
   });
 
   it("GET /v1/api/push-token returns 404 when token not found", async () => {
@@ -1082,13 +1090,16 @@ describe("API - Devices", () => {
   });
 
   it("GET /v1/api/devices returns all devices", async () => {
-    const mockDevices = [
+    // Mock devices query (new schema)
+    const mockDeviceRows = [
       {
+        device_id: 1,
         user_id: "user-123",
-        push_token: "fcm-token-123",
         device_info: "iPhone 14 Pro",
+        device_type: "ios",
         created_at: "2025-01-01T00:00:00Z",
         updated_at: "2025-01-01T00:00:00Z",
+        username: "testuser",
       },
     ];
 
@@ -1099,18 +1110,30 @@ describe("API - Devices", () => {
       bind: vi.fn().mockReturnThis(),
       first: vi.fn().mockResolvedValue({ count: 0 }),
     };
+
+    // Mock push tokens query
+    const pushTokensStmt = {
+      bind: vi.fn().mockReturnThis(),
+      all: vi.fn().mockResolvedValue({ results: [{ push_token: "fcm-token-123" }] }),
+    };
     
     env.stockly.prepare = vi.fn().mockImplementation((query: string) => {
-      if (query.includes("user_push_tokens")) {
+      if (query.includes("FROM devices d") && query.includes("LEFT JOIN users")) {
         return {
-          all: vi.fn().mockResolvedValue({ results: mockDevices }),
+          bind: vi.fn().mockReturnThis(),
+          all: vi.fn().mockResolvedValue({ results: mockDeviceRows }),
         };
-      } else if (query.includes("alerts") && query.includes("COUNT")) {
+      } else if (query.includes("SELECT push_token") && query.includes("FROM device_push_tokens") && query.includes("device_id")) {
+        return pushTokensStmt;
+      } else if (query.includes("COUNT(*)") && query.includes("FROM alerts") && query.includes("status = 'active'")) {
+        return alertCountStmt;
+      } else if (query.includes("COUNT(*)") && query.includes("FROM alerts")) {
         return alertCountStmt;
       }
       return {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({ count: 0 }),
+        all: vi.fn().mockResolvedValue({ results: [] }),
       };
     });
 
@@ -1128,22 +1151,36 @@ describe("API - Devices", () => {
     let queryCount = 0;
     env.stockly.prepare = vi.fn().mockImplementation((query: string) => {
       queryCount++;
-      if (query.includes("user_push_tokens") && query.includes("push_token = ?") && query.includes("SELECT")) {
-        // First query: check if device exists
+      if (query.includes("SELECT dpt.device_id") && query.includes("FROM device_push_tokens")) {
+        // First query: check if token exists (new schema)
         return {
           bind: vi.fn().mockReturnValue({
-            first: vi.fn().mockResolvedValue({ user_id: "user-123", push_token: "fcm-token-12345678901234567890" }),
+            first: vi.fn().mockResolvedValue({ device_id: 1, user_id: "user-123", username: "testuser" }),
           }),
         };
-      } else if (query.includes("users") && query.includes("username")) {
-        // Second query: get device user
+      } else if (query.includes("SELECT id FROM users WHERE username")) {
+        // Second query: get user for auth check
         return {
           bind: vi.fn().mockReturnValue({
-            first: vi.fn().mockResolvedValue({ username: "testuser" }),
+            first: vi.fn().mockResolvedValue({ id: "user-123" }),
           }),
         };
-      } else if (query.includes("DELETE")) {
-        // Third query: delete device
+      } else if (query.includes("DELETE FROM device_push_tokens")) {
+        // Third query: delete push token
+        return {
+          bind: vi.fn().mockReturnValue({
+            run: vi.fn().mockResolvedValue(undefined),
+          }),
+        };
+      } else if (query.includes("SELECT COUNT(*)") && query.includes("FROM device_push_tokens")) {
+        // Fourth query: check remaining tokens
+        return {
+          bind: vi.fn().mockReturnValue({
+            first: vi.fn().mockResolvedValue({ count: 0 }),
+          }),
+        };
+      } else if (query.includes("UPDATE devices SET is_active")) {
+        // Fifth query: deactivate device
         return {
           bind: vi.fn().mockReturnValue({
             run: vi.fn().mockResolvedValue(undefined),

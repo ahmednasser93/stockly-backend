@@ -123,9 +123,15 @@ export async function runAlertCron(env: Env, ctx?: ExecutionContext): Promise<vo
 
       // Send push notification if channel is "notification" and username exists
       if (alert.channel === "notification" && alert.username) {
-        // Get all push tokens for this username (supporting multiple devices per user)
+        // Get all active push tokens for this username (using new schema)
         const userTokens = await env.stockly
-          .prepare(`SELECT push_token, device_type FROM user_push_tokens WHERE username = ?`)
+          .prepare(
+            `SELECT dpt.push_token, d.device_type
+             FROM device_push_tokens dpt
+             INNER JOIN devices d ON dpt.device_id = d.id
+             INNER JOIN users u ON d.user_id = u.id
+             WHERE u.username = ? AND dpt.is_active = 1 AND d.is_active = 1`
+          )
           .bind(alert.username)
           .all<{ push_token: string; device_type: string | null }>();
 

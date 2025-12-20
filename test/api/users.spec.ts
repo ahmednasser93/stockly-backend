@@ -272,15 +272,15 @@ describe("Users API", () => {
   describe("getUserDevices", () => {
     it("should return devices for a user", async () => {
       const mockUser = { id: "u1" };
-      const mockDevices = [
+      // Mock devices query (new schema)
+      const mockDeviceRows = [
         {
+          device_id: 1,
           user_id: "u1",
-          push_token: "token1",
           device_info: "Android Device",
           device_type: "android",
           created_at: "2024-01-01T00:00:00Z",
           updated_at: "2024-01-02T00:00:00Z",
-          username: "alice",
         },
       ];
 
@@ -291,20 +291,44 @@ describe("Users API", () => {
 
       const devicesStmt = {
         bind: vi.fn().mockReturnThis(),
-        all: vi.fn().mockResolvedValue({ results: mockDevices }),
+        all: vi.fn().mockResolvedValue({ results: mockDeviceRows }),
       };
 
-      const alertCountStmt = {
+      // Mock push tokens query (called for each device)
+      const pushTokensStmt = {
         bind: vi.fn().mockReturnThis(),
-        first: vi.fn()
-          .mockResolvedValueOnce({ count: 5 })
-          .mockResolvedValueOnce({ count: 3 }),
+        all: vi.fn().mockResolvedValue({ results: [{ push_token: "token1" }] }),
       };
 
-      mockEnv.stockly.prepare
-        .mockReturnValueOnce(userStmt)
-        .mockReturnValueOnce(devicesStmt)
-        .mockReturnValue(alertCountStmt);
+      const totalAlertsStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue({ count: 5 }),
+      };
+
+      const activeAlertsStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue({ count: 3 }),
+      };
+
+      let callCount = 0;
+      mockEnv.stockly.prepare.mockImplementation((query: string) => {
+        if (query.includes("SELECT id FROM users WHERE username")) {
+          return userStmt;
+        } else if (query.includes("FROM devices d") && query.includes("WHERE d.user_id")) {
+          return devicesStmt;
+        } else if (query.includes("FROM device_push_tokens") && query.includes("device_id")) {
+          return pushTokensStmt;
+        } else if (query.includes("COUNT(*)") && query.includes("FROM alerts") && query.includes("status = 'active'")) {
+          return activeAlertsStmt;
+        } else if (query.includes("COUNT(*)") && query.includes("FROM alerts")) {
+          return totalAlertsStmt;
+        }
+        return {
+          bind: vi.fn().mockReturnThis(),
+          first: vi.fn(),
+          all: vi.fn(),
+        };
+      });
 
       const request = new Request("https://example.com/v1/api/users/alice/devices");
       const response = await getUserDevices(request, "alice", mockEnv, mockLogger);
@@ -312,7 +336,8 @@ describe("Users API", () => {
       expect(response.status).toBe(200);
       const data = await response.json();
       expect(data.devices).toHaveLength(1);
-      expect(data.devices[0].pushToken).toBe("token1");
+      expect(Array.isArray(data.devices[0].pushTokens)).toBe(true);
+      expect(data.devices[0].pushTokens).toContain("token1");
       expect(data.devices[0].username).toBe("alice");
     });
 

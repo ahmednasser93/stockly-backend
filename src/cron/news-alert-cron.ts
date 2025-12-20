@@ -157,11 +157,16 @@ export async function runNewsAlertCron(env: Env, ctx?: ExecutionContext): Promis
                             if (userIds.length > 0) {
                                 logger.info(`Found ${userIds.length} users with ${symbol} in favorites: ${userIds.join(", ")}`);
 
-                                // Fetch all push tokens for these users in one query
-                                // This will get ALL devices for each user (supporting multiple devices per user)
+                                // Fetch all active push tokens for these users in one query (using new schema)
+                                // This will get ALL active devices for each user (supporting multiple devices per user)
                                 const placeholders = userIds.map(() => "?").join(",");
                                 const tokens = await env.stockly
-                                    .prepare(`SELECT user_id, push_token FROM user_push_tokens WHERE user_id IN (${placeholders})`)
+                                    .prepare(
+                                      `SELECT d.user_id, dpt.push_token
+                                       FROM device_push_tokens dpt
+                                       INNER JOIN devices d ON dpt.device_id = d.id
+                                       WHERE d.user_id IN (${placeholders}) AND dpt.is_active = 1 AND d.is_active = 1`
+                                    )
                                     .bind(...userIds)
                                     .all<{ user_id: string; push_token: string }>();
 

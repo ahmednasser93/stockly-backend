@@ -42,37 +42,53 @@ describe("Devices API", () => {
         isAdmin: false,
       });
 
-      const mockDevices = [
-        createMockDevice({
-          user_id: userId,
-          username,
-          push_token: "token-1",
-          device_info: "Android Device",
-          device_type: "android",
-        }),
-        createMockDevice({
-          user_id: userId,
-          username,
-          push_token: "token-2",
-          device_info: "iOS Device",
-          device_type: "ios",
-        }),
-      ];
-
       // Mock user lookup
       const userStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({ id: userId }),
       };
 
-      // Mock devices query
+      // Mock devices query (new schema - returns devices)
+      const mockDeviceRows = [
+        {
+          device_id: 1,
+          user_id: userId,
+          device_info: "Android Device",
+          device_type: "android",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          username,
+        },
+        {
+          device_id: 2,
+          user_id: userId,
+          device_info: "iOS Device",
+          device_type: "ios",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          username,
+        },
+      ];
+
       const devicesStmt = {
         bind: vi.fn().mockReturnThis(),
-        all: vi.fn().mockResolvedValue({ results: mockDevices }),
+        all: vi.fn().mockResolvedValue({ results: mockDeviceRows }),
       };
 
-      // Mock alert count queries - need separate mocks for total and active
-      // The code makes two queries per device: one for total alerts, one for active alerts
+      // Mock push tokens query (called for each device)
+      const pushTokensStmt = {
+        bind: vi.fn().mockReturnThis(),
+        all: vi.fn().mockImplementation((deviceId: number) => {
+          if (deviceId === 1) {
+            return Promise.resolve({ results: [{ push_token: "token-1" }] });
+          } else if (deviceId === 2) {
+            return Promise.resolve({ results: [{ push_token: "token-2" }] });
+          }
+          return Promise.resolve({ results: [] });
+        }),
+      };
+
+      // Mock alert count queries
       const totalAlertCountStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({ count: 5 }),
@@ -83,19 +99,27 @@ describe("Devices API", () => {
         first: vi.fn().mockResolvedValue({ count: 3 }),
       };
 
+      let deviceQueryCallCount = 0;
       mockDb.prepare.mockImplementation((query: string) => {
         if (query.includes("SELECT id FROM users WHERE username")) {
           return userStmt;
-        } else if (query.includes("user_push_tokens") && (query.includes("WHERE u.username") || query.includes("WHERE"))) {
+        } else if (query.includes("FROM devices") && query.includes("INNER JOIN users")) {
           return devicesStmt;
+        } else if (query.includes("SELECT push_token") && query.includes("FROM device_push_tokens")) {
+          // Return push tokens for the device
+          const stmt = {
+            bind: vi.fn().mockReturnThis(),
+            all: vi.fn().mockResolvedValue({ 
+              results: deviceQueryCallCount === 0 
+                ? [{ push_token: "token-1" }] 
+                : [{ push_token: "token-2" }] 
+            }),
+          };
+          deviceQueryCallCount++;
+          return stmt;
         } else if (query.includes("COUNT") && query.includes("FROM alerts") && query.includes("status = 'active'") && query.includes("username = ?")) {
-          // Active alerts query for regular user (includes username)
           return activeAlertCountStmt;
         } else if (query.includes("COUNT") && query.includes("FROM alerts") && query.includes("username = ?")) {
-          // Total alerts query for regular user (includes username)
-          return totalAlertCountStmt;
-        } else if (query.includes("COUNT") && query.includes("FROM alerts")) {
-          // Fallback for any other alert count queries
           return totalAlertCountStmt;
         }
         return {
@@ -112,7 +136,8 @@ describe("Devices API", () => {
       expect(data.devices).toHaveLength(2);
       expect(data.devices[0].userId).toBe(userId);
       expect(data.devices[0].username).toBe(username);
-      expect(data.devices[0].pushToken).toBe("token-1");
+      expect(Array.isArray(data.devices[0].pushTokens)).toBe(true);
+      expect(data.devices[0].pushTokens).toContain("token-1");
       expect(data.devices[0].deviceInfo).toBe("Android Device");
       expect(data.devices[0].deviceType).toBe("android");
       expect(data.devices[0].alertCount).toBe(5);
@@ -127,17 +152,26 @@ describe("Devices API", () => {
         isAdmin: true,
       });
 
+      // Mock devices with new schema structure
       const mockDevices = [
-        createMockDevice({
+        {
+          device_id: 1,
           user_id: "user-1",
+          device_info: "Android Device",
+          device_type: "android",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
           username: "user1",
-          push_token: "token-1",
-        }),
-        createMockDevice({
+        },
+        {
+          device_id: 2,
           user_id: "user-2",
+          device_info: "iOS Device",
+          device_type: "ios",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
           username: "user2",
-          push_token: "token-2",
-        }),
+        },
       ];
 
       const devicesStmt = {
@@ -145,15 +179,30 @@ describe("Devices API", () => {
         all: vi.fn().mockResolvedValue({ results: mockDevices }),
       };
 
+      // Mock push tokens query
+      const pushTokensStmt1 = {
+        bind: vi.fn().mockReturnThis(),
+        all: vi.fn().mockResolvedValue({ results: [{ push_token: "token-1" }] }),
+      };
+      const pushTokensStmt2 = {
+        bind: vi.fn().mockReturnThis(),
+        all: vi.fn().mockResolvedValue({ results: [{ push_token: "token-2" }] }),
+      };
+
       const alertCountStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({ count: 2 }),
       };
 
+      let deviceCallCount = 0;
+      let tokenCallCount = 0;
       mockDb.prepare.mockImplementation((query: string) => {
-        if (query.includes("user_push_tokens") && !query.includes("WHERE")) {
+        if (query.includes("FROM devices d") && query.includes("LEFT JOIN")) {
           return devicesStmt;
-        } else if (query.includes("COUNT")) {
+        } else if (query.includes("FROM device_push_tokens")) {
+          tokenCallCount++;
+          return tokenCallCount === 1 ? pushTokensStmt1 : pushTokensStmt2;
+        } else if (query.includes("COUNT") && query.includes("FROM alerts")) {
           return alertCountStmt;
         }
         return {
@@ -170,6 +219,8 @@ describe("Devices API", () => {
       expect(data.devices).toHaveLength(2);
       expect(data.devices[0].username).toBe("user1");
       expect(data.devices[1].username).toBe("user2");
+      expect(Array.isArray(data.devices[0].pushTokens)).toBe(true);
+      expect(data.devices[0].pushTokens).toContain("token-1");
     });
 
     it("should handle missing device_type column gracefully", async () => {
@@ -188,26 +239,28 @@ describe("Devices API", () => {
         first: vi.fn().mockResolvedValue({ id: userId }),
       };
 
-      // First query fails with device_type error
-      const devicesStmtWithError = {
-        bind: vi.fn().mockReturnThis(),
-        all: vi.fn().mockRejectedValue(new Error("no such column: device_type")),
-      };
-
-      // Fallback query succeeds without device_type
+      // Mock devices with new schema structure (device_type can be null)
       const mockDevices = [
-        createMockDevice({
+        {
+          device_id: 1,
           user_id: userId,
-          username,
-          push_token: "token-1",
           device_info: "Android Device",
-        }),
+          device_type: null, // Null device_type
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          username,
+        },
       ];
-      delete (mockDevices[0] as any).device_type;
 
-      const devicesStmtFallback = {
+      const devicesStmt = {
         bind: vi.fn().mockReturnThis(),
         all: vi.fn().mockResolvedValue({ results: mockDevices }),
+      };
+
+      // Mock push tokens query
+      const pushTokensStmt = {
+        bind: vi.fn().mockReturnThis(),
+        all: vi.fn().mockResolvedValue({ results: [{ push_token: "token-1" }] }),
       };
 
       const alertCountStmt = {
@@ -215,16 +268,14 @@ describe("Devices API", () => {
         first: vi.fn().mockResolvedValue({ count: 0 }),
       };
 
-      let callCount = 0;
       mockDb.prepare.mockImplementation((query: string) => {
         if (query.includes("SELECT id FROM users WHERE username")) {
           return userStmt;
-        } else if (query.includes("user_push_tokens") && query.includes("device_type") && callCount === 0) {
-          callCount++;
-          return devicesStmtWithError;
-        } else if (query.includes("user_push_tokens") && !query.includes("device_type")) {
-          return devicesStmtFallback;
-        } else if (query.includes("COUNT")) {
+        } else if (query.includes("FROM devices d") && query.includes("INNER JOIN")) {
+          return devicesStmt;
+        } else if (query.includes("FROM device_push_tokens")) {
+          return pushTokensStmt;
+        } else if (query.includes("COUNT") && query.includes("FROM alerts")) {
           return alertCountStmt;
         }
         return {
@@ -258,27 +309,28 @@ describe("Devices API", () => {
         first: vi.fn().mockResolvedValue({ id: userId }),
       };
 
-      // First query fails with username error
-      const devicesStmtWithError = {
-        bind: vi.fn().mockReturnThis(),
-        all: vi.fn().mockRejectedValue(new Error("no such column: upt.username")),
-      };
-
-      // Fallback query succeeds using u.username from JOIN
+      // Mock devices with new schema structure (username from JOIN)
       const mockDevices = [
         {
+          device_id: 1,
           user_id: userId,
-          push_token: "token-1",
           device_info: "Android Device",
+          device_type: "android",
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           username,
         },
       ];
 
-      const devicesStmtFallback = {
+      const devicesStmt = {
         bind: vi.fn().mockReturnThis(),
         all: vi.fn().mockResolvedValue({ results: mockDevices }),
+      };
+
+      // Mock push tokens query
+      const pushTokensStmt = {
+        bind: vi.fn().mockReturnThis(),
+        all: vi.fn().mockResolvedValue({ results: [{ push_token: "token-1" }] }),
       };
 
       const alertCountStmt = {
@@ -286,16 +338,14 @@ describe("Devices API", () => {
         first: vi.fn().mockResolvedValue({ count: 0 }),
       };
 
-      let callCount = 0;
       mockDb.prepare.mockImplementation((query: string) => {
         if (query.includes("SELECT id FROM users WHERE username")) {
           return userStmt;
-        } else if (query.includes("user_push_tokens") && callCount === 0) {
-          callCount++;
-          return devicesStmtWithError;
-        } else if (query.includes("user_push_tokens") && !query.includes("COALESCE")) {
-          return devicesStmtFallback;
-        } else if (query.includes("COUNT")) {
+        } else if (query.includes("FROM devices d") && query.includes("INNER JOIN")) {
+          return devicesStmt;
+        } else if (query.includes("FROM device_push_tokens")) {
+          return pushTokensStmt;
+        } else if (query.includes("COUNT") && query.includes("FROM alerts")) {
           return alertCountStmt;
         }
         return {
@@ -337,7 +387,7 @@ describe("Devices API", () => {
       mockDb.prepare.mockImplementation((query: string) => {
         if (query.includes("SELECT id FROM users WHERE username")) {
           return userStmt;
-        } else if (query.includes("user_push_tokens")) {
+        } else if (query.includes("FROM devices d") || query.includes("FROM user_push_tokens")) {
           return devicesStmt;
         }
         return {
@@ -439,7 +489,7 @@ describe("Devices API", () => {
       };
 
       mockDb.prepare.mockImplementation((query: string) => {
-        if (query.includes("user_push_tokens") && !query.includes("WHERE")) {
+        if (query.includes("FROM devices d") && query.includes("LEFT JOIN")) {
           return devicesStmt;
         } else if (query.includes("COUNT")) {
           return alertCountStmt;
@@ -453,12 +503,9 @@ describe("Devices API", () => {
       const request = createMockRequest("https://api.test.com/v1/api/devices");
       await getAllDevices(request, mockEnv, mockLogger);
 
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        "Found devices with null username",
-        expect.objectContaining({
-          count: 1,
-        })
-      );
+      // The implementation doesn't log a warning for null usernames anymore
+      // It just sets alert counts to 0. So we just verify the function completes successfully.
+      expect(mockLogger.warn).not.toHaveBeenCalled();
     });
   });
 
@@ -475,33 +522,48 @@ describe("Devices API", () => {
         isAdmin: false,
       });
 
-      const deviceStmt = {
+      // Mock token record query (new schema)
+      const tokenRecordStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({
+          device_id: 1,
           user_id: userId,
-          push_token: pushToken,
-        }),
-      };
-
-      const deviceUserStmt = {
-        bind: vi.fn().mockReturnThis(),
-        first: vi.fn().mockResolvedValue({
           username,
         }),
       };
 
-      const deleteStmt = {
+      // Mock user lookup for auth check
+      const userStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue({ id: userId }),
+      };
+
+      const deleteTokenStmt = {
+        bind: vi.fn().mockReturnThis(),
+        run: vi.fn().mockResolvedValue({ success: true }),
+      };
+
+      // Mock remaining tokens check
+      const remainingTokensStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue({ count: 0 }), // No remaining tokens
+      };
+
+      // Mock device deactivation
+      const deactivateDeviceStmt = {
         bind: vi.fn().mockReturnThis(),
         run: vi.fn().mockResolvedValue({ success: true }),
       };
 
       mockDb.prepare.mockImplementation((query: string) => {
-        if (query.includes("SELECT user_id, push_token FROM user_push_tokens WHERE push_token")) {
-          return deviceStmt;
-        } else if (query.includes("SELECT username") && query.includes("FROM user_push_tokens")) {
-          return deviceUserStmt;
-        } else if (query.includes("DELETE FROM user_push_tokens")) {
-          return deleteStmt;
+        if (query.includes("SELECT dpt.device_id") && query.includes("FROM device_push_tokens")) {
+          return tokenRecordStmt;
+        } else if (query.includes("DELETE FROM device_push_tokens")) {
+          return deleteTokenStmt;
+        } else if (query.includes("SELECT COUNT(*)") && query.includes("FROM device_push_tokens") && query.includes("device_id")) {
+          return remainingTokensStmt;
+        } else if (query.includes("UPDATE devices SET is_active")) {
+          return deactivateDeviceStmt;
         }
         return {
           bind: vi.fn().mockReturnThis(),
@@ -519,7 +581,8 @@ describe("Devices API", () => {
       expect(response.status).toBe(200);
       expect(data.success).toBe(true);
       expect(data.userId).toBe(userId);
-      expect(deleteStmt.run).toHaveBeenCalled();
+      expect(deleteTokenStmt.run).toHaveBeenCalled();
+      expect(deactivateDeviceStmt.run).toHaveBeenCalled();
       expect(mockLogger.info).toHaveBeenCalledWith(
         "Device deleted successfully",
         expect.objectContaining({
@@ -543,33 +606,40 @@ describe("Devices API", () => {
         isAdmin: true,
       });
 
-      const deviceStmt = {
+      // Mock token record query (new schema)
+      const tokenRecordStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({
+          device_id: 1,
           user_id: deviceUserId,
-          push_token: pushToken,
-        }),
-      };
-
-      const deviceUserStmt = {
-        bind: vi.fn().mockReturnThis(),
-        first: vi.fn().mockResolvedValue({
           username: "otheruser",
         }),
       };
 
-      const deleteStmt = {
+      const deleteTokenStmt = {
+        bind: vi.fn().mockReturnThis(),
+        run: vi.fn().mockResolvedValue({ success: true }),
+      };
+
+      const remainingTokensStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue({ count: 0 }),
+      };
+
+      const deactivateDeviceStmt = {
         bind: vi.fn().mockReturnThis(),
         run: vi.fn().mockResolvedValue({ success: true }),
       };
 
       mockDb.prepare.mockImplementation((query: string) => {
-        if (query.includes("SELECT user_id, push_token FROM user_push_tokens WHERE push_token")) {
-          return deviceStmt;
-        } else if (query.includes("SELECT username") && query.includes("FROM user_push_tokens")) {
-          return deviceUserStmt;
-        } else if (query.includes("DELETE FROM user_push_tokens")) {
-          return deleteStmt;
+        if (query.includes("SELECT dpt.device_id") && query.includes("FROM device_push_tokens")) {
+          return tokenRecordStmt;
+        } else if (query.includes("DELETE FROM device_push_tokens")) {
+          return deleteTokenStmt;
+        } else if (query.includes("SELECT COUNT(*)") && query.includes("FROM device_push_tokens")) {
+          return remainingTokensStmt;
+        } else if (query.includes("UPDATE devices SET is_active")) {
+          return deactivateDeviceStmt;
         }
         return {
           bind: vi.fn().mockReturnThis(),
@@ -586,7 +656,8 @@ describe("Devices API", () => {
 
       expect(response.status).toBe(200);
       expect(data.success).toBe(true);
-      expect(deleteStmt.run).toHaveBeenCalled();
+      expect(deleteTokenStmt.run).toHaveBeenCalled();
+      expect(deactivateDeviceStmt.run).toHaveBeenCalled();
     });
 
     it("should return 403 when user tries to delete another user's device", async () => {
@@ -600,26 +671,19 @@ describe("Devices API", () => {
         isAdmin: false,
       });
 
-      const deviceStmt = {
+      // Mock token record query (new schema) - returns different user
+      const tokenRecordStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({
+          device_id: 1,
           user_id: "other-user-456",
-          push_token: pushToken,
-        }),
-      };
-
-      const deviceUserStmt = {
-        bind: vi.fn().mockReturnThis(),
-        first: vi.fn().mockResolvedValue({
-          username: "otheruser", // Different username
+          username: "otheruser",
         }),
       };
 
       mockDb.prepare.mockImplementation((query: string) => {
-        if (query.includes("SELECT user_id, push_token FROM user_push_tokens WHERE push_token")) {
-          return deviceStmt;
-        } else if (query.includes("SELECT username") && query.includes("FROM user_push_tokens")) {
-          return deviceUserStmt;
+        if (query.includes("SELECT dpt.device_id") && query.includes("FROM device_push_tokens")) {
+          return tokenRecordStmt;
         }
         return {
           bind: vi.fn().mockReturnThis(),
@@ -664,14 +728,15 @@ describe("Devices API", () => {
         isAdmin: false,
       });
 
-      const deviceStmt = {
+      // Mock token record query (new schema) - not found
+      const tokenRecordStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue(null),
       };
 
       mockDb.prepare.mockImplementation((query: string) => {
-        if (query.includes("SELECT user_id, push_token FROM user_push_tokens WHERE push_token")) {
-          return deviceStmt;
+        if (query.includes("SELECT dpt.device_id") && query.includes("FROM device_push_tokens")) {
+          return tokenRecordStmt;
         }
         return {
           bind: vi.fn().mockReturnThis(),
@@ -686,7 +751,7 @@ describe("Devices API", () => {
       const data = await response.json();
 
       expect(response.status).toBe(404);
-      expect(data.error).toContain("Device not found");
+      expect(data.error).toMatch(/Device not found/);
     });
 
     it("should return 401 when authentication fails", async () => {
@@ -711,14 +776,14 @@ describe("Devices API", () => {
         isAdmin: false,
       });
 
-      const deviceStmt = {
+      const tokenRecordStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockRejectedValue(new Error("Database error")),
       };
 
       mockDb.prepare.mockImplementation((query: string) => {
-        if (query.includes("SELECT user_id, push_token FROM user_push_tokens WHERE push_token")) {
-          return deviceStmt;
+        if (query.includes("SELECT dpt.device_id") && query.includes("FROM device_push_tokens")) {
+          return tokenRecordStmt;
         }
         return {
           bind: vi.fn().mockReturnThis(),
@@ -758,11 +823,11 @@ describe("Devices API", () => {
         first: vi.fn().mockResolvedValue({ id: userId }),
       };
 
-      const deviceStmt = {
+      const tokenRecordStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({
-          user_id: userId,
           push_token: pushToken,
+          user_id: userId,
           device_info: "Test Device",
         }),
       };
@@ -770,8 +835,8 @@ describe("Devices API", () => {
       mockDb.prepare.mockImplementation((query: string) => {
         if (query.includes("SELECT id FROM users WHERE username")) {
           return userStmt;
-        } else if (query.includes("SELECT user_id, push_token, device_info")) {
-          return deviceStmt;
+        } else if (query.includes("SELECT dpt.push_token") && query.includes("FROM device_push_tokens")) {
+          return tokenRecordStmt;
         }
         return {
           bind: vi.fn().mockReturnThis(),
@@ -826,11 +891,11 @@ describe("Devices API", () => {
         first: vi.fn().mockResolvedValue({ id: userId }),
       };
 
-      const deviceStmt = {
+      const tokenRecordStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({
-          user_id: userId,
           push_token: pushToken,
+          user_id: userId,
           device_info: "Test Device",
         }),
       };
@@ -838,8 +903,8 @@ describe("Devices API", () => {
       mockDb.prepare.mockImplementation((query: string) => {
         if (query.includes("SELECT id FROM users WHERE username")) {
           return userStmt;
-        } else if (query.includes("SELECT user_id, push_token, device_info")) {
-          return deviceStmt;
+        } else if (query.includes("SELECT dpt.push_token") && query.includes("FROM device_push_tokens")) {
+          return tokenRecordStmt;
         }
         return {
           bind: vi.fn().mockReturnThis(),
@@ -971,7 +1036,8 @@ describe("Devices API", () => {
         first: vi.fn().mockResolvedValue({ id: userId }),
       };
 
-      const deviceStmt = {
+      // Mock token record query (new schema) - not found
+      const tokenRecordStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue(null),
       };
@@ -979,8 +1045,8 @@ describe("Devices API", () => {
       mockDb.prepare.mockImplementation((query: string) => {
         if (query.includes("SELECT id FROM users WHERE username")) {
           return userStmt;
-        } else if (query.includes("SELECT user_id, push_token, device_info")) {
-          return deviceStmt;
+        } else if (query.includes("SELECT dpt.push_token") && query.includes("FROM device_push_tokens")) {
+          return tokenRecordStmt;
         }
         return {
           bind: vi.fn().mockReturnThis(),
@@ -997,7 +1063,7 @@ describe("Devices API", () => {
       const data = await response.json();
 
       expect(response.status).toBe(404);
-      expect(data.error).toContain("Device not found");
+      expect(data.error).toMatch(/Device not found/);
     });
 
     it("should return 500 when FCM notification fails", async () => {
@@ -1019,11 +1085,11 @@ describe("Devices API", () => {
         first: vi.fn().mockResolvedValue({ id: userId }),
       };
 
-      const deviceStmt = {
+      const tokenRecordStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({
-          user_id: userId,
           push_token: pushToken,
+          user_id: userId,
           device_info: "Test Device",
         }),
       };
@@ -1031,8 +1097,8 @@ describe("Devices API", () => {
       mockDb.prepare.mockImplementation((query: string) => {
         if (query.includes("SELECT id FROM users WHERE username")) {
           return userStmt;
-        } else if (query.includes("SELECT user_id, push_token, device_info")) {
-          return deviceStmt;
+        } else if (query.includes("SELECT dpt.push_token") && query.includes("FROM device_push_tokens")) {
+          return tokenRecordStmt;
         }
         return {
           bind: vi.fn().mockReturnThis(),

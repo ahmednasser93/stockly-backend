@@ -1,0 +1,16 @@
+flowchart TD
+    A[Mobile App] -->|POST /v1/api/push-token| B[registerPushToken]
+    B --> C{Device Exists?}
+    C -->|No| D[Create Device]
+    C -->|Yes| E[Update Device]
+    D --> F{Push Token Exists?}
+    E --> F
+    F -->|No| G[Create Push Token]
+    F -->|Yes| H[Update Push Token]
+    G --> I[Return Success]
+    H --> I
+    
+    J[Notification System] -->|Get Tokens| K[Query device_push_tokens]
+    K --> L[Join with devices]
+    L --> M[Filter by is_active]
+    M --> N[Send Notifications]
