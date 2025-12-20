@@ -63,7 +63,7 @@ export async function getAllDevices(
     let rows: { results?: Array<any> } | null = null;
     if (username === null) {
       // Admin: get all devices including those without usernames (unregistered devices)
-      // Use upt.username directly from user_push_tokens table (more reliable than JOIN)
+      // Use COALESCE to prefer upt.username, but fall back to u.username from JOIN
       try {
         rows = await env.stockly
           .prepare(
@@ -74,8 +74,9 @@ export async function getAllDevices(
                upt.device_type,
                upt.created_at, 
                upt.updated_at,
-               upt.username
+               COALESCE(upt.username, u.username) as username
              FROM user_push_tokens upt
+             LEFT JOIN users u ON upt.user_id = u.id
              ORDER BY upt.updated_at DESC`
           )
           .all<{
@@ -89,7 +90,7 @@ export async function getAllDevices(
           }>();
       } catch (error) {
         // If device_type or username column doesn't exist, select without them
-        if (error instanceof Error && (error.message.includes('device_type') || error.message.includes('username'))) {
+        if (error instanceof Error && (error.message.includes('device_type') || error.message.includes('username') || error.message.includes('COALESCE'))) {
           try {
             rows = await env.stockly
               .prepare(
@@ -99,8 +100,9 @@ export async function getAllDevices(
                    upt.device_info, 
                    upt.created_at, 
                    upt.updated_at,
-                   upt.username
+                   u.username
                  FROM user_push_tokens upt
+                 LEFT JOIN users u ON upt.user_id = u.id
                  ORDER BY upt.updated_at DESC`
               )
               .all<{
@@ -113,51 +115,26 @@ export async function getAllDevices(
               }>();
           } catch (fallbackError) {
             // If even device_info doesn't exist, use minimal query
-            // If username doesn't exist, fall back to JOIN with users table
             if (fallbackError instanceof Error && fallbackError.message.includes('device_info')) {
-              try {
-                rows = await env.stockly
-                  .prepare(
-                    `SELECT 
-                       upt.user_id, 
-                       upt.push_token, 
-                       upt.created_at, 
-                       upt.updated_at,
-                       u.username
-                     FROM user_push_tokens upt
-                     LEFT JOIN users u ON upt.user_id = u.id
-                     ORDER BY upt.updated_at DESC`
-                  )
-                  .all<{
-                    user_id: string;
-                    push_token: string;
-                    created_at: string;
-                    updated_at: string;
-                    username: string | null;
-                  }>();
-              } catch (usernameError) {
-                // If username column doesn't exist in users table either, use NULL
-                rows = await env.stockly
-                  .prepare(
-                    `SELECT 
-                       upt.user_id, 
-                       upt.push_token, 
-                       upt.created_at, 
-                       upt.updated_at
-                     FROM user_push_tokens upt
-                     ORDER BY upt.updated_at DESC`
-                  )
-                  .all<{
-                    user_id: string;
-                    push_token: string;
-                    created_at: string;
-                    updated_at: string;
-                  }>();
-                // Add null username to all rows
-                if (rows?.results) {
-                  rows.results = rows.results.map((r: any) => ({ ...r, username: null }));
-                }
-              }
+              rows = await env.stockly
+                .prepare(
+                  `SELECT 
+                     upt.user_id, 
+                     upt.push_token, 
+                     upt.created_at, 
+                     upt.updated_at,
+                     COALESCE(upt.username, u.username) as username
+                   FROM user_push_tokens upt
+                   LEFT JOIN users u ON upt.user_id = u.id
+                   ORDER BY upt.updated_at DESC`
+                )
+                .all<{
+                  user_id: string;
+                  push_token: string;
+                  created_at: string;
+                  updated_at: string;
+                  username: string | null;
+                }>();
             } else {
               throw fallbackError;
             }
@@ -177,7 +154,7 @@ export async function getAllDevices(
       }
     } else {
       // Regular user: filter by username
-      // Use upt.username directly from user_push_tokens table
+      // Use COALESCE to prefer upt.username, but fall back to u.username from JOIN
       try {
         rows = await env.stockly
           .prepare(
@@ -188,9 +165,10 @@ export async function getAllDevices(
                upt.device_type,
                upt.created_at, 
                upt.updated_at,
-               upt.username
+               COALESCE(upt.username, u.username) as username
              FROM user_push_tokens upt
-             WHERE upt.username = ?
+             LEFT JOIN users u ON upt.user_id = u.id
+             WHERE COALESCE(upt.username, u.username) = ?
              ORDER BY upt.updated_at DESC`
           )
           .bind(username)
@@ -205,7 +183,7 @@ export async function getAllDevices(
           }>();
       } catch (error) {
         // If device_type or username column doesn't exist, select without them
-        if (error instanceof Error && (error.message.includes('device_type') || error.message.includes('username'))) {
+        if (error instanceof Error && (error.message.includes('device_type') || error.message.includes('username') || error.message.includes('COALESCE'))) {
           try {
             rows = await env.stockly
               .prepare(
@@ -215,9 +193,10 @@ export async function getAllDevices(
                    upt.device_info, 
                    upt.created_at, 
                    upt.updated_at,
-                   upt.username
+                   u.username
                  FROM user_push_tokens upt
-                 WHERE upt.username = ?
+                 LEFT JOIN users u ON upt.user_id = u.id
+                 WHERE u.username = ?
                  ORDER BY upt.updated_at DESC`
               )
               .bind(username)
@@ -231,55 +210,28 @@ export async function getAllDevices(
               }>();
           } catch (fallbackError) {
             // If even device_info doesn't exist, use minimal query
-            // If username doesn't exist, fall back to JOIN with users table
             if (fallbackError instanceof Error && fallbackError.message.includes('device_info')) {
-              try {
-                rows = await env.stockly
-                  .prepare(
-                    `SELECT 
-                       upt.user_id, 
-                       upt.push_token, 
-                       upt.created_at, 
-                       upt.updated_at,
-                       u.username
-                     FROM user_push_tokens upt
-                     LEFT JOIN users u ON upt.user_id = u.id
-                     WHERE u.username = ?
-                     ORDER BY upt.updated_at DESC`
-                  )
-                  .bind(username)
-                  .all<{
-                    user_id: string;
-                    push_token: string;
-                    created_at: string;
-                    updated_at: string;
-                    username: string | null;
-                  }>();
-              } catch (usernameError) {
-                // If username column doesn't exist in users table either, use NULL
-                rows = await env.stockly
-                  .prepare(
-                    `SELECT 
-                       upt.user_id, 
-                       upt.push_token, 
-                       upt.created_at, 
-                       upt.updated_at
-                     FROM user_push_tokens upt
-                     WHERE upt.user_id = ?
-                     ORDER BY upt.updated_at DESC`
-                  )
-                  .bind(userId)
-                  .all<{
-                    user_id: string;
-                    push_token: string;
-                    created_at: string;
-                    updated_at: string;
-                  }>();
-                // Add null username to all rows
-                if (rows?.results) {
-                  rows.results = rows.results.map((r: any) => ({ ...r, username: null }));
-                }
-              }
+              rows = await env.stockly
+                .prepare(
+                  `SELECT 
+                     upt.user_id, 
+                     upt.push_token, 
+                     upt.created_at, 
+                     upt.updated_at,
+                     COALESCE(upt.username, u.username) as username
+                   FROM user_push_tokens upt
+                   LEFT JOIN users u ON upt.user_id = u.id
+                   WHERE COALESCE(upt.username, u.username) = ?
+                   ORDER BY upt.updated_at DESC`
+                )
+                .bind(username)
+                .all<{
+                  user_id: string;
+                  push_token: string;
+                  created_at: string;
+                  updated_at: string;
+                  username: string | null;
+                }>();
             } else {
               throw fallbackError;
             }

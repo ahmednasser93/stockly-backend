@@ -12,7 +12,7 @@ SELECT
     upt.push_token, 
     upt.device_info,
     upt.device_type,
-    u.username,
+    COALESCE(upt.username, u.username) as username,
     upt.created_at, 
     upt.updated_at
 FROM user_push_tokens upt

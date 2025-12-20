@@ -11,14 +11,14 @@ SELECT
     upt.push_token, 
     upt.device_info,
     upt.device_type,
-    u.username,
+    COALESCE(upt.username, u.username) as username,
     COUNT(DISTINCT a.id) as alert_count,
     COUNT(DISTINCT CASE WHEN a.status = 'active' THEN a.id END) as active_alert_count,
     upt.created_at, 
     upt.updated_at
 FROM user_push_tokens upt
 LEFT JOIN users u ON upt.user_id = u.id
-LEFT JOIN alerts a ON a.username = u.username
-GROUP BY upt.user_id, upt.push_token, upt.device_info, upt.device_type, u.username, upt.created_at, upt.updated_at
+LEFT JOIN alerts a ON a.username = COALESCE(upt.username, u.username)
+GROUP BY upt.user_id, upt.push_token, upt.device_info, upt.device_type, COALESCE(upt.username, u.username), upt.created_at, upt.updated_at
 ORDER BY upt.updated_at DESC;
 
