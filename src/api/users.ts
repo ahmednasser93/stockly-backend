@@ -3,9 +3,9 @@ import type { Env } from "../index";
 import { authenticateRequestWithAdmin } from "../auth/middleware";
 import { createErrorResponse } from "../auth/error-handler";
 import type { Logger } from "../logging/logger";
-import { listAlerts } from "../alerts/storage";
+import { createAlertService } from "../factories/createAlertService";
+import { createFavoriteStocksService } from "../factories/createFavoriteStocksService";
 import type { Device } from "./devices";
-import type { FavoriteStock } from "./favorite-stocks";
 
 export interface UserWithActivity {
   userId: string;
@@ -426,8 +426,9 @@ export async function getUserAlerts(
       return json({ error: "User not found" }, 404, request);
     }
 
-    // Get all alerts for this user
-    const alerts = await listAlerts(env, username);
+    // Get all alerts for this user using AlertService
+    const alertService = createAlertService(env, logger);
+    const alerts = await alertService.listAlerts(username);
 
     logger.info("Fetched user alerts", { username, count: alerts.length });
     return json({ alerts }, 200, request);
@@ -471,43 +472,17 @@ export async function getUserFavoriteStocks(
   }
 
   try {
-    // Verify user exists and get user_id
-    const user = await env.stockly
-      .prepare("SELECT id FROM users WHERE username = ?")
-      .bind(username)
-      .first<{ id: string }>();
-
-    if (!user) {
-      return json({ error: "User not found" }, 404, request);
-    }
-
-    // Get favorite stocks for this user
-    const rows = await env.stockly
-      .prepare(
-        `SELECT symbol, display_order, created_at, updated_at
-         FROM user_favorite_stocks
-         WHERE user_id = ?
-         ORDER BY display_order ASC, created_at ASC`
-      )
-      .bind(user.id)
-      .all<{
-        symbol: string;
-        display_order: number;
-        created_at: number;
-        updated_at: number;
-      }>();
-
-    const stocks: FavoriteStock[] = (rows.results || []).map((row) => ({
-      symbol: row.symbol,
-      displayOrder: row.display_order,
-      createdAt: new Date(row.created_at * 1000).toISOString(),
-      updatedAt: new Date(row.updated_at * 1000).toISOString(),
-    }));
+    // Use FavoriteStocksService to get favorite stocks
+    const favoriteStocksService = createFavoriteStocksService(env, logger);
+    const stocks = await favoriteStocksService.getFavoriteStocks(username);
 
     logger.info("Fetched user favorite stocks", { username, count: stocks.length });
     return json({ stocks }, 200, request);
   } catch (error) {
     logger.error("Failed to retrieve user favorite stocks", error, { username });
+    if (error instanceof Error && error.message.includes("User account not found")) {
+      return json({ error: "User not found" }, 404, request);
+    }
     return json({ error: "Failed to retrieve user favorite stocks" }, 500, request);
   }
 }

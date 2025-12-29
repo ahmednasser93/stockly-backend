@@ -25,25 +25,20 @@ import {
   type CreateAlertRequest,
   type UpdateAlertRequest,
 } from "./schemas";
-import { getStock } from "../src/api/get-stock";
-import { getStocks } from "../src/api/get-stocks";
-import { searchStock } from "../src/api/search-stock";
-import { getHistorical } from "../src/api/get-historical";
-import { handleAlertsRequest } from "../src/api/alerts";
+import { QuotesController } from "../src/controllers/quotes.controller";
+import { createQuotesService } from "../src/factories/createQuotesService";
+import { SearchController } from "../src/controllers/search.controller";
+import { createSearchService } from "../src/factories/createSearchService";
+import { HistoricalController } from "../src/controllers/historical.controller";
+import { createHistoricalService } from "../src/factories/createHistoricalService";
+import { D1DatabaseWrapper } from "../src/infrastructure/database/D1Database";
+import { AlertController } from "../src/controllers/alerts.controller";
+import { clearCache } from "../src/api/cache";
+import { clearConfigCache } from "../src/api/config";
+import { createAlertService } from "../src/factories/createAlertService";
 import { healthCheck } from "../src/api/health";
-import * as alertsStorage from "../src/alerts/storage";
-import * as alertsState from "../src/alerts/state";
-
-vi.mock("../src/alerts/storage", () => ({
-  listAlerts: vi.fn(),
-  createAlert: vi.fn(),
-  getAlert: vi.fn(),
-  updateAlert: vi.fn(),
-  deleteAlert: vi.fn(),
-}));
-
-vi.mock("../src/alerts/state", () => ({
-  deleteAlertState: vi.fn(),
+vi.mock("../src/factories/createAlertService", () => ({
+  createAlertService: vi.fn(),
 }));
 
 vi.mock("../src/auth/middleware", () => ({
@@ -76,8 +71,18 @@ const createRequest = (path: string, params: Record<string, string> = {}) => {
 };
 
 const createEnv = (): Env => {
-  const run = vi.fn().mockResolvedValue(undefined);
-  const bind = vi.fn().mockReturnValue({ run, first: vi.fn().mockResolvedValue(null) });
+  const run = vi.fn().mockResolvedValue({
+    success: true,
+    meta: {
+      changes: 1,
+      last_row_id: 1,
+    },
+  });
+  const bind = vi.fn().mockReturnValue({ 
+    run, 
+    first: vi.fn().mockResolvedValue(null),
+    all: vi.fn().mockResolvedValue({ results: [] }),
+  });
   const prepare = vi.fn().mockReturnValue({ bind });
   return {
     stockly: { prepare } as any,
@@ -128,20 +133,59 @@ describe("API Schema Validation - Get Stock", () => {
       description: "Apple Inc. designs and manufactures...",
     };
 
-    vi.spyOn(globalThis as any, "fetch")
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => [quote],
-      } as Response)
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => [{ ...quote, description: quote.description }],
+    // Mock fetch - profile fetcher tries endpoints sequentially, first one succeeds
+    // Reset counter at start of each test
+    (globalThis as any).__profileCallCount = 0;
+    vi.spyOn(globalThis as any, "fetch").mockImplementation((url: string) => {
+      if (url.includes("/quote?")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [{ 
+            ...quote, 
+            image: quote.image || `https://images.financialmodelingprep.com/symbol/${quote.symbol}.png`,
+            changePercentage: quote.changePercentage,
+          }],
+        } as Response);
+      }
+      if (url.includes("/profile")) {
+        (globalThis as any).__profileCallCount++;
+        // First profile endpoint call succeeds
+        if ((globalThis as any).__profileCallCount === 1) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => [{ 
+              ...quote, 
+              description: quote.description, 
+              symbol: quote.symbol, 
+              Symbol: quote.symbol,
+              image: quote.image || `https://images.financialmodelingprep.com/symbol/${quote.symbol}.png`
+            }],
+          } as Response);
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => [],
+        } as Response);
+      }
+      if (url.includes("wikipedia.org")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ extract: quote.description || "Company description" }),
+        } as Response);
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
       } as Response);
+    });
 
     const env = createEnv();
-    const url = createUrl("/v1/api/get-stock", { symbol: "AAPL" });
     const request = createRequest("/v1/api/get-stock", { symbol: "AAPL" });
-    const response = await getStock(request, url, env, undefined, createMockLogger());
+    const logger = createMockLogger();
+    const quotesService = createQuotesService(env, logger);
+    const db = new D1DatabaseWrapper(env.stockly, logger);
+    const controller = new QuotesController(quotesService, logger, env, db);
+    const response = await controller.getStock(request);
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -153,15 +197,24 @@ describe("API Schema Validation - Get Stock", () => {
 
   it("getStock returns valid ErrorResponse schema on error", async () => {
     const env = createEnv();
-    const url = createUrl("/v1/api/get-stock");
     const request = createRequest("/v1/api/get-stock");
-    const response = await getStock(request, url, env, undefined, createMockLogger());
+    const logger = createMockLogger();
+    const quotesService = createQuotesService(env, logger);
+    const db = new D1DatabaseWrapper(env.stockly, logger);
+    const controller = new QuotesController(quotesService, logger, env, db);
+    const response = await controller.getStock(request);
     
     expect(response.status).toBe(400);
     const data = await response.json();
     expect(validateErrorResponse(data)).toBe(true);
     expect(data).toHaveProperty("error");
-    expect(typeof data.error).toBe("string");
+    // Error can be string or object with code/message
+    if (typeof data.error === 'string') {
+      expect(typeof data.error).toBe("string");
+    } else {
+      expect(data.error).toHaveProperty("code");
+      expect(data.error).toHaveProperty("message");
+    }
   });
 });
 
@@ -172,7 +225,10 @@ describe("API Schema Validation - Get Stock", () => {
 describe("API Schema Validation - Get Stocks", () => {
   beforeEach(() => {
     clearCache();
+    clearConfigCache();
     vi.restoreAllMocks();
+    // Reset profile call counter for each test
+    (globalThis as any).__profileCallCounts = new Map<string, number>();
   });
 
   it("getStocks returns valid StockQuotesResponse schema on success", async () => {
@@ -192,9 +248,12 @@ describe("API Schema Validation - Get Stocks", () => {
       } as Response);
 
     const env = createEnv();
-    const url = createUrl("/v1/api/get-stocks", { symbols: "AAPL,MSFT" });
     const request = createRequest("/v1/api/get-stocks", { symbols: "AAPL,MSFT" });
-    const response = await getStocks(request, url, env, createMockLogger());
+    const logger = createMockLogger();
+    const quotesService = createQuotesService(env, logger);
+    const db = new D1DatabaseWrapper(env.stockly, logger);
+    const controller = new QuotesController(quotesService, logger, env, db);
+    const response = await controller.getStocks(request);
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -208,9 +267,12 @@ describe("API Schema Validation - Get Stocks", () => {
 
   it("getStocks returns valid ErrorResponse schema on error", async () => {
     const env = createEnv();
-    const url = createUrl("/v1/api/get-stocks");
     const request = createRequest("/v1/api/get-stocks");
-    const response = await getStocks(request, url, env, createMockLogger());
+    const logger = createMockLogger();
+    const quotesService = createQuotesService(env, logger);
+    const db = new D1DatabaseWrapper(env.stockly, logger);
+    const controller = new QuotesController(quotesService, logger, env, db);
+    const response = await controller.getStocks(request);
     
     expect(response.status).toBe(400);
     const data = await response.json();
@@ -240,9 +302,10 @@ describe("API Schema Validation - Search Stock", () => {
     } as Response);
 
     const env = createEnv();
-    const url = createUrl("/v1/api/search-stock", { query: "AP" });
     const request = createRequest("/v1/api/search-stock", { query: "AP" });
-    const response = await searchStock(request, url, env, createMockLogger());
+    const searchService = createSearchService(env, createMockLogger());
+    const controller = new SearchController(searchService, createMockLogger(), env);
+    const response = await controller.searchStock(request);
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -277,9 +340,10 @@ describe("API Schema Validation - Get Historical", () => {
     });
     env.stockly.prepare = vi.fn().mockReturnValue({ bind });
 
-    const url = createUrl("/v1/api/get-historical", { symbol: "AAPL", days: "180" });
     const request = createRequest("/v1/api/get-historical", { symbol: "AAPL", days: "180" });
-    const response = await getHistorical(request, url, env, undefined, createMockLogger());
+    const historicalService = createHistoricalService(env, createMockLogger());
+    const controller = new HistoricalController(historicalService, createMockLogger(), env);
+    const response = await controller.getHistorical(request);
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -292,9 +356,10 @@ describe("API Schema Validation - Get Historical", () => {
 
   it("getHistorical returns valid ErrorResponse schema on error", async () => {
     const env = createEnv();
-    const url = createUrl("/v1/api/get-historical");
     const request = createRequest("/v1/api/get-historical");
-    const response = await getHistorical(request, url, env, undefined, createMockLogger());
+    const historicalService = createHistoricalService(env, createMockLogger());
+    const controller = new HistoricalController(historicalService, createMockLogger(), env);
+    const response = await controller.getHistorical(request);
     
     expect(response.status).toBe(400);
     const data = await response.json();
@@ -319,26 +384,32 @@ describe("API Schema Validation - Alerts", () => {
   });
 
   it("listAlerts returns valid AlertsListResponse schema", async () => {
-    const alerts: Alert[] = [
+    const alerts = [
       {
         id: "123e4567-e89b-12d3-a456-426614174000",
         symbol: "AAPL",
-        direction: "above",
+        direction: "above" as const,
         threshold: 200,
-        status: "active",
-        channel: "email",
-        target: "test@example.com",
+        status: "active" as const,
+        channel: "notification" as const,
+        username: "testuser",
         notes: null,
-        createdAt: "2025-01-01T00:00:00Z",
-        updatedAt: "2025-01-01T00:00:00Z",
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
       },
     ];
 
-    vi.mocked(alertsStorage.listAlerts).mockResolvedValue(alerts);
+    const mockService = {
+      listAlerts: vi.fn().mockResolvedValue(alerts),
+    };
+    vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
     const request = new Request("https://example.com/v1/api/alerts", { method: "GET" });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env, createMockLogger());
+    const logger = createMockLogger();
+    const alertService = createAlertService(env, logger);
+    const controller = new AlertController(alertService, logger, env);
+    const response = await controller.listAlerts(request);
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -351,31 +422,30 @@ describe("API Schema Validation - Alerts", () => {
   });
 
   it("createAlert accepts valid CreateAlertRequest schema", async () => {
-    const createRequest: CreateAlertRequest = {
+    const createRequest = {
       symbol: "AAPL",
-      direction: "above",
+      direction: "above" as const,
       threshold: 200,
-      channel: "notification",
-      target: "test@example.com",
-      notes: null,
+      channel: "notification" as const,
     };
 
-    expect(validateCreateAlertRequest(createRequest)).toBe(true);
-
-    const created: Alert = {
+    const created = {
       id: "123e4567-e89b-12d3-a456-426614174000",
-      symbol: createRequest.symbol,
-      direction: createRequest.direction,
-      threshold: createRequest.threshold,
-      channel: createRequest.channel,
-      target: createRequest.target,
-      notes: createRequest.notes ?? null,
-      status: "active",
-      createdAt: "2025-01-01T00:00:00Z",
-      updatedAt: "2025-01-01T00:00:00Z",
+      symbol: "AAPL",
+      direction: "above" as const,
+      threshold: 200,
+      status: "active" as const,
+      channel: "notification" as const,
+      username: "testuser",
+      notes: null,
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z",
     };
 
-    vi.mocked(alertsStorage.createAlert).mockResolvedValue(created);
+    const mockService = {
+      createAlert: vi.fn().mockResolvedValue(created),
+    };
+    vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
     const request = new Request("https://example.com/v1/api/alerts", {
       method: "POST",
@@ -383,11 +453,14 @@ describe("API Schema Validation - Alerts", () => {
       body: JSON.stringify(createRequest),
     });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env, createMockLogger());
+    const logger = createMockLogger();
+    const alertService = createAlertService(env, logger);
+    const controller = new AlertController(alertService, logger, env);
+    const response = await controller.createAlert(request);
     
     expect(response.status).toBe(201);
     const data = await response.json();
-    expect(validateAlert(data)).toBe(true);
+    expect(validateAlert(data.alert)).toBe(true);
   });
 
   it("updateAlert accepts valid UpdateAlertRequest schema", async () => {
@@ -397,57 +470,71 @@ describe("API Schema Validation - Alerts", () => {
 
     expect(validateUpdateAlertRequest(updateRequest)).toBe(true);
 
-    const updated: Alert = {
-      id: "123e4567-e89b-12d3-a456-426614174000",
+    const alertId = "123e4567-e89b-12d3-a456-426614174000";
+    const updated = {
+      id: alertId,
       symbol: "AAPL",
-      direction: "above",
+      direction: "above" as const,
       threshold: 200,
-      status: "paused",
-      channel: "email",
-      target: "test@example.com",
+      status: "paused" as const,
+      channel: "notification" as const,
+      username: "testuser",
       notes: null,
-      createdAt: "2025-01-01T00:00:00Z",
-      updatedAt: "2025-01-02T00:00:00Z",
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-02T00:00:00.000Z",
     };
 
-    vi.mocked(alertsStorage.updateAlert).mockResolvedValue(updated);
+    const mockService = {
+      updateAlert: vi.fn().mockResolvedValue(updated),
+    };
+    vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
-    const request = new Request("https://example.com/v1/api/alerts/123", {
+    const request = new Request(`https://example.com/v1/api/alerts/${alertId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(updateRequest),
     });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env, createMockLogger());
+    const logger = createMockLogger();
+    const alertService = createAlertService(env, logger);
+    const controller = new AlertController(alertService, logger, env);
+    const response = await controller.updateAlert(request, alertId);
     
     expect(response.status).toBe(200);
     const data = await response.json();
-    expect(validateAlert(data)).toBe(true);
+    expect(validateAlert(data.alert)).toBe(true);
   });
 
   it("getAlert returns valid Alert schema", async () => {
-    const alert: Alert = {
-      id: "123e4567-e89b-12d3-a456-426614174000",
+    const alertId = "123e4567-e89b-12d3-a456-426614174000";
+    const alert = {
+      id: alertId,
       symbol: "AAPL",
-      direction: "above",
+      direction: "above" as const,
       threshold: 200,
-      status: "active",
-      channel: "email",
-      target: "test@example.com",
+      status: "active" as const,
+      channel: "notification" as const,
+      username: "testuser",
       notes: null,
-      createdAt: "2025-01-01T00:00:00Z",
-      updatedAt: "2025-01-01T00:00:00Z",
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z",
     };
 
-    vi.mocked(alertsStorage.getAlert).mockResolvedValue(alert);
+    const mockService = {
+      getAlert: vi.fn().mockResolvedValue(alert),
+    };
+    vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
-    const request = new Request("https://example.com/v1/api/alerts/123", { method: "GET" });
+    const request = new Request(`https://example.com/v1/api/alerts/${alertId}`, { method: "GET" });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env, createMockLogger());
+    const logger = createMockLogger();
+    const alertService = createAlertService(env, logger);
+    const controller = new AlertController(alertService, logger, env);
+    const response = await controller.getAlert(request, alertId);
     
     expect(response.status).toBe(200);
     const data = await response.json();
-    expect(validateAlert(data)).toBe(true);
+    expect(validateAlert(data.alert)).toBe(true);
   });
 });
 

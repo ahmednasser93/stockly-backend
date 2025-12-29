@@ -7,13 +7,19 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { healthCheck } from "../src/api/health";
-import { getStock } from "../src/api/get-stock";
-import { getStocks } from "../src/api/get-stocks";
-import { getStockDetailsRoute } from "../src/api/get-stock-details";
-import { getStockNews } from "../src/api/get-stock-news";
-import { searchStock } from "../src/api/search-stock";
-import { getHistorical } from "../src/api/get-historical";
-import { handleAlertsRequest } from "../src/api/alerts";
+import { QuotesController } from "../src/controllers/quotes.controller";
+import { createQuotesService } from "../src/factories/createQuotesService";
+import { D1DatabaseWrapper } from "../src/infrastructure/database/D1Database";
+import { StockController } from "../src/controllers/stocks.controller";
+import { createStockService } from "../src/factories/createStockService";
+import { NewsController } from "../src/controllers/news.controller";
+import { createNewsService } from "../src/factories/createNewsService";
+import { SearchController } from "../src/controllers/search.controller";
+import { createSearchService } from "../src/factories/createSearchService";
+import { HistoricalController } from "../src/controllers/historical.controller";
+import { createHistoricalService } from "../src/factories/createHistoricalService";
+import { AlertController } from "../src/controllers/alerts.controller";
+import { createAlertService } from "../src/factories/createAlertService";
 import { registerPushToken, getPushToken } from "../src/api/push-token";
 import { getPreferences, updatePreferences } from "../src/api/preferences";
 import { getSettings, updateSettings } from "../src/api/settings";
@@ -23,20 +29,29 @@ import { getConfigEndpoint, updateConfigEndpoint, simulateProviderFailureEndpoin
 import { getOpenApiSpec } from "../src/api/openapi";
 import { clearCache } from "../src/api/cache";
 import { clearConfigCache } from "../src/api/config";
-import * as alertsStorage from "../src/alerts/storage";
 import type { Env } from "../src/index";
 import { createMockLogger } from "./test-utils";
+import { validateErrorResponse } from "./schemas";
 
-vi.mock("../src/alerts/storage", () => ({
-  listAlerts: vi.fn(),
-  createAlert: vi.fn(),
-  getAlert: vi.fn(),
-  updateAlert: vi.fn(),
-  deleteAlert: vi.fn(),
+vi.mock("../src/factories/createAlertService", () => ({
+  createAlertService: vi.fn(),
 }));
 
-vi.mock("../src/alerts/state", () => ({
-  deleteAlertState: vi.fn(),
+// Don't mock these - let them create real services for integration tests
+// vi.mock("../src/factories/createQuotesService", () => ({
+//   createQuotesService: vi.fn(),
+// }));
+
+// vi.mock("../src/factories/createSearchService", () => ({
+//   createSearchService: vi.fn(),
+// }));
+
+// vi.mock("../src/factories/createHistoricalService", () => ({
+//   createHistoricalService: vi.fn(),
+// }));
+
+vi.mock("../src/factories/createNewsService", () => ({
+  createNewsService: vi.fn(),
 }));
 
 vi.mock("../src/auth/middleware", () => ({
@@ -71,7 +86,13 @@ const createRequest = (path: string, params: Record<string, string> = {}, init?:
 };
 
 const createEnv = (): Env => {
-  const run = vi.fn().mockResolvedValue(undefined);
+  const run = vi.fn().mockResolvedValue({
+    success: true,
+    meta: {
+      changes: 1,
+      last_row_id: 1,
+    },
+  });
   const first = vi.fn().mockResolvedValue(null);
   const all = vi.fn().mockResolvedValue({ results: [] });
   const bind = vi.fn().mockReturnValue({ 
@@ -113,6 +134,9 @@ describe("API - Get Single Stock", () => {
   beforeEach(() => {
     clearCache();
     clearConfigCache();
+    vi.restoreAllMocks();
+    // Reset profile call counter for each test
+    (globalThis as any).__profileCallCount = 0;
   });
 
   it("GET /v1/api/get-stock returns stock data with all required fields", async () => {
@@ -133,20 +157,56 @@ describe("API - Get Single Stock", () => {
       description: "Apple Inc. designs and manufactures...",
     };
 
-    vi.spyOn(globalThis as any, "fetch")
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => [mockQuote],
-      } as Response)
-      .mockResolvedValueOnce({
+    // Mock fetch - profile fetcher tries 4 endpoints sequentially, first one succeeds
+    // Reset counter at start of each test
+    (globalThis as any).__profileCallCount = 0;
+    vi.spyOn(globalThis as any, "fetch").mockImplementation((url: string) => {
+      if (url.includes("/quote?")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [mockQuote],
+        } as Response);
+      }
+      if (url.includes("/profile")) {
+        (globalThis as any).__profileCallCount++;
+        // First profile endpoint call succeeds (stops trying others)
+        if ((globalThis as any).__profileCallCount === 1) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => [{ 
+              ...mockQuote, 
+              description: mockQuote.description,
+              symbol: mockQuote.symbol,
+              Symbol: mockQuote.symbol,
+              image: mockQuote.image || `https://images.financialmodelingprep.com/symbol/${mockQuote.symbol}.png`,
+            }],
+          } as Response);
+        }
+        // Subsequent calls return empty (shouldn't happen, but handle gracefully)
+        return Promise.resolve({
+          ok: true,
+          json: async () => [],
+        } as Response);
+      }
+      if (url.includes("wikipedia.org")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ extract: mockQuote.description }),
+        } as Response);
+      }
+      return Promise.resolve({
         ok: false,
         status: 404,
       } as Response);
+    });
 
     const env = createEnv();
-    const url = createUrl("/v1/api/get-stock", { symbol: "AAPL" });
     const request = createRequest("/v1/api/get-stock", { symbol: "AAPL" });
-    const response = await getStock(request, url, env, undefined, createMockLogger());
+    const logger = createMockLogger();
+    const quotesService = createQuotesService(env, logger);
+    const db = new D1DatabaseWrapper(env.stockly, logger);
+    const controller = new QuotesController(quotesService, logger, env, db);
+    const response = await controller.getStock(request);
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -160,12 +220,21 @@ describe("API - Get Single Stock", () => {
 
   it("GET /v1/api/get-stock returns 400 when symbol is missing", async () => {
     const env = createEnv();
-    const url = createUrl("/v1/api/get-stock");
     const request = createRequest("/v1/api/get-stock");
-    const response = await getStock(request, url, env, undefined, createMockLogger());
+    const logger = createMockLogger();
+    const quotesService = createQuotesService(env, logger);
+    const db = new D1DatabaseWrapper(env.stockly, logger);
+    const controller = new QuotesController(quotesService, logger, env, db);
+    const response = await controller.getStock(request);
     expect(response.status).toBe(400);
     const data = await response.json();
-    expect(data.error).toContain("symbol");
+    expect(validateErrorResponse(data)).toBe(true);
+    // Error message should indicate missing required field (symbol)
+    if (typeof data.error === 'string') {
+      expect(data.error.toLowerCase()).toMatch(/symbol|required/);
+    } else if (data.error?.message) {
+      expect(data.error.message.toLowerCase()).toMatch(/symbol|required/);
+    }
   });
 });
 
@@ -173,6 +242,9 @@ describe("API - Get Multiple Stocks", () => {
   beforeEach(() => {
     clearCache();
     clearConfigCache();
+    vi.restoreAllMocks();
+    // Reset profile call counter for each test
+    (globalThis as any).__profileCallCounts = new Map<string, number>();
   });
 
   it("GET /v1/api/get-stocks returns array of stocks with all fields", async () => {
@@ -193,24 +265,64 @@ describe("API - Get Multiple Stocks", () => {
       },
     ];
 
-    let callCount = 0;
+    // Mock fetch - profile fetcher tries endpoints sequentially, first one succeeds per symbol
+    // Reset counter at start of each test
+    (globalThis as any).__profileCallCounts = new Map<string, number>();
     vi.spyOn(globalThis as any, "fetch").mockImplementation((url: string) => {
       if (url.includes("/quote?")) {
         const symbol = url.match(/symbol=([^&]+)/)?.[1];
-        const quote = mockQuotes.find(q => q.symbol === symbol);
-        callCount++;
+        const quote = mockQuotes.find(q => q.symbol === symbol?.toUpperCase());
+        if (!quote) {
+          return Promise.resolve({
+            ok: false,
+            status: 404,
+          } as Response);
+        }
         return Promise.resolve({
           ok: true,
-          json: async () => quote ? [quote] : [],
+          json: async () => [{ ...quote, image: quote.image || `https://images.financialmodelingprep.com/symbol/${quote.symbol}.png` }],
+        } as Response);
+      }
+      if (url.includes("/profile")) {
+        const symbol = url.match(/symbol=([^&]+)/)?.[1] || url.match(/profile\/([^?]+)/)?.[1] || "";
+        const callCount = ((globalThis as any).__profileCallCounts.get(symbol) || 0) + 1;
+        (globalThis as any).__profileCallCounts.set(symbol, callCount);
+        const quote = mockQuotes.find(q => q.symbol === symbol?.toUpperCase());
+        if (quote && callCount === 1) {
+          // First profile endpoint call for this symbol succeeds (stops trying others)
+          return Promise.resolve({
+            ok: true,
+            json: async () => [{ 
+              ...quote, 
+              description: `${quote.name} description`, 
+              symbol: quote.symbol,
+              Symbol: quote.symbol,
+              image: quote.image || `https://images.financialmodelingprep.com/symbol/${quote.symbol}.png`
+            }],
+          } as Response);
+        }
+        // Subsequent calls return empty (shouldn't happen, but handle gracefully)
+        return Promise.resolve({
+          ok: true,
+          json: async () => [],
+        } as Response);
+      }
+      if (url.includes("wikipedia.org")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ extract: "Company description" }),
         } as Response);
       }
       return Promise.resolve({ ok: false, status: 404 } as Response);
     });
 
     const env = createEnv();
-    const url = createUrl("/v1/api/get-stocks", { symbols: "AAPL,MSFT" });
     const request = createRequest("/v1/api/get-stocks", { symbols: "AAPL,MSFT" });
-    const response = await getStocks(request, url, env, createMockLogger());
+    const logger = createMockLogger();
+    const quotesService = createQuotesService(env, logger);
+    const db = new D1DatabaseWrapper(env.stockly, logger);
+    const controller = new QuotesController(quotesService, logger, env, db);
+    const response = await controller.getStocks(request);
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -226,12 +338,18 @@ describe("API - Get Multiple Stocks", () => {
 
   it("GET /v1/api/get-stocks returns 400 when symbols parameter is missing", async () => {
     const env = createEnv();
-    const url = createUrl("/v1/api/get-stocks");
     const request = createRequest("/v1/api/get-stocks");
-    const response = await getStocks(request, url, env, createMockLogger());
+    const logger = createMockLogger();
+    const quotesService = createQuotesService(env, logger);
+    const db = new D1DatabaseWrapper(env.stockly, logger);
+    const controller = new QuotesController(quotesService, logger, env, db);
+    const response = await controller.getStocks(request);
     expect(response.status).toBe(400);
     const data = await response.json();
-    expect(data.error).toContain("symbols");
+    expect(data.error).toBeDefined();
+    // Error can be either { code, message } or just a string
+    const errorMessage = typeof data.error === 'string' ? data.error : (data.error.message || data.error.code || '');
+    expect(errorMessage.toLowerCase()).toMatch(/symbols|required|invalid/i);
   });
 });
 
@@ -248,9 +366,10 @@ describe("API - Search Stocks", () => {
     } as Response);
 
     const env = createEnv();
-    const url = createUrl("/v1/api/search-stock", { query: "AP" });
     const request = createRequest("/v1/api/search-stock", { query: "AP" });
-    const response = await searchStock(request, url, env, createMockLogger());
+    const searchService = createSearchService(env, createMockLogger());
+    const controller = new SearchController(searchService, createMockLogger(), env);
+    const response = await controller.searchStock(request);
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -267,9 +386,11 @@ describe("API - Search Stocks", () => {
 
   it("GET /v1/api/search-stock returns empty array when query is missing", async () => {
     const env = createEnv();
-    const url = createUrl("/v1/api/search-stock");
     const request = createRequest("/v1/api/search-stock");
-    const response = await searchStock(request, url, env, createMockLogger());
+    const logger = createMockLogger();
+    const searchService = createSearchService(env, logger);
+    const controller = new SearchController(searchService, logger, env);
+    const response = await controller.searchStock(request);
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(Array.isArray(data)).toBe(true);
@@ -296,9 +417,11 @@ describe("API - Get Historical", () => {
     });
     env.stockly.prepare = vi.fn().mockReturnValue({ bind });
 
-    const url = createUrl("/v1/api/get-historical", { symbol: "AAPL", days: "180" });
     const request = createRequest("/v1/api/get-historical", { symbol: "AAPL", days: "180" });
-    const response = await getHistorical(request, url, env, undefined, createMockLogger());
+    const logger = createMockLogger();
+    const historicalService = createHistoricalService(env, logger);
+    const controller = new HistoricalController(historicalService, logger, env);
+    const response = await controller.getHistorical(request);
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -309,9 +432,11 @@ describe("API - Get Historical", () => {
 
   it("GET /v1/api/get-historical returns 400 when symbol is missing", async () => {
     const env = createEnv();
-    const url = createUrl("/v1/api/get-historical");
     const request = createRequest("/v1/api/get-historical");
-    const response = await getHistorical(request, url, env, undefined, createMockLogger());
+    const logger = createMockLogger();
+    const historicalService = createHistoricalService(env, logger);
+    const controller = new HistoricalController(historicalService, logger, env);
+    const response = await controller.getHistorical(request);
     expect(response.status).toBe(400);
   });
 });
@@ -338,25 +463,30 @@ describe("API - Alerts", () => {
   it("GET /v1/api/alerts lists all alerts", async () => {
     const mockAlerts = [
       {
-        id: "alert-123",
+        id: "550e8400-e29b-41d4-a716-446655440000",
         symbol: "AAPL",
         direction: "above" as const,
         threshold: 200,
         status: "active" as const,
         channel: "notification" as const,
-        target: "fcm-token-123",
         username: "testuser",
         notes: null,
-        createdAt: "2025-01-01T00:00:00Z",
-        updatedAt: "2025-01-01T00:00:00Z",
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
       },
     ];
 
-    vi.mocked(alertsStorage.listAlerts).mockResolvedValue(mockAlerts);
+    const mockService = {
+      listAlerts: vi.fn().mockResolvedValue(mockAlerts),
+    };
+    vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
     const request = new Request("https://example.com/v1/api/alerts", { method: "GET" });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env, createMockLogger());
+    const logger = createMockLogger();
+    const alertService = createAlertService(env, logger);
+    const controller = new AlertController(alertService, logger, env);
+    const response = await controller.listAlerts(request);
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -370,20 +500,25 @@ describe("API - Alerts", () => {
       direction: "above" as const,
       threshold: 200,
       channel: "notification" as const,
-      target: "fcm-token-123",
     };
 
     const createdAlert = {
-      id: "alert-123",
-      ...createRequest,
+      id: "550e8400-e29b-41d4-a716-446655440001",
+      symbol: "AAPL",
+      direction: "above" as const,
+      threshold: 200,
       status: "active" as const,
+      channel: "notification" as const,
       username: "testuser",
       notes: null,
-      createdAt: "2025-01-01T00:00:00Z",
-      updatedAt: "2025-01-01T00:00:00Z",
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z",
     };
 
-    vi.mocked(alertsStorage.createAlert).mockResolvedValue(createdAlert);
+    const mockService = {
+      createAlert: vi.fn().mockResolvedValue(createdAlert),
+    };
+    vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
     const request = new Request("https://example.com/v1/api/alerts", {
       method: "POST",
@@ -391,80 +526,102 @@ describe("API - Alerts", () => {
       body: JSON.stringify(createRequest),
     });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env, createMockLogger());
+    const logger = createMockLogger();
+    const alertService = createAlertService(env, logger);
+    const controller = new AlertController(alertService, logger, env);
+    const response = await controller.createAlert(request);
     
     expect(response.status).toBe(201);
     const data = await response.json();
-    expect(data.symbol).toBe("AAPL");
-    expect(data.threshold).toBe(200);
+    expect(data.alert.symbol).toBe("AAPL");
+    expect(data.alert.threshold).toBe(200);
   });
 
   it("GET /v1/api/alerts/:id gets a specific alert", async () => {
     const mockAlert = {
-      id: "alert-123",
+      id: "550e8400-e29b-41d4-a716-446655440002",
       symbol: "AAPL",
       direction: "above" as const,
       threshold: 200,
       status: "active" as const,
       channel: "notification" as const,
-      target: "fcm-token-123",
       username: "testuser",
       notes: null,
-      createdAt: "2025-01-01T00:00:00Z",
-      updatedAt: "2025-01-01T00:00:00Z",
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z",
     };
 
-    vi.mocked(alertsStorage.getAlert).mockResolvedValue(mockAlert);
+    const mockService = {
+      getAlert: vi.fn().mockResolvedValue(mockAlert),
+    };
+    vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
-    const request = new Request("https://example.com/v1/api/alerts/alert-123", { method: "GET" });
+    const alertId = "550e8400-e29b-41d4-a716-446655440002";
+    const request = new Request(`https://example.com/v1/api/alerts/${alertId}`, { method: "GET" });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env, createMockLogger());
+    const logger = createMockLogger();
+    const alertService = createAlertService(env, logger);
+    const controller = new AlertController(alertService, logger, env);
+    const response = await controller.getAlert(request, alertId);
     
     expect(response.status).toBe(200);
     const data = await response.json();
-    expect(data.id).toBe("alert-123");
+    expect(data.alert.id).toBe(alertId);
   });
 
   it("PUT /v1/api/alerts/:id updates an alert", async () => {
     const updateRequest = { status: "paused" as const };
 
     const updatedAlert = {
-      id: "alert-123",
+      id: "550e8400-e29b-41d4-a716-446655440003",
       symbol: "AAPL",
       direction: "above" as const,
       threshold: 200,
       status: "paused" as const,
       channel: "notification" as const,
-      target: "fcm-token-123",
       username: "testuser",
       notes: null,
-      createdAt: "2025-01-01T00:00:00Z",
-      updatedAt: "2025-01-02T00:00:00Z",
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-02T00:00:00.000Z",
     };
 
-    vi.mocked(alertsStorage.updateAlert).mockResolvedValue(updatedAlert);
+    const mockService = {
+      updateAlert: vi.fn().mockResolvedValue(updatedAlert),
+    };
+    vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
-    const request = new Request("https://example.com/v1/api/alerts/alert-123", {
+    const alertId = "550e8400-e29b-41d4-a716-446655440003";
+    const request = new Request(`https://example.com/v1/api/alerts/${alertId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(updateRequest),
     });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env, createMockLogger());
+    const logger = createMockLogger();
+    const alertService = createAlertService(env, logger);
+    const controller = new AlertController(alertService, logger, env);
+    const response = await controller.updateAlert(request, alertId);
     
     expect(response.status).toBe(200);
     const data = await response.json();
-    expect(data.status).toBe("paused");
+    expect(data.alert.status).toBe("paused");
   });
 
   it("DELETE /v1/api/alerts/:id deletes an alert", async () => {
-    vi.mocked(alertsStorage.deleteAlert).mockResolvedValue(true);
+    const mockService = {
+      deleteAlert: vi.fn().mockResolvedValue(undefined),
+    };
+    vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
-    const request = new Request("https://example.com/v1/api/alerts/alert-123", {
+    const alertId = "550e8400-e29b-41d4-a716-446655440004";
+    const request = new Request(`https://example.com/v1/api/alerts/${alertId}`, {
       method: "DELETE",
     });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env, createMockLogger());
+    const logger = createMockLogger();
+    const alertService = createAlertService(env, logger);
+    const controller = new AlertController(alertService, logger, env);
+    const response = await controller.deleteAlert(request, alertId);
     
     expect(response.status).toBe(200);
     const data = await response.json();

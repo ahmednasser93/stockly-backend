@@ -48,3 +48,4 @@ WHERE device_identifier IS NULL;
 -- Note: The old user_push_tokens table will remain for backward compatibility
 -- It can be removed in a future migration after verifying the new schema works correctly
 
+

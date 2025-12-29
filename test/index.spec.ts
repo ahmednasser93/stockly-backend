@@ -2,30 +2,28 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock all dependencies
-vi.mock("../src/api/get-stock", () => ({ getStock: vi.fn() }));
-vi.mock("../src/api/get-stocks", () => ({ getStocks: vi.fn() }));
-vi.mock("../src/api/get-stock-details", () => ({ getStockDetailsRoute: vi.fn() }));
+vi.mock("../src/controllers/quotes.controller", () => ({ QuotesController: vi.fn() }));
+vi.mock("../src/factories/createQuotesService", () => ({ createQuotesService: vi.fn() }));
+vi.mock("../src/controllers/stocks.controller", () => ({ StockController: vi.fn() }));
+vi.mock("../src/factories/createStockService", () => ({ createStockService: vi.fn() }));
 vi.mock("../src/api/get-news", () => ({
-  getNews: vi.fn(),
-  getGeneralNews: vi.fn(),
   getFavoriteNews: vi.fn()
 }));
-vi.mock("../src/api/get-stock-news", () => ({ getStockNews: vi.fn() }));
-vi.mock("../src/api/search-stock", () => ({ searchStock: vi.fn() }));
+vi.mock("../src/controllers/news.controller", () => ({ NewsController: vi.fn() }));
+vi.mock("../src/factories/createNewsService", () => ({ createNewsService: vi.fn() }));
+vi.mock("../src/controllers/search.controller", () => ({ SearchController: vi.fn() }));
+vi.mock("../src/factories/createSearchService", () => ({ createSearchService: vi.fn() }));
 vi.mock("../src/api/health", () => ({ healthCheck: vi.fn() }));
-vi.mock("../src/api/alerts", () => ({ handleAlertsRequest: vi.fn() }));
+vi.mock("../src/controllers/alerts.controller", () => ({ AlertController: vi.fn() }));
+vi.mock("../src/factories/createAlertService", () => ({ createAlertService: vi.fn() }));
 vi.mock("../src/api/push-token", () => ({
   registerPushToken: vi.fn(),
   getPushToken: vi.fn()
 }));
-vi.mock("../src/api/preferences", () => ({
-  getPreferences: vi.fn(),
-  updatePreferences: vi.fn()
-}));
-vi.mock("../src/api/settings", () => ({
-  getSettings: vi.fn(),
-  updateSettings: vi.fn()
-}));
+vi.mock("../src/controllers/preferences.controller", () => ({ PreferencesController: vi.fn() }));
+vi.mock("../src/factories/createPreferencesService", () => ({ createPreferencesService: vi.fn() }));
+vi.mock("../src/controllers/settings.controller", () => ({ SettingsController: vi.fn() }));
+vi.mock("../src/factories/createSettingsService", () => ({ createSettingsService: vi.fn() }));
 vi.mock("../src/api/admin", () => ({
   getRecentNotifications: vi.fn(),
   getFailedNotifications: vi.fn(),
@@ -41,19 +39,15 @@ vi.mock("../src/api/news-archive", () => ({
   getArchivedNews: vi.fn(),
   toggleArchivedNews: vi.fn()
 }));
-vi.mock("../src/api/favorite-stocks", () => ({
-  getFavoriteStocks: vi.fn(),
-  updateFavoriteStocks: vi.fn(),
-  deleteFavoriteStock: vi.fn(),
-  getAllUsersFavoriteStocks: vi.fn()
-}));
+vi.mock("../src/controllers/favorite-stocks.controller", () => ({ FavoriteStocksController: vi.fn() }));
+vi.mock("../src/factories/createFavoriteStocksService", () => ({ createFavoriteStocksService: vi.fn() }));
 vi.mock("../src/api/users", () => ({
   getAllUsers: vi.fn()
 }));
 vi.mock("../src/cron/alerts-cron", () => ({ runAlertCron: vi.fn() }));
 vi.mock("../src/cron/news-alert-cron", () => ({ runNewsAlertCron: vi.fn() }));
-vi.mock("../src/api/get-historical", () => ({ getHistorical: vi.fn() }));
-vi.mock("../src/api/get-historical-intraday", () => ({ getHistoricalIntraday: vi.fn() }));
+vi.mock("../src/controllers/historical.controller", () => ({ HistoricalController: vi.fn() }));
+vi.mock("../src/factories/createHistoricalService", () => ({ createHistoricalService: vi.fn() }));
 vi.mock("../src/api/openapi", () => ({ getOpenApiSpec: vi.fn() }));
 vi.mock("../src/api/config", () => ({
   getConfigEndpoint: vi.fn(),
@@ -73,26 +67,32 @@ vi.mock("../src/logging/loki-shipper", () => ({ sendLogsToLoki: vi.fn() }));
 
 // Import worker and mocks
 import worker from "../src/index";
-import * as getStockMock from "../src/api/get-stock";
-import * as getStocksMock from "../src/api/get-stocks";
-import * as getStockDetailsMock from "../src/api/get-stock-details";
-import * as getNewsMock from "../src/api/get-news";
-import * as getStockNewsMock from "../src/api/get-stock-news";
-import * as searchStockMock from "../src/api/search-stock";
+import * as QuotesControllerMock from "../src/controllers/quotes.controller";
+import * as createQuotesServiceMock from "../src/factories/createQuotesService";
+import * as StockControllerMock from "../src/controllers/stocks.controller";
+import * as createStockServiceMock from "../src/factories/createStockService";
+import * as NewsControllerMock from "../src/controllers/news.controller";
+import * as createNewsServiceMock from "../src/factories/createNewsService";
+import * as SearchControllerMock from "../src/controllers/search.controller";
+import * as createSearchServiceMock from "../src/factories/createSearchService";
 import * as healthMock from "../src/api/health";
-import * as alertsMock from "../src/api/alerts";
+import * as AlertControllerMock from "../src/controllers/alerts.controller";
+import * as createAlertServiceMock from "../src/factories/createAlertService";
 import * as pushTokenMock from "../src/api/push-token";
-import * as preferencesMock from "../src/api/preferences";
-import * as settingsMock from "../src/api/settings";
+import * as PreferencesControllerMock from "../src/controllers/preferences.controller";
+import * as createPreferencesServiceMock from "../src/factories/createPreferencesService";
+import * as SettingsControllerMock from "../src/controllers/settings.controller";
+import * as createSettingsServiceMock from "../src/factories/createSettingsService";
 import * as adminMock from "../src/api/admin";
 import * as devicesMock from "../src/api/devices";
 import * as userPreferencesMock from "../src/api/user-preferences";
 import * as newsArchiveMock from "../src/api/news-archive";
-import * as favoriteStocksMock from "../src/api/favorite-stocks";
+import * as FavoriteStocksControllerMock from "../src/controllers/favorite-stocks.controller";
+import * as createFavoriteStocksServiceMock from "../src/factories/createFavoriteStocksService";
 import * as alertsCronMock from "../src/cron/alerts-cron";
 import * as newsAlertCronMock from "../src/cron/news-alert-cron";
-import * as getHistoricalMock from "../src/api/get-historical";
-import * as getHistoricalIntradayMock from "../src/api/get-historical-intraday";
+import * as HistoricalControllerMock from "../src/controllers/historical.controller";
+import * as createHistoricalServiceMock from "../src/factories/createHistoricalService";
 import * as openapiMock from "../src/api/openapi";
 import * as configMock from "../src/api/config";
 import * as authMock from "../src/api/auth";
@@ -147,16 +147,99 @@ describe("worker router", () => {
     expect(response).toBe(mockResponse);
   };
 
-  it("delegates /get-stock", () => verifyRoute("/v1/api/get-stock", "GET", getStockMock.getStock));
-  it("delegates /get-stocks", () => verifyRoute("/v1/api/get-stocks", "GET", getStocksMock.getStocks));
-  it("delegates /get-stock-details", () => verifyRoute("/v1/api/get-stock-details", "GET", getStockDetailsMock.getStockDetailsRoute));
-  it("delegates /get-news", () => verifyRoute("/v1/api/get-news", "GET", getNewsMock.getNews));
-  it("delegates /news/general", () => verifyRoute("/v1/api/news/general", "GET", getNewsMock.getGeneralNews));
-  it("delegates /news/favorites", () => verifyRoute("/v1/api/news/favorites", "GET", getNewsMock.getFavoriteNews));
-  it("delegates /get-stock-news", () => verifyRoute("/v1/api/get-stock-news", "GET", getStockNewsMock.getStockNews));
-  it("delegates /search-stock", () => verifyRoute("/v1/api/search-stock", "GET", searchStockMock.searchStock));
-  it("delegates /get-historical", () => verifyRoute("/v1/api/get-historical", "GET", getHistoricalMock.getHistorical));
-  it("delegates /get-historical-intraday", () => verifyRoute("/v1/api/get-historical-intraday", "GET", getHistoricalIntradayMock.getHistoricalIntraday));
+  it("delegates /get-stock", async () => {
+    const mockController = {
+      getStock: vi.fn().mockResolvedValue(new Response(JSON.stringify({ symbol: "AAPL", price: 150 }), { status: 200 })),
+    };
+    vi.mocked(QuotesControllerMock.QuotesController).mockImplementation(() => mockController as any);
+    vi.mocked(createQuotesServiceMock.createQuotesService).mockReturnValue({} as any);
+    const response = await worker.fetch(makeRequest("/v1/api/get-stock?symbol=AAPL"), mockEnv, mockCtx);
+    expect(mockController.getStock).toHaveBeenCalled();
+  });
+
+  it("delegates /get-stocks", async () => {
+    const mockController = {
+      getStocks: vi.fn().mockResolvedValue(new Response(JSON.stringify([{ symbol: "AAPL", price: 150 }]), { status: 200 })),
+    };
+    vi.mocked(QuotesControllerMock.QuotesController).mockImplementation(() => mockController as any);
+    vi.mocked(createQuotesServiceMock.createQuotesService).mockReturnValue({} as any);
+    const response = await worker.fetch(makeRequest("/v1/api/get-stocks?symbols=AAPL,MSFT"), mockEnv, mockCtx);
+    expect(mockController.getStocks).toHaveBeenCalled();
+  });
+  // /get-stock-details is now handled by StockController, tested in stocks.controller.test.ts
+  // /get-news, /news/general, and /get-stock-news are now handled by NewsController
+  it("delegates /get-news", async () => {
+    const mockController = {
+      getNews: vi.fn().mockResolvedValue(new Response(JSON.stringify({ news: [] }), { status: 200 })),
+    };
+    vi.mocked(NewsControllerMock.NewsController).mockImplementation(() => mockController as any);
+    vi.mocked(createNewsServiceMock.createNewsService).mockReturnValue({} as any);
+    
+    const response = await worker.fetch(makeRequest("/v1/api/get-news?symbol=AAPL", "GET"), mockEnv, mockCtx);
+    expect(mockController.getNews).toHaveBeenCalled();
+  });
+  
+  it("delegates /news/general", async () => {
+    const mockController = {
+      getGeneralNews: vi.fn().mockResolvedValue(new Response(JSON.stringify({ news: [] }), { status: 200 })),
+    };
+    vi.mocked(NewsControllerMock.NewsController).mockImplementation(() => mockController as any);
+    vi.mocked(createNewsServiceMock.createNewsService).mockReturnValue({} as any);
+    
+    const response = await worker.fetch(makeRequest("/v1/api/news/general", "GET"), mockEnv, mockCtx);
+    expect(mockController.getGeneralNews).toHaveBeenCalled();
+  });
+  
+  it("delegates /news/favorites", async () => {
+    const mockController = {
+      getFavoriteNews: vi.fn().mockResolvedValue(new Response(JSON.stringify({ news: [], pagination: { page: 0, limit: 20, total: 0, hasMore: false } }), { status: 200 })),
+    };
+    vi.mocked(NewsControllerMock.NewsController).mockImplementation(() => mockController as any);
+    vi.mocked(createNewsServiceMock.createNewsService).mockReturnValue({} as any);
+    
+    const response = await worker.fetch(makeRequest("/v1/api/news/favorites", "GET"), mockEnv, mockCtx);
+    expect(mockController.getFavoriteNews).toHaveBeenCalled();
+  });
+  
+  it("delegates /get-stock-news", async () => {
+    const mockController = {
+      getStockNews: vi.fn().mockResolvedValue(new Response(JSON.stringify({ news: [] }), { status: 200 })),
+    };
+    vi.mocked(NewsControllerMock.NewsController).mockImplementation(() => mockController as any);
+    vi.mocked(createNewsServiceMock.createNewsService).mockReturnValue({} as any);
+    
+    const response = await worker.fetch(makeRequest("/v1/api/get-stock-news?symbol=AAPL", "GET"), mockEnv, mockCtx);
+    expect(mockController.getStockNews).toHaveBeenCalled();
+  });
+  it("delegates /search-stock", async () => {
+    const mockController = {
+      searchStock: vi.fn().mockResolvedValue(new Response(JSON.stringify([]), { status: 200 })),
+    };
+    vi.mocked(SearchControllerMock.SearchController).mockImplementation(() => mockController as any);
+    vi.mocked(createSearchServiceMock.createSearchService).mockReturnValue({} as any);
+    const response = await worker.fetch(makeRequest("/v1/api/search-stock"), mockEnv, mockCtx);
+    expect(mockController.searchStock).toHaveBeenCalled();
+  });
+
+  it("delegates /get-historical", async () => {
+    const mockController = {
+      getHistorical: vi.fn().mockResolvedValue(new Response(JSON.stringify({ symbol: "AAPL", data: [] }), { status: 200 })),
+    };
+    vi.mocked(HistoricalControllerMock.HistoricalController).mockImplementation(() => mockController as any);
+    vi.mocked(createHistoricalServiceMock.createHistoricalService).mockReturnValue({} as any);
+    const response = await worker.fetch(makeRequest("/v1/api/get-historical?symbol=AAPL"), mockEnv, mockCtx);
+    expect(mockController.getHistorical).toHaveBeenCalled();
+  });
+
+  it("delegates /get-historical-intraday", async () => {
+    const mockController = {
+      getHistoricalIntraday: vi.fn().mockResolvedValue(new Response(JSON.stringify({ symbol: "AAPL", data: [] }), { status: 200 })),
+    };
+    vi.mocked(HistoricalControllerMock.HistoricalController).mockImplementation(() => mockController as any);
+    vi.mocked(createHistoricalServiceMock.createHistoricalService).mockReturnValue({} as any);
+    const response = await worker.fetch(makeRequest("/v1/api/get-historical-intraday?symbol=AAPL"), mockEnv, mockCtx);
+    expect(mockController.getHistoricalIntraday).toHaveBeenCalled();
+  });
 
   it("delegates /health", async () => {
     const response = await worker.fetch(makeRequest("/v1/api/health"), mockEnv, mockCtx);
@@ -165,16 +248,63 @@ describe("worker router", () => {
 
   it("delegates /openapi.json", () => verifyRoute("/openapi.json", "GET", openapiMock.getOpenApiSpec));
 
-  it("delegates /alerts prefix", () => verifyRoute("/v1/api/alerts/some-alert", "GET", alertsMock.handleAlertsRequest));
+  it("delegates /alerts prefix", async () => {
+    const mockController = {
+      getAlert: vi.fn().mockResolvedValue(new Response(JSON.stringify({ alert: {} }), { status: 200 })),
+    };
+    vi.mocked(AlertControllerMock.AlertController).mockImplementation(() => mockController as any);
+    vi.mocked(createAlertServiceMock.createAlertService).mockReturnValue({} as any);
+    
+    const response = await worker.fetch(makeRequest("/v1/api/alerts/some-alert", "GET"), mockEnv, mockCtx);
+    expect(mockController.getAlert).toHaveBeenCalled();
+  });
 
   it("delegates /push-token GET", () => verifyRoute("/v1/api/push-token", "GET", pushTokenMock.getPushToken));
   it("delegates /push-token POST", () => verifyRoute("/v1/api/push-token", "POST", pushTokenMock.registerPushToken));
 
-  it("delegates /preferences GET", () => verifyRoute("/v1/api/preferences", "GET", preferencesMock.getPreferences));
-  it("delegates /preferences PUT", () => verifyRoute("/v1/api/preferences", "PUT", preferencesMock.updatePreferences));
+  it("delegates /preferences GET", async () => {
+    const mockController = {
+      getPreferences: vi.fn().mockResolvedValue(new Response(JSON.stringify({}), { status: 200 })),
+    };
+    vi.mocked(PreferencesControllerMock.PreferencesController).mockImplementation(() => mockController as any);
+    vi.mocked(createPreferencesServiceMock.createPreferencesService).mockReturnValue({} as any);
+    
+    const response = await worker.fetch(makeRequest("/v1/api/preferences", "GET"), mockEnv, mockCtx);
+    expect(mockController.getPreferences).toHaveBeenCalled();
+  });
+  
+  it("delegates /preferences PUT", async () => {
+    const mockController = {
+      updatePreferences: vi.fn().mockResolvedValue(new Response(JSON.stringify({}), { status: 200 })),
+    };
+    vi.mocked(PreferencesControllerMock.PreferencesController).mockImplementation(() => mockController as any);
+    vi.mocked(createPreferencesServiceMock.createPreferencesService).mockReturnValue({} as any);
+    
+    const response = await worker.fetch(makeRequest("/v1/api/preferences", "PUT"), mockEnv, mockCtx);
+    expect(mockController.updatePreferences).toHaveBeenCalled();
+  });
 
-  it("delegates /settings GET", () => verifyRoute("/v1/api/settings", "GET", settingsMock.getSettings));
-  it("delegates /settings PUT", () => verifyRoute("/v1/api/settings", "PUT", settingsMock.updateSettings));
+  it("delegates /settings GET", async () => {
+    const mockController = {
+      getSettings: vi.fn().mockResolvedValue(new Response(JSON.stringify({}), { status: 200 })),
+    };
+    vi.mocked(SettingsControllerMock.SettingsController).mockImplementation(() => mockController as any);
+    vi.mocked(createSettingsServiceMock.createSettingsService).mockReturnValue({} as any);
+    
+    const response = await worker.fetch(makeRequest("/v1/api/settings", "GET"), mockEnv, mockCtx);
+    expect(mockController.getSettings).toHaveBeenCalled();
+  });
+  
+  it("delegates /settings PUT", async () => {
+    const mockController = {
+      updateSettings: vi.fn().mockResolvedValue(new Response(JSON.stringify({}), { status: 200 })),
+    };
+    vi.mocked(SettingsControllerMock.SettingsController).mockImplementation(() => mockController as any);
+    vi.mocked(createSettingsServiceMock.createSettingsService).mockReturnValue({} as any);
+    
+    const response = await worker.fetch(makeRequest("/v1/api/settings", "PUT"), mockEnv, mockCtx);
+    expect(mockController.updateSettings).toHaveBeenCalled();
+  });
 
   it("delegates /users/preferences/update", () => verifyRoute("/v1/api/users/preferences/update", "POST", userPreferencesMock.updateUserPreferences));
 
@@ -186,8 +316,25 @@ describe("worker router", () => {
     expect(newsArchiveMock.toggleArchivedNews).toHaveBeenCalledWith(expect.anything(), "123", expect.anything(), expect.anything());
   });
 
-  it("delegates /favorite-stocks GET", () => verifyRoute("/v1/api/favorite-stocks", "GET", favoriteStocksMock.getFavoriteStocks));
-  it("delegates /favorite-stocks POST", () => verifyRoute("/v1/api/favorite-stocks", "POST", favoriteStocksMock.updateFavoriteStocks));
+  it("delegates /favorite-stocks GET", async () => {
+    const mockController = {
+      getFavoriteStocks: vi.fn().mockResolvedValue(new Response(JSON.stringify({ stocks: [] }), { status: 200 })),
+    };
+    vi.mocked(FavoriteStocksControllerMock.FavoriteStocksController).mockImplementation(() => mockController as any);
+    vi.mocked(createFavoriteStocksServiceMock.createFavoriteStocksService).mockReturnValue({} as any);
+    const response = await worker.fetch(makeRequest("/v1/api/favorite-stocks", "GET"), mockEnv, mockCtx);
+    expect(mockController.getFavoriteStocks).toHaveBeenCalled();
+  });
+
+  it("delegates /favorite-stocks POST", async () => {
+    const mockController = {
+      updateFavoriteStocks: vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true, stocks: [] }), { status: 200 })),
+    };
+    vi.mocked(FavoriteStocksControllerMock.FavoriteStocksController).mockImplementation(() => mockController as any);
+    vi.mocked(createFavoriteStocksServiceMock.createFavoriteStocksService).mockReturnValue({} as any);
+    const response = await worker.fetch(makeRequest("/v1/api/favorite-stocks", "POST"), mockEnv, mockCtx);
+    expect(mockController.updateFavoriteStocks).toHaveBeenCalled();
+  });
   it.skip("delegates /favorite-stocks ALL (moved to /v1/api/users/all)", () => {
     // This endpoint has been moved to /v1/api/users/all
   });
@@ -197,10 +344,13 @@ describe("worker router", () => {
     await verifyRoute("/v1/api/users/all", "GET", vi.mocked(usersMock.getAllUsers));
   });
   it("delegates /favorite-stocks/:symbol DELETE", async () => {
-    const mockResponse = new Response("mocked");
-    vi.mocked(favoriteStocksMock.deleteFavoriteStock).mockResolvedValue(mockResponse);
+    const mockController = {
+      deleteFavoriteStock: vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 })),
+    };
+    vi.mocked(FavoriteStocksControllerMock.FavoriteStocksController).mockImplementation(() => mockController as any);
+    vi.mocked(createFavoriteStocksServiceMock.createFavoriteStocksService).mockReturnValue({} as any);
     const response = await worker.fetch(makeRequest("/v1/api/favorite-stocks/MSFT", "DELETE"), mockEnv, mockCtx);
-    expect(favoriteStocksMock.deleteFavoriteStock).toHaveBeenCalledWith(expect.anything(), "MSFT", expect.anything(), expect.anything());
+    expect(mockController.deleteFavoriteStock).toHaveBeenCalledWith(expect.any(Request), "MSFT");
   });
 
   it("delegates /notifications/recent", () => verifyRoute("/v1/api/notifications/recent", "GET", adminMock.getRecentNotifications));

@@ -1,25 +1,31 @@
 import { json, CORS_HEADERS, getCorsHeaders } from "./util";
-import { getStock } from "./api/get-stock";
-import { getStocks } from "./api/get-stocks";
-import { getStockDetailsRoute } from "./api/get-stock-details";
-import { getNews, getGeneralNews, getFavoriteNews } from "./api/get-news";
-import { getStockNews } from "./api/get-stock-news";
-import { searchStock } from "./api/search-stock";
+import { createQuotesService } from "./factories/createQuotesService";
+import { QuotesController } from "./controllers/quotes.controller";
+import { createStockService } from "./factories/createStockService";
+import { StockController } from "./controllers/stocks.controller";
+import { createNewsService } from "./factories/createNewsService";
+import { NewsController } from "./controllers/news.controller";
+import { createSearchService } from "./factories/createSearchService";
+import { SearchController } from "./controllers/search.controller";
 import { healthCheck } from "./api/health";
-import { handleAlertsRequest } from "./api/alerts";
+import { createAlertService } from "./factories/createAlertService";
+import { AlertController } from "./controllers/alerts.controller";
 import { registerPushToken, getPushToken } from "./api/push-token";
-import { getPreferences, updatePreferences } from "./api/preferences";
-import { getSettings, updateSettings } from "./api/settings";
+import { createPreferencesService } from "./factories/createPreferencesService";
+import { PreferencesController } from "./controllers/preferences.controller";
+import { createSettingsService } from "./factories/createSettingsService";
+import { SettingsController } from "./controllers/settings.controller";
 import { getRecentNotifications, getFailedNotifications, retryNotification } from "./api/admin";
 import { getAllDevices, sendTestNotification, deleteDevice } from "./api/devices";
 import { updateUserPreferences } from "./api/user-preferences";
 import { getArchivedNews, toggleArchivedNews } from "./api/news-archive";
-import { getFavoriteStocks, updateFavoriteStocks, deleteFavoriteStock } from "./api/favorite-stocks";
+import { createFavoriteStocksService } from "./factories/createFavoriteStocksService";
+import { FavoriteStocksController } from "./controllers/favorite-stocks.controller";
 import { getAllUsers, getUserByUsername, getUserDevices, getUserAlerts, getUserFavoriteStocks } from "./api/users";
 import { runAlertCron } from "./cron/alerts-cron";
 import { runNewsAlertCron } from "./cron/news-alert-cron";
-import { getHistorical } from "./api/get-historical";
-import { getHistoricalIntraday } from "./api/get-historical-intraday";
+import { createHistoricalService } from "./factories/createHistoricalService";
+import { HistoricalController } from "./controllers/historical.controller";
 import { getOpenApiSpec } from "./api/openapi";
 import {
   getConfigEndpoint,
@@ -34,11 +40,14 @@ import {
   refreshToken,
   logout,
   getCurrentUser,
-} from "./api/auth";
+} from "./api/auth"
+import { createUserService } from "./factories/createUserService";
+import { UserController } from "./controllers/users.controller";;
 import { Logger, extractUserId } from "./logging/logger";
 import { sendLogsToLoki } from "./logging/loki-shipper";
 import { LoggedD1Database } from "./logging/d1-wrapper";
 import { LoggedKVNamespace } from "./logging/kv-wrapper";
+import { D1DatabaseWrapper } from "./infrastructure/database/D1Database";
 
 export interface Env {
   stockly: D1Database;
@@ -130,39 +139,93 @@ export default {
       } else if (pathname === "/v1/api/health") {
         response = healthCheck();
       } else if (pathname === "/v1/api/get-stock") {
-        response = await getStock(request, url, loggedEnv, ctx, logger);
+        const quotesService = createQuotesService(loggedEnv, logger);
+        const db = new D1DatabaseWrapper(loggedEnv.stockly, logger);
+        const controller = new QuotesController(quotesService, logger, loggedEnv, db);
+        response = await controller.getStock(request, ctx);
       } else if (pathname === "/v1/api/get-stocks") {
-        response = await getStocks(request, url, loggedEnv, logger);
+        const quotesService = createQuotesService(loggedEnv, logger);
+        const db = new D1DatabaseWrapper(loggedEnv.stockly, logger);
+        const controller = new QuotesController(quotesService, logger, loggedEnv, db);
+        response = await controller.getStocks(request);
       } else if (pathname === "/v1/api/get-stock-details") {
-        response = await getStockDetailsRoute(request, url, loggedEnv, ctx, logger);
+        const stockService = createStockService(loggedEnv, logger);
+        const controller = new StockController(stockService, logger, loggedEnv);
+        const symbol = url.searchParams.get("symbol");
+        if (!symbol) {
+          response = createErrorResponse("INVALID_INPUT", "symbol parameter required", undefined, 400, request).response;
+        } else {
+          response = await controller.getStockDetails(request, symbol);
+        }
       } else if (pathname === "/v1/api/get-news") {
-        response = await getNews(request, url, loggedEnv, logger);
+        const newsService = createNewsService(loggedEnv, logger);
+        const controller = new NewsController(newsService, logger, loggedEnv);
+        response = await controller.getNews(request);
       } else if (pathname === "/v1/api/news/general") {
-        response = await getGeneralNews(request, url, loggedEnv, logger);
+        const newsService = createNewsService(loggedEnv, logger);
+        const controller = new NewsController(newsService, logger, loggedEnv);
+        response = await controller.getGeneralNews(request);
       } else if (pathname === "/v1/api/news/favorites") {
-        response = await getFavoriteNews(request, url, loggedEnv, logger);
+        const newsService = createNewsService(loggedEnv, logger);
+        const controller = new NewsController(newsService, logger, loggedEnv);
+        response = await controller.getFavoriteNews(request);
       } else if (pathname === "/v1/api/get-stock-news") {
-        response = await getStockNews(request, url, loggedEnv, logger);
+        const newsService = createNewsService(loggedEnv, logger);
+        const controller = new NewsController(newsService, logger, loggedEnv);
+        response = await controller.getStockNews(request);
       } else if (pathname === "/v1/api/search-stock") {
-        response = await searchStock(request, url, loggedEnv, logger);
+        const searchService = createSearchService(loggedEnv, logger);
+        const controller = new SearchController(searchService, logger, loggedEnv);
+        response = await controller.searchStock(request);
       } else if (pathname === "/v1/api/get-historical") {
-        response = await getHistorical(request, url, loggedEnv, ctx, logger);
+        const historicalService = createHistoricalService(loggedEnv, logger);
+        const controller = new HistoricalController(historicalService, logger, loggedEnv);
+        response = await controller.getHistorical(request, ctx);
       } else if (pathname === "/v1/api/get-historical-intraday") {
-        response = await getHistoricalIntraday(request, url, loggedEnv, logger);
+        const historicalService = createHistoricalService(loggedEnv, logger);
+        const controller = new HistoricalController(historicalService, logger, loggedEnv);
+        response = await controller.getHistoricalIntraday(request);
       } else if (pathname.startsWith("/v1/api/alerts")) {
-        response = await handleAlertsRequest(request, loggedEnv, logger);
+        const alertService = createAlertService(loggedEnv, logger);
+        const controller = new AlertController(alertService, logger, loggedEnv);
+        
+        const url = new URL(request.url);
+        const pathSegments = url.pathname.slice("/v1/api/alerts".length).split("/").filter(Boolean);
+        const alertId = pathSegments[0];
+
+        if (request.method === "GET" && !alertId) {
+          response = await controller.listAlerts(request);
+        } else if (request.method === "GET" && alertId) {
+          response = await controller.getAlert(request, alertId);
+        } else if (request.method === "POST" && !alertId) {
+          response = await controller.createAlert(request);
+        } else if (request.method === "PUT" && alertId) {
+          response = await controller.updateAlert(request, alertId);
+        } else if (request.method === "DELETE" && alertId) {
+          response = await controller.deleteAlert(request, alertId);
+        } else {
+          response = createErrorResponse("METHOD_NOT_ALLOWED", "Method not allowed", undefined, 405, request).response;
+        }
       } else if (pathname === "/v1/api/push-token" && request.method === "GET") {
         response = await getPushToken(request, loggedEnv, logger);
       } else if (pathname === "/v1/api/push-token" && request.method === "POST") {
         response = await registerPushToken(request, loggedEnv, logger);
       } else if (pathname === "/v1/api/preferences" && request.method === "GET") {
-        response = await getPreferences(request, loggedEnv, logger);
+        const preferencesService = createPreferencesService(loggedEnv, logger);
+        const controller = new PreferencesController(preferencesService, logger, loggedEnv);
+        response = await controller.getPreferences(request);
       } else if (pathname === "/v1/api/preferences" && request.method === "PUT") {
-        response = await updatePreferences(request, loggedEnv, logger);
+        const preferencesService = createPreferencesService(loggedEnv, logger);
+        const controller = new PreferencesController(preferencesService, logger, loggedEnv);
+        response = await controller.updatePreferences(request);
       } else if (pathname === "/v1/api/settings" && request.method === "GET") {
-        response = await getSettings(request, loggedEnv, logger);
+        const settingsService = createSettingsService(loggedEnv, logger);
+        const controller = new SettingsController(settingsService, logger, loggedEnv);
+        response = await controller.getSettings(request);
       } else if (pathname === "/v1/api/settings" && request.method === "PUT") {
-        response = await updateSettings(request, loggedEnv, logger);
+        const settingsService = createSettingsService(loggedEnv, logger);
+        const controller = new SettingsController(settingsService, logger, loggedEnv);
+        response = await controller.updateSettings(request);
       } else if (pathname === "/v1/api/users/preferences/update" && request.method === "POST") {
         response = await updateUserPreferences(request, loggedEnv, logger);
       } else if (pathname === "/v1/api/news/archive" && request.method === "GET") {
@@ -171,12 +234,18 @@ export default {
         const articleId = pathname.split("/v1/api/news/archive/")[1];
         response = await toggleArchivedNews(request, articleId, loggedEnv, logger);
       } else if (pathname === "/v1/api/favorite-stocks" && request.method === "GET") {
-        response = await getFavoriteStocks(request, loggedEnv, logger);
+        const favoriteStocksService = createFavoriteStocksService(loggedEnv, logger);
+        const controller = new FavoriteStocksController(favoriteStocksService, logger, loggedEnv);
+        response = await controller.getFavoriteStocks(request);
       } else if (pathname === "/v1/api/favorite-stocks" && request.method === "POST") {
-        response = await updateFavoriteStocks(request, loggedEnv, logger);
+        const favoriteStocksService = createFavoriteStocksService(loggedEnv, logger);
+        const controller = new FavoriteStocksController(favoriteStocksService, logger, loggedEnv);
+        response = await controller.updateFavoriteStocks(request);
       } else if (pathname.startsWith("/v1/api/favorite-stocks/") && request.method === "DELETE") {
         const symbol = pathname.split("/v1/api/favorite-stocks/")[1];
-        response = await deleteFavoriteStock(request, symbol, loggedEnv, logger);
+        const favoriteStocksService = createFavoriteStocksService(loggedEnv, logger);
+        const controller = new FavoriteStocksController(favoriteStocksService, logger, loggedEnv);
+        response = await controller.deleteFavoriteStock(request, symbol);
       } else if (pathname === "/v1/api/users/all" && request.method === "GET") {
         response = await getAllUsers(request, loggedEnv, logger);
       } else if (pathname.startsWith("/v1/api/users/") && request.method === "GET") {
@@ -238,6 +307,14 @@ export default {
         response = await refreshToken(request, loggedEnv, logger);
       } else if (pathname === "/v1/api/auth/me" && request.method === "GET") {
         response = await getCurrentUser(request, loggedEnv, logger);
+      } else if (pathname === "/v1/api/users/profile" && request.method === "GET") {
+        const userService = createUserService(loggedEnv, logger);
+        const controller = new UserController(userService, logger, loggedEnv);
+        response = await controller.getProfile(request);
+      } else if (pathname === "/v1/api/users/profile" && request.method === "PUT") {
+        const userService = createUserService(loggedEnv, logger);
+        const controller = new UserController(userService, logger, loggedEnv);
+        response = await controller.updateProfile(request);
       } else if (pathname === "/v1/api/auth/logout" && request.method === "POST") {
         response = await logout(request, loggedEnv, logger);
       } else {

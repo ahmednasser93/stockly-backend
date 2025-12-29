@@ -1,8 +1,8 @@
 import { API_KEY, API_URL } from "../util";
 import type { Env } from "../index";
-import { listActiveAlerts } from "../alerts/storage";
 import { evaluateAlerts } from "../alerts/evaluate-alerts";
 import type { AlertRecord } from "../alerts/types";
+import type { Alert } from "@stockly/shared/types";
 import { sendFCMNotification } from "../notifications/fcm-sender";
 import { getConfig } from "../api/config";
 import {
@@ -12,6 +12,7 @@ import {
 } from "../alerts/state-cache";
 import { Logger } from "../logging/logger";
 import { sendLogsToLoki } from "../logging/loki-shipper";
+import { createAlertService } from "../factories/createAlertService";
 
 async function fetchQuote(symbol: string): Promise<number | null> {
   const endpoint = `${API_URL}/quote?symbol=${symbol}&apikey=${API_KEY}`;
@@ -62,7 +63,23 @@ export async function runAlertCron(env: Env, ctx?: ExecutionContext): Promise<vo
 
     logger.info("Starting alert evaluation cron job");
 
-    const alerts = await listActiveAlerts(env);
+    // Use new AlertRepository to get active alerts
+    const alertService = createAlertService(env, logger);
+    const allAlerts: Alert[] = await alertService.listAlerts(null); // null = admin, gets all alerts
+    const alerts: AlertRecord[] = allAlerts
+      .filter(alert => alert.status === 'active')
+      .map(alert => ({
+        id: alert.id,
+        symbol: alert.symbol,
+        direction: alert.direction,
+        threshold: alert.threshold,
+        status: alert.status,
+        channel: alert.channel,
+        notes: alert.notes,
+        username: alert.username,
+        createdAt: alert.createdAt,
+        updatedAt: alert.updatedAt,
+    })) as AlertRecord[];
     if (!alerts.length) {
       logger.info("No active alerts found");
       return;

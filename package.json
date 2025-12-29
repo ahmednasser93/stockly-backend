@@ -37,6 +37,8 @@
 		"wrangler": "^4.48.0"
 	},
 	"dependencies": {
-		"jose": "^6.1.3"
+		"@stockly/shared": "*",
+		"jose": "^6.1.3",
+		"zod": "^3.23.8"
 	}
 }

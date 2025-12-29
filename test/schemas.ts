@@ -179,7 +179,8 @@ export function validateAlert(data: any): data is Alert {
   if (typeof data.threshold !== "number") return false;
   if (!["active", "paused"].includes(data.status)) return false;
   if (!["email", "webhook", "notification"].includes(data.channel)) return false;
-  if (typeof data.target !== "string") return false;
+  // target field removed - now using username
+  if (data.username !== undefined && data.username !== null && typeof data.username !== "string") return false;
   if (data.notes !== null && typeof data.notes !== "string") return false;
   if (typeof data.createdAt !== "string") return false;
   if (typeof data.updatedAt !== "string") return false;
@@ -198,7 +199,7 @@ export function validateCreateAlertRequest(data: any): data is CreateAlertReques
   if (!["above", "below"].includes(data.direction)) return false;
   if (typeof data.threshold !== "number") return false;
   if (!["email", "webhook", "notification"].includes(data.channel)) return false;
-  if (typeof data.target !== "string") return false;
+  // target field removed - now using username (optional in request)
   return true;
 }
 
@@ -235,6 +236,16 @@ export function validateHealthCheckResponse(data: any): data is HealthCheckRespo
 }
 
 export function validateErrorResponse(data: any): data is ErrorResponse {
-  return data && typeof data === "object" && typeof data.error === "string";
+  if (!data || typeof data !== "object") return false;
+  // Support both old format (error as string) and new format (error as object with code and message)
+  if (typeof data.error === "string") {
+    return true; // Old format
+  }
+  if (data.error && typeof data.error === "object" &&
+      typeof data.error.code === "string" &&
+      typeof data.error.message === "string") {
+    return true; // New format
+  }
+  return false;
 }
 

@@ -71,3 +71,4 @@ UPDATE user_push_tokens SET device_type = 'unknown' WHERE device_type IS NULL;
 
 
 
+

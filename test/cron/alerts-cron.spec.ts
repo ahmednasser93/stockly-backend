@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { runAlertCron } from "../../src/cron/alerts-cron";
-import { listActiveAlerts } from "../../src/alerts/storage";
+import { createAlertService } from "../../src/factories/createAlertService";
 import { evaluateAlerts } from "../../src/alerts/evaluate-alerts";
 import { sendFCMNotification } from "../../src/notifications/fcm-sender";
 import { getConfig } from "../../src/api/config";
@@ -14,9 +14,10 @@ import { sendLogsToLoki } from "../../src/logging/loki-shipper";
 import type { Env } from "../../src/index";
 import type { AlertRecord } from "../../src/alerts/types";
 import type { AlertStateSnapshot } from "../../src/alerts/types";
+import type { Alert } from "@stockly/shared/types";
 
-vi.mock("../../src/alerts/storage", () => ({
-  listActiveAlerts: vi.fn(),
+vi.mock("../../src/factories/createAlertService", () => ({
+  createAlertService: vi.fn(),
 }));
 
 vi.mock("../../src/alerts/evaluate-alerts", () => ({
@@ -70,6 +71,22 @@ describe("Alert Cron Job", () => {
     updatedAt: "2025-01-01T00:00:00.000Z",
   };
 
+  // Helper function to convert AlertRecord[] to Alert[]
+  const toAlerts = (records: AlertRecord[]): Alert[] => {
+    return records.map(record => ({
+      id: record.id,
+      symbol: record.symbol,
+      direction: record.direction,
+      threshold: record.threshold,
+      status: record.status,
+      channel: record.channel,
+      notes: record.notes,
+      username: record.username,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    }));
+  };
+
   beforeEach(() => {
     mockDb = {
       prepare: vi.fn(),
@@ -110,24 +127,43 @@ describe("Alert Cron Job", () => {
 
       await runAlertCron(mockEnv, mockCtx);
 
-      expect(listActiveAlerts).not.toHaveBeenCalled();
+      expect(createAlertService).not.toHaveBeenCalled();
     });
 
     it("should skip cron if no active alerts found", async () => {
-      vi.mocked(listActiveAlerts).mockResolvedValue([]);
+      const mockService = {
+        listAlerts: vi.fn().mockResolvedValue([]),
+      };
+      vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
       await runAlertCron(mockEnv, mockCtx);
 
-      expect(listActiveAlerts).toHaveBeenCalledWith(mockEnv);
+      expect(createAlertService).toHaveBeenCalled();
+      expect(mockService.listAlerts).toHaveBeenCalledWith(null);
       expect(evaluateAlerts).not.toHaveBeenCalled();
     });
 
     it("should process alerts and send notifications", async () => {
       const alerts: AlertRecord[] = [baseAlert];
+      const allAlerts: Alert[] = [{
+        id: baseAlert.id,
+        symbol: baseAlert.symbol,
+        direction: baseAlert.direction,
+        threshold: baseAlert.threshold,
+        status: baseAlert.status,
+        channel: baseAlert.channel,
+        notes: baseAlert.notes,
+        username: baseAlert.username,
+        createdAt: baseAlert.createdAt,
+        updatedAt: baseAlert.updatedAt,
+      }];
       const priceBySymbol = { AAPL: 205 };
       const stateById: Record<string, AlertStateSnapshot> = {};
 
-      vi.mocked(listActiveAlerts).mockResolvedValue(alerts);
+      const mockService = {
+        listAlerts: vi.fn().mockResolvedValue(allAlerts),
+      };
+      vi.mocked(createAlertService).mockReturnValue(mockService as any);
       vi.mocked(global.fetch).mockResolvedValue({
         ok: true,
         json: async () => ({ price: 205 }),
@@ -167,9 +203,21 @@ describe("Alert Cron Job", () => {
 
       await runAlertCron(mockEnv, mockCtx);
 
-      expect(listActiveAlerts).toHaveBeenCalledWith(mockEnv);
+      expect(createAlertService).toHaveBeenCalled();
+      expect(mockService.listAlerts).toHaveBeenCalledWith(null);
       expect(evaluateAlerts).toHaveBeenCalledWith({
-        alerts,
+        alerts: expect.arrayContaining([
+          expect.objectContaining({
+            id: baseAlert.id,
+            symbol: baseAlert.symbol,
+            direction: baseAlert.direction,
+            threshold: baseAlert.threshold,
+            status: baseAlert.status,
+            channel: baseAlert.channel,
+            notes: baseAlert.notes,
+            username: baseAlert.username,
+          }),
+        ]),
         priceBySymbol,
         stateByAlertId: stateById,
         timestamp: expect.any(Number),
@@ -193,14 +241,29 @@ describe("Alert Cron Job", () => {
     });
 
     it("should handle fetch price failures gracefully", async () => {
-      const alerts: AlertRecord[] = [baseAlert];
+      const allAlerts: Alert[] = [{
+        id: baseAlert.id,
+        symbol: baseAlert.symbol,
+        direction: baseAlert.direction,
+        threshold: baseAlert.threshold,
+        status: baseAlert.status,
+        channel: baseAlert.channel,
+        notes: baseAlert.notes,
+        username: baseAlert.username,
+        createdAt: baseAlert.createdAt,
+        updatedAt: baseAlert.updatedAt,
+      }];
 
-      vi.mocked(listActiveAlerts).mockResolvedValue(alerts);
+      const mockService = {
+        listAlerts: vi.fn().mockResolvedValue(allAlerts),
+      };
+      vi.mocked(createAlertService).mockReturnValue(mockService as any);
       vi.mocked(global.fetch).mockRejectedValue(new Error("Network error"));
 
       await runAlertCron(mockEnv, mockCtx);
 
-      expect(listActiveAlerts).toHaveBeenCalledWith(mockEnv);
+      expect(createAlertService).toHaveBeenCalled();
+      expect(mockService.listAlerts).toHaveBeenCalledWith(null);
       expect(evaluateAlerts).not.toHaveBeenCalled();
     });
 
@@ -209,11 +272,25 @@ describe("Alert Cron Job", () => {
         ...baseAlert,
         target: "ExponentPushToken[123]",
       };
-      const alerts: AlertRecord[] = [expoAlert];
+      const allAlerts: Alert[] = [{
+        id: expoAlert.id,
+        symbol: expoAlert.symbol,
+        direction: expoAlert.direction,
+        threshold: expoAlert.threshold,
+        status: expoAlert.status,
+        channel: expoAlert.channel,
+        notes: expoAlert.notes,
+        username: expoAlert.username,
+        createdAt: expoAlert.createdAt,
+        updatedAt: expoAlert.updatedAt,
+      }];
       const priceBySymbol = { AAPL: 205 };
       const stateById: Record<string, AlertStateSnapshot> = {};
 
-      vi.mocked(listActiveAlerts).mockResolvedValue(alerts);
+      const mockService = {
+        listAlerts: vi.fn().mockResolvedValue(allAlerts),
+      };
+      vi.mocked(createAlertService).mockReturnValue(mockService as any);
       vi.mocked(global.fetch).mockResolvedValue({
         ok: true,
         json: async () => ({ price: 205 }),
@@ -265,10 +342,14 @@ describe("Alert Cron Job", () => {
 
     it("should log failed FCM notifications", async () => {
       const alerts: AlertRecord[] = [baseAlert];
+      const allAlerts: Alert[] = toAlerts(alerts);
       const priceBySymbol = { AAPL: 205 };
       const stateById: Record<string, AlertStateSnapshot> = {};
 
-      vi.mocked(listActiveAlerts).mockResolvedValue(alerts);
+      const mockService = {
+        listAlerts: vi.fn().mockResolvedValue(allAlerts),
+      };
+      vi.mocked(createAlertService).mockReturnValue(mockService as any);
       vi.mocked(global.fetch).mockResolvedValue({
         ok: true,
         json: async () => ({ price: 205 }),
@@ -318,10 +399,14 @@ describe("Alert Cron Job", () => {
 
     it("should handle FCM notification errors", async () => {
       const alerts: AlertRecord[] = [baseAlert];
+      const allAlerts: Alert[] = toAlerts(alerts);
       const priceBySymbol = { AAPL: 205 };
       const stateById: Record<string, AlertStateSnapshot> = {};
 
-      vi.mocked(listActiveAlerts).mockResolvedValue(alerts);
+      const mockService = {
+        listAlerts: vi.fn().mockResolvedValue(allAlerts),
+      };
+      vi.mocked(createAlertService).mockReturnValue(mockService as any);
       vi.mocked(global.fetch).mockResolvedValue({
         ok: true,
         json: async () => ({ price: 205 }),
@@ -379,10 +464,14 @@ describe("Alert Cron Job", () => {
         threshold: 300,
       };
       const alerts: AlertRecord[] = [baseAlert, alert2];
+      const allAlerts: Alert[] = toAlerts(alerts);
       const priceBySymbol = { AAPL: 205, MSFT: 310 };
       const stateById: Record<string, AlertStateSnapshot> = {};
 
-      vi.mocked(listActiveAlerts).mockResolvedValue(alerts);
+      const mockService = {
+        listAlerts: vi.fn().mockResolvedValue(allAlerts),
+      };
+      vi.mocked(createAlertService).mockReturnValue(mockService as any);
       vi.mocked(global.fetch)
         .mockResolvedValueOnce({
           ok: true,
@@ -443,8 +532,12 @@ describe("Alert Cron Job", () => {
 
     it("should skip when no prices available", async () => {
       const alerts: AlertRecord[] = [baseAlert];
+      const allAlerts: Alert[] = toAlerts(alerts);
 
-      vi.mocked(listActiveAlerts).mockResolvedValue(alerts);
+      const mockService = {
+        listAlerts: vi.fn().mockResolvedValue(allAlerts),
+      };
+      vi.mocked(createAlertService).mockReturnValue(mockService as any);
       vi.mocked(global.fetch).mockResolvedValue({
         ok: true,
         json: async () => ({ price: null }),
@@ -457,10 +550,14 @@ describe("Alert Cron Job", () => {
 
     it("should flush pending KV writes", async () => {
       const alerts: AlertRecord[] = [baseAlert];
+      const allAlerts: Alert[] = toAlerts(alerts);
       const priceBySymbol = { AAPL: 205 };
       const stateById: Record<string, AlertStateSnapshot> = {};
 
-      vi.mocked(listActiveAlerts).mockResolvedValue(alerts);
+      const mockService = {
+        listAlerts: vi.fn().mockResolvedValue(allAlerts),
+      };
+      vi.mocked(createAlertService).mockReturnValue(mockService as any);
       vi.mocked(global.fetch).mockResolvedValue({
         ok: true,
         json: async () => ({ price: 205 }),
@@ -486,10 +583,14 @@ describe("Alert Cron Job", () => {
 
     it("should send logs to Loki if configured", async () => {
       const alerts: AlertRecord[] = [baseAlert];
+      const allAlerts: Alert[] = toAlerts(alerts);
       const priceBySymbol = { AAPL: 205 };
       const stateById: Record<string, AlertStateSnapshot> = {};
 
-      vi.mocked(listActiveAlerts).mockResolvedValue(alerts);
+      const mockService = {
+        listAlerts: vi.fn().mockResolvedValue(allAlerts),
+      };
+      vi.mocked(createAlertService).mockReturnValue(mockService as any);
       vi.mocked(global.fetch).mockResolvedValue({
         ok: true,
         json: async () => ({ price: 205 }),
@@ -514,8 +615,12 @@ describe("Alert Cron Job", () => {
     it("should not send logs to Loki if not configured", async () => {
       mockEnv.LOKI_URL = undefined;
       const alerts: AlertRecord[] = [baseAlert];
+      const allAlerts: Alert[] = toAlerts(alerts);
 
-      vi.mocked(listActiveAlerts).mockResolvedValue(alerts);
+      const mockService = {
+        listAlerts: vi.fn().mockResolvedValue(allAlerts),
+      };
+      vi.mocked(createAlertService).mockReturnValue(mockService as any);
       vi.mocked(global.fetch).mockResolvedValue({
         ok: true,
         json: async () => ({ price: null }),
@@ -528,17 +633,24 @@ describe("Alert Cron Job", () => {
 
     it("should handle fatal errors and re-throw", async () => {
       const error = new Error("Fatal error");
-      vi.mocked(listActiveAlerts).mockRejectedValue(error);
+      const mockService = {
+        listAlerts: vi.fn().mockRejectedValue(error),
+      };
+      vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
       await expect(runAlertCron(mockEnv, mockCtx)).rejects.toThrow("Fatal error");
     });
 
     it("should use default KV write interval if not in config", async () => {
       const alerts: AlertRecord[] = [baseAlert];
+      const allAlerts: Alert[] = toAlerts(alerts);
       const priceBySymbol = { AAPL: 205 };
       const stateById: Record<string, AlertStateSnapshot> = {};
 
-      vi.mocked(listActiveAlerts).mockResolvedValue(alerts);
+      const mockService = {
+        listAlerts: vi.fn().mockResolvedValue(allAlerts),
+      };
+      vi.mocked(createAlertService).mockReturnValue(mockService as any);
       vi.mocked(global.fetch).mockResolvedValue({
         ok: true,
         json: async () => ({ price: 205 }),
@@ -559,10 +671,14 @@ describe("Alert Cron Job", () => {
 
     it("should handle array response from quote API", async () => {
       const alerts: AlertRecord[] = [baseAlert];
+      const allAlerts: Alert[] = toAlerts(alerts);
       const priceBySymbol = { AAPL: 205 };
       const stateById: Record<string, AlertStateSnapshot> = {};
 
-      vi.mocked(listActiveAlerts).mockResolvedValue(alerts);
+      const mockService = {
+        listAlerts: vi.fn().mockResolvedValue(allAlerts),
+      };
+      vi.mocked(createAlertService).mockReturnValue(mockService as any);
       vi.mocked(global.fetch).mockResolvedValue({
         ok: true,
         json: async () => [{ price: 205 }],

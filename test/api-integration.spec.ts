@@ -9,25 +9,31 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { getStock } from "../src/api/get-stock";
-import { getStocks } from "../src/api/get-stocks";
-import { searchStock } from "../src/api/search-stock";
-import { getHistorical } from "../src/api/get-historical";
-import { handleAlertsRequest } from "../src/api/alerts";
+import { QuotesController } from "../src/controllers/quotes.controller";
+import { createQuotesService } from "../src/factories/createQuotesService";
+import { SearchController } from "../src/controllers/search.controller";
+import { createSearchService } from "../src/factories/createSearchService";
+import { HistoricalController } from "../src/controllers/historical.controller";
+import { createHistoricalService } from "../src/factories/createHistoricalService";
+import { D1DatabaseWrapper } from "../src/infrastructure/database/D1Database";
+import { AlertController } from "../src/controllers/alerts.controller";
+import { createAlertService } from "../src/factories/createAlertService";
 import { healthCheck } from "../src/api/health";
 import { createMockLogger } from "./test-utils";
-import * as alertsStorage from "../src/alerts/storage";
-
-vi.mock("../src/alerts/storage", () => ({
-  listAlerts: vi.fn(),
-  createAlert: vi.fn(),
-  getAlert: vi.fn(),
-  updateAlert: vi.fn(),
-  deleteAlert: vi.fn(),
+vi.mock("../src/factories/createAlertService", () => ({
+  createAlertService: vi.fn(),
 }));
 
-vi.mock("../src/alerts/state", () => ({
-  deleteAlertState: vi.fn(),
+vi.mock("../src/factories/createQuotesService", () => ({
+  createQuotesService: vi.fn(),
+}));
+
+vi.mock("../src/factories/createSearchService", () => ({
+  createSearchService: vi.fn(),
+}));
+
+vi.mock("../src/factories/createHistoricalService", () => ({
+  createHistoricalService: vi.fn(),
 }));
 
 vi.mock("../src/auth/middleware", () => ({
@@ -69,7 +75,13 @@ const createRequest = (path: string, params: Record<string, string> = {}) => {
 };
 
 const createEnv = (): Env => {
-  const run = vi.fn().mockResolvedValue(undefined);
+  const run = vi.fn().mockResolvedValue({
+    success: true,
+    meta: {
+      changes: 1,
+      last_row_id: 1,
+    },
+  });
   const bind = vi.fn().mockReturnValue({ 
     run, 
     first: vi.fn().mockResolvedValue(null),
@@ -109,6 +121,10 @@ describe("API Integration - Get Stock", () => {
   beforeEach(() => {
     clearCache();
     vi.restoreAllMocks();
+    // Reset profileCallMap for each test
+    if (typeof (globalThis as any).profileCallMap !== 'undefined') {
+      (globalThis as any).profileCallMap = new Map();
+    }
   });
 
   it("successfully fetches and returns stock data with all required fields", async () => {
@@ -130,20 +146,61 @@ describe("API Integration - Get Stock", () => {
       description: "Apple Inc. designs and manufactures...",
     };
 
-    vi.spyOn(globalThis as any, "fetch")
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => [mockQuote],
-      } as Response)
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => [{ ...mockQuote, description: mockQuote.description }],
+    // Mock fetch for quote API, profile API, and Wikipedia API
+    const profileCallMap = new Map<string, number>();
+    vi.spyOn(globalThis as any, "fetch").mockImplementation((url: string) => {
+      if (url.includes("/quote?")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [{ 
+            ...mockQuote, 
+            image: mockQuote.image || `https://images.financialmodelingprep.com/symbol/${mockQuote.symbol}.png`
+          }],
+        } as Response);
+      }
+      if (url.includes("/profile")) {
+        const callKey = url;
+        const callCount = (profileCallMap.get(callKey) || 0) + 1;
+        profileCallMap.set(callKey, callCount);
+        if (callCount === 1) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => [{ 
+              ...mockQuote, 
+              description: mockQuote.description, 
+              symbol: mockQuote.symbol, 
+              Symbol: mockQuote.symbol,
+              image: mockQuote.image || `https://images.financialmodelingprep.com/symbol/${mockQuote.symbol}.png`
+            }],
+          } as Response);
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => [],
+        } as Response);
+      }
+      if (url.includes("wikipedia.org")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ extract: mockQuote.description || "Company description" }),
+        } as Response);
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
       } as Response);
+    });
 
     const env = createEnv();
-    const url = createUrl("/v1/api/get-stock", { symbol: "AAPL" });
     const request = createRequest("/v1/api/get-stock", { symbol: "AAPL" });
-    const response = await getStock(request, url, env, undefined, createMockLogger());
+    const logger = createMockLogger();
+    // Use real implementation (unmock for this test)
+    vi.doUnmock("../src/factories/createQuotesService");
+    const { createQuotesService: realCreateQuotesService } = await import("../src/factories/createQuotesService");
+    const quotesService = realCreateQuotesService(env, logger);
+    const db = new D1DatabaseWrapper(env.stockly, logger);
+    const controller = new QuotesController(quotesService, logger, env, db);
+    const response = await controller.getStock(request);
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -156,14 +213,26 @@ describe("API Integration - Get Stock", () => {
 
   it("returns error when symbol is missing", async () => {
     const env = createEnv();
-    const url = createUrl("/v1/api/get-stock");
     const request = createRequest("/v1/api/get-stock");
-    const response = await getStock(request, url, env, undefined, createMockLogger());
+    const logger = createMockLogger();
+    // Use real implementation (unmock for this test)
+    vi.doUnmock("../src/factories/createQuotesService");
+    const { createQuotesService: realCreateQuotesService } = await import("../src/factories/createQuotesService");
+    const quotesService = realCreateQuotesService(env, logger);
+    const db = new D1DatabaseWrapper(env.stockly, logger);
+    const controller = new QuotesController(quotesService, logger, env, db);
+    const response = await controller.getStock(request);
     
     expect(response.status).toBe(400);
     const data = await response.json();
     expect(validateErrorResponse(data)).toBe(true);
-    expect(data.error).toContain("symbol");
+    expect(data.error).toBeDefined();
+    // Error message should indicate missing required field (symbol)
+    if (typeof data.error === 'string') {
+      expect(data.error.toLowerCase()).toMatch(/symbol|required/);
+    } else if (data.error?.message) {
+      expect(data.error.message.toLowerCase()).toMatch(/symbol|required/);
+    }
   });
 
   it("uses cache when available", async () => {
@@ -184,9 +253,12 @@ describe("API Integration - Get Stock", () => {
     const fetchSpy = vi.spyOn(globalThis as any, "fetch");
 
     const env = createEnv();
-    const url = createUrl("/v1/api/get-stock", { symbol: "MSFT" });
     const request = createRequest("/v1/api/get-stock", { symbol: "MSFT" });
-    const response = await getStock(request, url, env, undefined, createMockLogger());
+    const logger = createMockLogger();
+    const quotesService = createQuotesService(env, logger);
+    const db = new D1DatabaseWrapper(env.stockly, logger);
+    const controller = new QuotesController(quotesService, logger, env, db);
+    const response = await controller.getStock(request);
     
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(response.status).toBe(200);
@@ -205,6 +277,8 @@ describe("API Integration - Get Stocks", () => {
     clearCache();
     clearConfigCache();
     vi.restoreAllMocks();
+    // Reset profile call counter for each test
+    (globalThis as any).__profileCallCounts = new Map<string, number>();
   });
 
   it("successfully fetches multiple stocks with all required fields", async () => {
@@ -239,37 +313,69 @@ describe("API Integration - Get Stocks", () => {
       },
     ];
 
-    // Mock fetch - need to handle multiple quote calls (one per symbol) and profile calls
-    let quoteCallCount = 0;
+    // Mock fetch - profile fetcher tries endpoints sequentially, first one succeeds per symbol
+    // Reset counter at start of each test
+    (globalThis as any).__profileCallCounts = new Map<string, number>();
     vi.spyOn(globalThis as any, "fetch")
       .mockImplementation((url: string) => {
         if (url.includes("/quote?")) {
-          // Each symbol gets its own quote call - return the appropriate quote
           const symbol = url.match(/symbol=([^&]+)/)?.[1];
-          const quote = mockQuotes.find(q => q.symbol === symbol);
-          quoteCallCount++;
+          const quote = mockQuotes.find(q => q.symbol === symbol?.toUpperCase());
           return Promise.resolve({
             ok: true,
-            json: async () => quote ? [quote] : [],
+            json: async () => quote ? [{ 
+              ...quote, 
+              image: quote.image || `https://images.financialmodelingprep.com/symbol/${quote.symbol}.png`,
+              changePercentage: quote.changePercent,
+            }] : [],
           } as Response);
         }
-        // Profile endpoint or Wikipedia - return empty or minimal data
+        // Profile endpoint - first call per symbol succeeds
+        if (url.includes("/profile")) {
+          const symbol = url.match(/symbol=([^&]+)/)?.[1] || url.match(/profile\/([^?]+)/)?.[1] || "";
+          const callCount = ((globalThis as any).__profileCallCounts.get(symbol) || 0) + 1;
+          (globalThis as any).__profileCallCounts.set(symbol, callCount);
+          const quote = mockQuotes.find(q => q.symbol === symbol?.toUpperCase());
+          if (quote && callCount === 1) {
+            return Promise.resolve({
+              ok: true,
+              json: async () => [{ 
+                ...quote, 
+                description: `${quote.name} description`, 
+                symbol: quote.symbol, 
+                Symbol: quote.symbol,
+                image: quote.image || `https://images.financialmodelingprep.com/symbol/${quote.symbol}.png`
+              }],
+            } as Response);
+          }
+          return Promise.resolve({
+            ok: true,
+            json: async () => [],
+          } as Response);
+        }
+        // Wikipedia - return description
         if (url.includes("wikipedia.org")) {
           return Promise.resolve({
-            ok: false,
+            ok: true,
+            json: async () => ({ extract: "Company description" }),
           } as Response);
         }
-        // Profile endpoint - return empty array (profile fetching will skip)
         return Promise.resolve({
-          ok: true,
-          json: async () => [],
+          ok: false,
+          status: 404,
         } as Response);
       });
 
     const env = createEnv();
-    const url = createUrl("/v1/api/get-stocks", { symbols: "AAPL,MSFT" });
     const request = createRequest("/v1/api/get-stocks", { symbols: "AAPL,MSFT" });
-    const response = await getStocks(request, url, env, createMockLogger());
+    const logger = createMockLogger();
+    // Use real implementation (unmock for this test)
+    vi.doUnmock("../src/factories/createQuotesService");
+    const { createQuotesService: realCreateQuotesService } = await import("../src/factories/createQuotesService");
+    const quotesService = realCreateQuotesService(env, logger);
+    const db = new D1DatabaseWrapper(env.stockly, logger);
+    const controller = new QuotesController(quotesService, logger, env, db);
+    const response = await controller.getStocks(request);
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -287,9 +393,15 @@ describe("API Integration - Get Stocks", () => {
 
   it("returns error when symbols parameter is missing", async () => {
     const env = createEnv();
-    const url = createUrl("/v1/api/get-stocks");
     const request = createRequest("/v1/api/get-stocks");
-    const response = await getStocks(request, url, env, createMockLogger());
+    const logger = createMockLogger();
+    // Use real implementation (unmock for this test)
+    vi.doUnmock("../src/factories/createQuotesService");
+    const { createQuotesService: realCreateQuotesService } = await import("../src/factories/createQuotesService");
+    const quotesService = realCreateQuotesService(env, logger);
+    const db = new D1DatabaseWrapper(env.stockly, logger);
+    const controller = new QuotesController(quotesService, logger, env, db);
+    const response = await controller.getStocks(request);
     
     expect(response.status).toBe(400);
     const data = await response.json();
@@ -298,9 +410,15 @@ describe("API Integration - Get Stocks", () => {
 
   it("handles empty symbols list", async () => {
     const env = createEnv();
-    const url = createUrl("/v1/api/get-stocks", { symbols: "" });
     const request = createRequest("/v1/api/get-stocks", { symbols: "" });
-    const response = await getStocks(request, url, env, createMockLogger());
+    const logger = createMockLogger();
+    // Use real implementation (unmock for this test)
+    vi.doUnmock("../src/factories/createQuotesService");
+    const { createQuotesService: realCreateQuotesService } = await import("../src/factories/createQuotesService");
+    const quotesService = realCreateQuotesService(env, logger);
+    const db = new D1DatabaseWrapper(env.stockly, logger);
+    const controller = new QuotesController(quotesService, logger, env, db);
+    const response = await controller.getStocks(request);
     
     expect(response.status).toBe(400);
     const data = await response.json();
@@ -330,9 +448,13 @@ describe("API Integration - Search Stock", () => {
     } as Response);
 
     const env = createEnv();
-    const url = createUrl("/v1/api/search-stock", { query: "AP" });
     const request = createRequest("/v1/api/search-stock", { query: "AP" });
-    const response = await searchStock(request, url, env, createMockLogger());
+    // Use real implementation (unmock for this test)
+    vi.doUnmock("../src/factories/createSearchService");
+    const { createSearchService: realCreateSearchService } = await import("../src/factories/createSearchService");
+    const searchService = realCreateSearchService(env, createMockLogger());
+    const controller = new SearchController(searchService, createMockLogger(), env);
+    const response = await controller.searchStock(request);
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -348,9 +470,13 @@ describe("API Integration - Search Stock", () => {
 
   it("returns empty array when query parameter is missing", async () => {
     const env = createEnv();
-    const url = createUrl("/v1/api/search-stock");
     const request = createRequest("/v1/api/search-stock");
-    const response = await searchStock(request, url, env, createMockLogger());
+    // Use real implementation (unmock for this test)
+    vi.doUnmock("../src/factories/createSearchService");
+    const { createSearchService: realCreateSearchService } = await import("../src/factories/createSearchService");
+    const searchService = realCreateSearchService(env, createMockLogger());
+    const controller = new SearchController(searchService, createMockLogger(), env);
+    const response = await controller.searchStock(request);
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -378,14 +504,27 @@ describe("API Integration - Get Historical", () => {
     };
 
     const env = createEnv();
+    const run = vi.fn().mockResolvedValue({
+      success: true,
+      meta: {
+        changes: 1,
+        last_row_id: 1,
+      },
+    });
     const bind = vi.fn().mockReturnValue({
+      run,
+      first: vi.fn().mockResolvedValue(null),
       all: vi.fn().mockResolvedValue(mockHistoricalData),
     });
     env.stockly.prepare = vi.fn().mockReturnValue({ bind });
 
-    const url = createUrl("/v1/api/get-historical", { symbol: "AAPL", days: "180" });
     const request = createRequest("/v1/api/get-historical", { symbol: "AAPL", days: "180" });
-    const response = await getHistorical(request, url, env, undefined, createMockLogger());
+    // Use real implementation (unmock for this test)
+    vi.doUnmock("../src/factories/createHistoricalService");
+    const { createHistoricalService: realCreateHistoricalService } = await import("../src/factories/createHistoricalService");
+    const historicalService = realCreateHistoricalService(env, createMockLogger());
+    const controller = new HistoricalController(historicalService, createMockLogger(), env);
+    const response = await controller.getHistorical(request);
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -398,9 +537,13 @@ describe("API Integration - Get Historical", () => {
 
   it("returns error when symbol is missing", async () => {
     const env = createEnv();
-    const url = createUrl("/v1/api/get-historical");
     const request = createRequest("/v1/api/get-historical");
-    const response = await getHistorical(request, url, env, undefined, createMockLogger());
+    // Use real implementation (unmock for this test)
+    vi.doUnmock("../src/factories/createHistoricalService");
+    const { createHistoricalService: realCreateHistoricalService } = await import("../src/factories/createHistoricalService");
+    const historicalService = realCreateHistoricalService(env, createMockLogger());
+    const controller = new HistoricalController(historicalService, createMockLogger(), env);
+    const response = await controller.getHistorical(request);
     
     expect(response.status).toBe(400);
     const data = await response.json();
@@ -409,9 +552,13 @@ describe("API Integration - Get Historical", () => {
 
   it("validates days parameter", async () => {
     const env = createEnv();
-    const url = createUrl("/v1/api/get-historical", { symbol: "AAPL", days: "0" });
     const request = createRequest("/v1/api/get-historical", { symbol: "AAPL", days: "0" });
-    const response = await getHistorical(request, url, env, undefined, createMockLogger());
+    // Use real implementation (unmock for this test)
+    vi.doUnmock("../src/factories/createHistoricalService");
+    const { createHistoricalService: realCreateHistoricalService } = await import("../src/factories/createHistoricalService");
+    const historicalService = realCreateHistoricalService(env, createMockLogger());
+    const controller = new HistoricalController(historicalService, createMockLogger(), env);
+    const response = await controller.getHistorical(request);
     
     // Should handle invalid days (0 or negative)
     expect([400, 500]).toContain(response.status);
@@ -445,18 +592,24 @@ describe("API Integration - Alerts", () => {
         threshold: 200,
         status: "active" as const,
         channel: "notification" as const,
-        target: "test@example.com",
+        username: "testuser",
         notes: null,
-        createdAt: "2025-01-01T00:00:00Z",
-        updatedAt: "2025-01-01T00:00:00Z",
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
       },
     ];
 
-    vi.mocked(alertsStorage.listAlerts).mockResolvedValue(mockAlerts);
+    const mockService = {
+      listAlerts: vi.fn().mockResolvedValue(mockAlerts),
+    };
+    vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
     const request = new Request("https://example.com/v1/api/alerts", { method: "GET" });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env, createMockLogger());
+    const logger = createMockLogger();
+    const alertService = createAlertService(env, logger);
+    const controller = new AlertController(alertService, logger, env);
+    const response = await controller.listAlerts(request);
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -471,19 +624,25 @@ describe("API Integration - Alerts", () => {
       direction: "above" as const,
       threshold: 200,
       channel: "notification" as const,
-      target: "test@example.com",
-      notes: null,
     };
 
     const createdAlert = {
       id: "123e4567-e89b-12d3-a456-426614174000",
-      ...createRequest,
+      symbol: "AAPL",
+      direction: "above" as const,
+      threshold: 200,
       status: "active" as const,
-      createdAt: "2025-01-01T00:00:00Z",
-      updatedAt: "2025-01-01T00:00:00Z",
+      channel: "notification" as const,
+      username: "testuser",
+      notes: null,
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z",
     };
 
-    vi.mocked(alertsStorage.createAlert).mockResolvedValue(createdAlert);
+    const mockService = {
+      createAlert: vi.fn().mockResolvedValue(createdAlert),
+    };
+    vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
     const request = new Request("https://example.com/v1/api/alerts", {
       method: "POST",
@@ -491,13 +650,16 @@ describe("API Integration - Alerts", () => {
       body: JSON.stringify(createRequest),
     });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env, createMockLogger());
+    const logger = createMockLogger();
+    const alertService = createAlertService(env, logger);
+    const controller = new AlertController(alertService, logger, env);
+    const response = await controller.createAlert(request);
     
     expect(response.status).toBe(201);
     const data = await response.json();
-    expect(validateAlert(data)).toBe(true);
-    expect(data.symbol).toBe("AAPL");
-    expect(data.threshold).toBe(200);
+    expect(validateAlert(data.alert)).toBe(true);
+    expect(data.alert.symbol).toBe("AAPL");
+    expect(data.alert.threshold).toBe(200);
   });
 
   it("successfully updates an alert", async () => {
@@ -505,43 +667,57 @@ describe("API Integration - Alerts", () => {
       status: "paused" as const,
     };
 
+    const alertId = "123e4567-e89b-12d3-a456-426614174000";
     const updatedAlert = {
-      id: "123e4567-e89b-12d3-a456-426614174000",
+      id: alertId,
       symbol: "AAPL",
       direction: "above" as const,
       threshold: 200,
       status: "paused" as const,
       channel: "notification" as const,
-      target: "test@example.com",
+      username: "testuser",
       notes: null,
-      createdAt: "2025-01-01T00:00:00Z",
-      updatedAt: "2025-01-02T00:00:00Z",
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-02T00:00:00.000Z",
     };
 
-    vi.mocked(alertsStorage.updateAlert).mockResolvedValue(updatedAlert);
+    const mockService = {
+      updateAlert: vi.fn().mockResolvedValue(updatedAlert),
+    };
+    vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
-    const request = new Request("https://example.com/v1/api/alerts/123e4567-e89b-12d3-a456-426614174000", {
+    const request = new Request(`https://example.com/v1/api/alerts/${alertId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(updateRequest),
     });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env, createMockLogger());
+    const logger = createMockLogger();
+    const alertService = createAlertService(env, logger);
+    const controller = new AlertController(alertService, logger, env);
+    const response = await controller.updateAlert(request, alertId);
     
     expect(response.status).toBe(200);
     const data = await response.json();
-    expect(validateAlert(data)).toBe(true);
-    expect(data.status).toBe("paused");
+    expect(validateAlert(data.alert)).toBe(true);
+    expect(data.alert.status).toBe("paused");
   });
 
   it("successfully deletes an alert", async () => {
-    vi.mocked(alertsStorage.deleteAlert).mockResolvedValue(true);
+    const alertId = "123e4567-e89b-12d3-a456-426614174001";
+    const mockService = {
+      deleteAlert: vi.fn().mockResolvedValue(undefined),
+    };
+    vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
-    const request = new Request("https://example.com/v1/api/alerts/123e4567-e89b-12d3-a456-426614174000", {
+    const request = new Request(`https://example.com/v1/api/alerts/${alertId}`, {
       method: "DELETE",
     });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env, createMockLogger());
+    const logger = createMockLogger();
+    const alertService = createAlertService(env, logger);
+    const controller = new AlertController(alertService, logger, env);
+    const response = await controller.deleteAlert(request, alertId);
     
     expect(response.status).toBe(200);
     const data = await response.json();
@@ -549,11 +725,18 @@ describe("API Integration - Alerts", () => {
   });
 
   it("returns 404 when alert not found", async () => {
-    vi.mocked(alertsStorage.getAlert).mockResolvedValue(null);
+    const alertId = "550e8400-e29b-41d4-a716-446655440999";
+    const mockService = {
+      getAlert: vi.fn().mockResolvedValue(null),
+    };
+    vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
-    const request = new Request("https://example.com/v1/api/alerts/non-existent", { method: "GET" });
+    const request = new Request(`https://example.com/v1/api/alerts/${alertId}`, { method: "GET" });
     const env = createEnv();
-    const response = await handleAlertsRequest(request, env, createMockLogger());
+    const logger = createMockLogger();
+    const alertService = createAlertService(env, logger);
+    const controller = new AlertController(alertService, logger, env);
+    const response = await controller.getAlert(request, alertId);
     
     expect(response.status).toBe(404);
     const data = await response.json();

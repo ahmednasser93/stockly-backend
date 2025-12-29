@@ -40,3 +40,4 @@ CREATE INDEX IF NOT EXISTS idx_device_push_tokens_device_id ON device_push_token
 CREATE INDEX IF NOT EXISTS idx_device_push_tokens_push_token ON device_push_tokens(push_token);
 CREATE INDEX IF NOT EXISTS idx_device_push_tokens_is_active ON device_push_tokens(is_active);
 
+

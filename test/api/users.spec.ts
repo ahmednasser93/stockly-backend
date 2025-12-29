@@ -2,10 +2,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { getAllUsers, getUserByUsername, getUserDevices, getUserAlerts, getUserFavoriteStocks } from "../../src/api/users";
 import { authenticateRequestWithAdmin } from "../../src/auth/middleware";
 import { createMockD1Database } from "../test-utils";
-import { listAlerts } from "../../src/alerts/storage";
+import { createAlertService } from "../../src/factories/createAlertService";
+import { createFavoriteStocksService } from "../../src/factories/createFavoriteStocksService";
 
 vi.mock("../../src/auth/middleware");
-vi.mock("../../src/alerts/storage");
+vi.mock("../../src/factories/createAlertService");
+vi.mock("../../src/factories/createFavoriteStocksService");
 
 describe("Users API", () => {
   let mockEnv: any;
@@ -381,7 +383,10 @@ describe("Users API", () => {
         first: vi.fn().mockResolvedValue(mockUser),
       };
 
-      vi.mocked(listAlerts).mockResolvedValue(mockAlerts as any);
+      const mockService = {
+        listAlerts: vi.fn().mockResolvedValue(mockAlerts),
+      };
+      vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
       mockEnv.stockly.prepare.mockReturnValueOnce(userStmt);
 
@@ -392,7 +397,8 @@ describe("Users API", () => {
       const data = await response.json();
       expect(data.alerts).toHaveLength(1);
       expect(data.alerts[0].symbol).toBe("AAPL");
-      expect(listAlerts).toHaveBeenCalledWith(mockEnv, "alice");
+      expect(createAlertService).toHaveBeenCalled();
+      expect(mockService.listAlerts).toHaveBeenCalledWith("alice");
     });
 
     it("should return 404 if user not found", async () => {
@@ -414,35 +420,26 @@ describe("Users API", () => {
 
   describe("getUserFavoriteStocks", () => {
     it("should return favorite stocks for a user", async () => {
-      const mockUser = { id: "u1" };
       const mockStocks = [
         {
           symbol: "AAPL",
-          display_order: 0,
-          created_at: 1704067200, // 2024-01-01
-          updated_at: 1704153600, // 2024-01-02
+          displayOrder: 0,
+          createdAt: new Date(1704067200 * 1000).toISOString(),
+          updatedAt: new Date(1704153600 * 1000).toISOString(),
         },
         {
           symbol: "TSLA",
-          display_order: 1,
-          created_at: 1704067200,
-          updated_at: 1704153600,
+          displayOrder: 1,
+          createdAt: new Date(1704067200 * 1000).toISOString(),
+          updatedAt: new Date(1704153600 * 1000).toISOString(),
         },
       ];
 
-      const userStmt = {
-        bind: vi.fn().mockReturnThis(),
-        first: vi.fn().mockResolvedValue(mockUser),
+      const mockService = {
+        getFavoriteStocks: vi.fn().mockResolvedValue(mockStocks),
       };
 
-      const stocksStmt = {
-        bind: vi.fn().mockReturnThis(),
-        all: vi.fn().mockResolvedValue({ results: mockStocks }),
-      };
-
-      mockEnv.stockly.prepare
-        .mockReturnValueOnce(userStmt)
-        .mockReturnValueOnce(stocksStmt);
+      vi.mocked(createFavoriteStocksService).mockReturnValue(mockService as any);
 
       const request = new Request("https://example.com/v1/api/users/alice/favorite-stocks");
       const response = await getUserFavoriteStocks(request, "alice", mockEnv, mockLogger);
@@ -455,12 +452,11 @@ describe("Users API", () => {
     });
 
     it("should return 404 if user not found", async () => {
-      const userStmt = {
-        bind: vi.fn().mockReturnThis(),
-        first: vi.fn().mockResolvedValue(null),
+      const mockService = {
+        getFavoriteStocks: vi.fn().mockRejectedValue(new Error("User account not found. Please sign in again.")),
       };
 
-      mockEnv.stockly.prepare.mockReturnValueOnce(userStmt);
+      vi.mocked(createFavoriteStocksService).mockReturnValue(mockService as any);
 
       const request = new Request("https://example.com/v1/api/users/nonexistent/favorite-stocks");
       const response = await getUserFavoriteStocks(request, "nonexistent", mockEnv, mockLogger);

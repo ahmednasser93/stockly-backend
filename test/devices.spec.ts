@@ -201,7 +201,7 @@ describe("Devices API", () => {
       });
 
       // Mock fetch for Google OAuth token endpoint and FCM API
-      globalThis.fetch = vi.fn()
+      global.fetch = vi.fn()
         .mockResolvedValueOnce({
           ok: true,
           json: async () => ({ access_token: "mock-google-access-token" }),
@@ -213,13 +213,13 @@ describe("Devices API", () => {
 
       // Mock crypto.subtle for JWT signing
       const mockCryptoKey = {} as CryptoKey;
-      (globalThis as any).crypto = {
+      global.crypto = {
         subtle: {
           importKey: vi.fn().mockResolvedValue(mockCryptoKey),
           sign: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3, 4, 5])),
         } as unknown as SubtleCrypto,
         getRandomValues: vi.fn(),
-      } as unknown as Crypto;
+      } as Crypto;
 
       const request = new Request("http://localhost/v1/api/devices/user-1/test", {
         method: "POST",
@@ -249,7 +249,7 @@ describe("Devices API", () => {
         device_info: null,
       };
 
-      // Mock user lookup for sendTestNotification
+      // Mock user lookup
       const mockUserStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({ id: "user-1" }),
@@ -261,7 +261,7 @@ describe("Devices API", () => {
       };
 
       // Mock fetch for Google OAuth token endpoint and FCM API
-      globalThis.fetch = vi.fn()
+      global.fetch = vi.fn()
         .mockResolvedValueOnce({
           ok: true,
           json: async () => ({ access_token: "mock-google-access-token" }),
@@ -273,13 +273,13 @@ describe("Devices API", () => {
 
       // Mock crypto.subtle for JWT signing
       const mockCryptoKey = {} as CryptoKey;
-      (globalThis as any).crypto = {
+      global.crypto = {
         subtle: {
           importKey: vi.fn().mockResolvedValue(mockCryptoKey),
           sign: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3, 4, 5])),
         } as unknown as SubtleCrypto,
         getRandomValues: vi.fn(),
-      } as unknown as Crypto;
+      } as Crypto;
 
       mockDb.prepare.mockImplementation((query: string) => {
         if (query.includes("SELECT id FROM users")) {
@@ -302,7 +302,7 @@ describe("Devices API", () => {
       });
 
       const response = await sendTestNotification(request, mockEnv, createMockLogger());
-      const data = await response.json() as { success: boolean };
+      const data = await response.json();
 
       expect(data.success).toBe(true);
     });
@@ -422,38 +422,43 @@ describe("Devices API", () => {
         device_info: null,
       };
 
+      // Mock user lookup
+      const mockUserStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue({ id: "user-1" }),
+      };
+
       const mockTokenStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue(mockTokenRecord),
       };
 
-      // Mock fetch for FCM API to return error
-      globalThis.fetch = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 400,
-        json: async () => ({
-          error: {
-            code: 400,
-            message: "Invalid token",
-            status: "INVALID_ARGUMENT",
-          },
-        }),
-      });
+      // Mock fetch for Google OAuth token endpoint (success) and FCM API (error)
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ access_token: "mock-google-access-token" }),
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 400,
+          json: async () => ({
+            error: {
+              code: 400,
+              message: "Invalid token",
+              status: "INVALID_ARGUMENT",
+            },
+          }),
+        });
 
       // Mock crypto.subtle for JWT signing
-      (globalThis as any).crypto = {
+      globalThis.crypto = {
         subtle: {
           importKey: vi.fn().mockResolvedValue({}),
           sign: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
         } as unknown as SubtleCrypto,
         getRandomValues: vi.fn(),
       } as unknown as Crypto;
-
-      // Mock user lookup
-      const mockUserStmt = {
-        bind: vi.fn().mockReturnThis(),
-        first: vi.fn().mockResolvedValue({ id: "user-1" }),
-      };
 
       mockDb.prepare.mockImplementation((query: string) => {
         if (query.includes("SELECT id FROM users")) {
@@ -476,7 +481,7 @@ describe("Devices API", () => {
       });
 
       const response = await sendTestNotification(request, mockEnv, createMockLogger());
-      const data = await response.json() as { success?: boolean; error?: string };
+      const data = await response.json();
 
       // FCM errors might return 400 (invalid token) or 500 (other errors)
       expect([400, 500]).toContain(response.status);

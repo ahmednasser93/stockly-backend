@@ -1,8 +1,27 @@
 /**
  * Type definitions for Stock Details API
- * Unified JSON structure for comprehensive stock information
+ * DEPRECATED: Types have been moved to @stockly/shared
+ * This file is kept for backward compatibility during migration
+ * 
+ * @deprecated Use types from @stockly/shared/types instead
  */
 
+// Re-export from shared package for backward compatibility
+export type {
+  StockProfile,
+  StockQuote,
+  ChartDataPoint,
+  StockChart,
+  IncomeStatement,
+  KeyMetric,
+  FinancialRatio,
+  StockFinancials,
+  StockNews,
+  StockPeer,
+  StockDetails,
+} from '@stockly/shared/types';
+
+// Keep old interfaces for backward compatibility (will be removed)
 export interface StockProfile {
   companyName: string;
   industry: string;

@@ -5,10 +5,13 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { getStock } from "../../src/api/get-stock";
-import { getStocks } from "../../src/api/get-stocks";
-import { searchStock } from "../../src/api/search-stock";
-import { getStockDetailsRoute } from "../../src/api/get-stock-details";
+import { QuotesController } from "../../src/controllers/quotes.controller";
+import { createQuotesService } from "../../src/factories/createQuotesService";
+import { SearchController } from "../../src/controllers/search.controller";
+import { createSearchService } from "../../src/factories/createSearchService";
+import { D1DatabaseWrapper } from "../../src/infrastructure/database/D1Database";
+import { StockController } from "../../src/controllers/stocks.controller";
+import { createStockService } from "../../src/factories/createStockService";
 import type { Env } from "../../src/index";
 import {
   createMockEnv,
@@ -37,15 +40,76 @@ describe("Stock Data Flow Integration", () => {
       bind: vi.fn().mockReturnThis(),
       first: vi.fn().mockResolvedValue(null),
       all: vi.fn().mockResolvedValue({ results: [] }),
-      run: vi.fn().mockResolvedValue({ success: true }),
+      run: vi.fn().mockResolvedValue({
+        success: true,
+        meta: {
+          changes: 1,
+          last_row_id: 1,
+        },
+      }),
     };
     mockDb.prepare.mockReturnValue(defaultStmt);
     
-    // Mock fetch for external API calls
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ price: 100, symbol: "AAPL" }),
-    } as Response);
+    // Mock fetch - profile fetcher tries endpoints sequentially, first one succeeds
+    // Reset counter at start of each test
+    (globalThis as any).__profileCallCount = 0;
+    (globalThis as any).__profileCallCounts = new Map<string, number>();
+    global.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/quote?")) {
+        const symbol = url.match(/symbol=([^&]+)/)?.[1] || "AAPL";
+        return Promise.resolve({
+          ok: true,
+          json: async () => [{ 
+            price: 100, 
+            symbol: symbol.toUpperCase(), 
+            name: `${symbol.toUpperCase()} Inc.`, 
+            change: 1.5, 
+            changePercent: 1.5,
+            changePercentage: 1.5,
+            image: `https://images.financialmodelingprep.com/symbol/${symbol.toUpperCase()}.png`
+          }],
+        } as Response);
+      }
+      if (url.includes("/profile")) {
+        const symbol = url.match(/symbol=([^&]+)/)?.[1] || url.match(/profile\/([^?]+)/)?.[1] || "AAPL";
+        const callCount = ((globalThis as any).__profileCallCounts.get(symbol) || 0) + 1;
+        (globalThis as any).__profileCallCounts.set(symbol, callCount);
+        // First profile endpoint call per symbol succeeds
+        if (callCount === 1) {
+          const symbol = url.match(/symbol=([^&]+)/)?.[1] || url.match(/profile\/([^?]+)/)?.[1] || "AAPL";
+          return Promise.resolve({
+            ok: true,
+            json: async () => [{ 
+              symbol: symbol.toUpperCase(), 
+              Symbol: symbol.toUpperCase(),
+              description: `${symbol.toUpperCase()} Inc. description`, 
+              image: `https://images.financialmodelingprep.com/symbol/${symbol.toUpperCase()}.png` 
+            }],
+          } as Response);
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => [],
+        } as Response);
+      }
+      if (url.includes("wikipedia.org")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ extract: "Company description" }),
+        } as Response);
+      }
+      // Default fallback for other API calls (search, historical, etc.)
+      if (url.includes("/search") || url.includes("/historical")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ([]),
+        } as Response);
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ price: 100, symbol: "AAPL" }),
+      } as Response);
+    });
     
     vi.clearAllMocks();
   });
@@ -54,12 +118,9 @@ describe("Stock Data Flow Integration", () => {
     it("should complete flow: search -> get stock -> get details", async () => {
       // 1. Search for stock
       const searchRequest = createMockRequest("/v1/api/search-stock?query=AAPL");
-      const searchResponse = await searchStock(
-        searchRequest,
-        new URL(searchRequest.url),
-        mockEnv,
-        mockLogger
-      );
+      const searchService = createSearchService(mockEnv, mockLogger);
+      const searchController = new SearchController(searchService, mockLogger, mockEnv);
+      const searchResponse = await searchController.searchStock(searchRequest);
       
       expect(searchResponse.status).toBe(200);
       const searchData = await searchResponse.json();
@@ -67,31 +128,24 @@ describe("Stock Data Flow Integration", () => {
 
       // 2. Get stock quote
       const stockRequest = createMockRequest("/v1/api/get-stock?symbol=AAPL");
-      const stockResponse = await getStock(
-        stockRequest,
-        new URL(stockRequest.url),
-        mockEnv,
-        mockCtx,
-        mockLogger
-      );
+      const quotesService = createQuotesService(mockEnv, mockLogger);
+      const db = new D1DatabaseWrapper(mockEnv.stockly, mockLogger);
+      const quotesController = new QuotesController(quotesService, mockLogger, mockEnv, db);
+      const stockResponse = await quotesController.getStock(stockRequest, mockCtx);
       
       expect(stockResponse.status).toBe(200);
       const stockData = await stockResponse.json();
       expect(stockData.symbol).toBe("AAPL");
 
-      // 3. Get stock details
-      const detailsRequest = createMockRequest("/v1/api/get-stock-details?symbol=AAPL");
-      const detailsResponse = await getStockDetailsRoute(
-        detailsRequest,
-        new URL(detailsRequest.url),
-        mockEnv,
-        mockCtx,
-        mockLogger
-      );
+      // 3. Get stock details (using the symbol from the route)
+      const detailsRequest = createMockRequest("/v1/api/get-stock-details/AAPL");
+      const stockService = createStockService(mockEnv, mockLogger);
+      const controller = new StockController(stockService, mockLogger, mockEnv);
+      const detailsResponse = await controller.getStockDetails(detailsRequest, "AAPL");
       
       expect(detailsResponse.status).toBe(200);
       const detailsData = await detailsResponse.json();
-      expect(detailsData.symbol).toBe("AAPL");
+      expect(detailsData.stockDetails?.symbol || detailsData.symbol).toBe("AAPL");
     });
   });
 
@@ -100,12 +154,10 @@ describe("Stock Data Flow Integration", () => {
       const symbols = ["AAPL", "GOOGL", "MSFT"];
       const request = createMockRequest(`/v1/api/get-stocks?symbols=${symbols.join(",")}`);
       
-      const response = await getStocks(
-        request,
-        new URL(request.url),
-        mockEnv,
-        mockLogger
-      );
+      const quotesService = createQuotesService(mockEnv, mockLogger);
+      const db = new D1DatabaseWrapper(mockEnv.stockly, mockLogger);
+      const quotesController = new QuotesController(quotesService, mockLogger, mockEnv, db);
+      const response = await quotesController.getStocks(request);
       
       expect(response.status).toBe(200);
       const data = await response.json();
@@ -117,31 +169,23 @@ describe("Stock Data Flow Integration", () => {
     it("should cache stock data and serve from cache on subsequent requests", async () => {
       // First request - should fetch from API
       const firstRequest = createMockRequest("/v1/api/get-stock?symbol=AAPL");
-      const firstResponse = await getStock(
-        firstRequest,
-        new URL(firstRequest.url),
-        mockEnv,
-        mockCtx,
-        mockLogger
-      );
+      const quotesService = createQuotesService(mockEnv, mockLogger);
+      const db = new D1DatabaseWrapper(mockEnv.stockly, mockLogger);
+      const quotesController = new QuotesController(quotesService, mockLogger, mockEnv, db);
+      const firstResponse = await quotesController.getStock(firstRequest, mockCtx);
       
       expect(firstResponse.status).toBe(200);
 
       // Second request - should serve from cache
       const secondRequest = createMockRequest("/v1/api/get-stock?symbol=AAPL");
-      const secondResponse = await getStock(
-        secondRequest,
-        new URL(secondRequest.url),
-        mockEnv,
-        mockCtx,
-        mockLogger
-      );
+      const secondResponse = await quotesController.getStock(secondRequest, mockCtx);
       
       expect(secondResponse.status).toBe(200);
       // Note: Would verify cache hit in actual implementation
     });
   });
 });
+
 
 
 

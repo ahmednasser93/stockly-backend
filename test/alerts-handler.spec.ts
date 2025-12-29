@@ -1,25 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { handleAlertsRequest } from "../src/api/alerts";
-import {
-  listAlerts,
-  createAlert,
-  getAlert,
-  updateAlert,
-  deleteAlert,
-} from "../src/alerts/storage";
-import { deleteAlertState } from "../src/alerts/state";
+import { AlertController } from "../src/controllers/alerts.controller";
+import { createAlertService } from "../src/factories/createAlertService";
 import { createMockLogger } from "./test-utils";
 
-vi.mock("../src/alerts/storage", () => ({
-  listAlerts: vi.fn(),
-  createAlert: vi.fn(),
-  getAlert: vi.fn(),
-  updateAlert: vi.fn(),
-  deleteAlert: vi.fn(),
-}));
-
-vi.mock("../src/alerts/state", () => ({
-  deleteAlertState: vi.fn(),
+vi.mock("../src/factories/createAlertService", () => ({
+  createAlertService: vi.fn(),
 }));
 
 vi.mock("../src/auth/middleware", () => ({
@@ -36,29 +21,62 @@ const createRequest = (init?: RequestInit & { path?: string }) => {
   return new Request(url, init);
 };
 
-const env = { stockly: {} as any, alertsKv: { delete: vi.fn() } as any };
+const env = { stockly: {} as any, alertsKv: { delete: vi.fn() } as any, JWT_SECRET: "test-secret", JWT_REFRESH_SECRET: "test-refresh-secret" };
 
 describe("alerts handler", () => {
+  let mockService: any;
+  let controller: AlertController;
+  let logger: ReturnType<typeof createMockLogger>;
+
   beforeEach(() => {
-    vi.mocked(listAlerts).mockReset();
-    vi.mocked(createAlert).mockReset();
-    vi.mocked(getAlert).mockReset();
-    vi.mocked(updateAlert).mockReset();
-    vi.mocked(deleteAlert).mockReset();
-    vi.mocked(deleteAlertState).mockReset();
+    logger = createMockLogger();
+    mockService = {
+      listAlerts: vi.fn(),
+      createAlert: vi.fn(),
+      getAlert: vi.fn(),
+      updateAlert: vi.fn(),
+      deleteAlert: vi.fn(),
+    };
+    vi.mocked(createAlertService).mockReturnValue(mockService as any);
+    controller = new AlertController(mockService, logger, env as any);
   });
 
   it("lists alerts", async () => {
-    vi.mocked(listAlerts).mockResolvedValue([{ id: "1", username: "testuser" } as any]);
-    const response = await handleAlertsRequest(createRequest({ method: "GET" }), env as any, createMockLogger());
+    const mockAlert = {
+      id: "550e8400-e29b-41d4-a716-446655440000",
+      symbol: "AAPL",
+      direction: "above" as const,
+      threshold: 200,
+      status: "active" as const,
+      channel: "notification" as const,
+      notes: null,
+      username: "testuser",
+      createdAt: "2024-01-01T00:00:00.000Z",
+      updatedAt: "2024-01-01T00:00:00.000Z",
+    };
+    vi.mocked(mockService.listAlerts).mockResolvedValue([mockAlert]);
+    const response = await controller.listAlerts(createRequest({ method: "GET" }));
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ alerts: [{ id: "1", username: "testuser" }] });
-    expect(listAlerts).toHaveBeenCalledWith(expect.anything(), "testuser");
+    const data = await response.json();
+    expect(data.alerts).toHaveLength(1);
+    expect(data.alerts[0].id).toBe(mockAlert.id);
+    expect(mockService.listAlerts).toHaveBeenCalledWith("testuser");
   });
 
   it("creates an alert when payload is valid", async () => {
-    const created = { id: "2", username: "testuser" } as any;
-    vi.mocked(createAlert).mockResolvedValue(created);
+    const created = {
+      id: "550e8400-e29b-41d4-a716-446655440001",
+      symbol: "AAPL",
+      direction: "above" as const,
+      threshold: 200,
+      status: "active" as const,
+      channel: "notification" as const,
+      notes: null,
+      username: "testuser",
+      createdAt: "2024-01-01T00:00:00.000Z",
+      updatedAt: "2024-01-01T00:00:00.000Z",
+    };
+    vi.mocked(mockService.createAlert).mockResolvedValue(created);
     const body = {
       symbol: "aapl",
       direction: "above",
@@ -66,58 +84,70 @@ describe("alerts handler", () => {
       channel: "notification",
     };
 
-    const response = await handleAlertsRequest(
-      createRequest({ method: "POST", body: JSON.stringify(body) }),
-      env as any,
-      createMockLogger()
+    const response = await controller.createAlert(
+      createRequest({ 
+        method: "POST", 
+        body: JSON.stringify(body),
+        headers: { "Content-Type": "application/json" }
+      })
     );
 
     expect(response.status).toBe(201);
-    await expect(response.json()).resolves.toEqual(created);
-    expect(createAlert).toHaveBeenCalledWith(
-      expect.anything(), 
-      expect.objectContaining({ symbol: "AAPL", direction: "above", threshold: 200, channel: "notification" }), 
+    const data = await response.json();
+    expect(data.alert.id).toBe(created.id);
+    expect(mockService.createAlert).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: "aapl", direction: "above", threshold: 200, channel: "notification" }), 
       "testuser"
     );
   });
 
   it("returns 404 when an alert is missing", async () => {
-    vi.mocked(getAlert).mockResolvedValue(null);
-    const response = await handleAlertsRequest(
+    vi.mocked(mockService.getAlert).mockResolvedValue(null);
+    const response = await controller.getAlert(
       createRequest({ method: "GET", path: "/v1/api/alerts/missing" }),
-      env as any,
-      createMockLogger()
+      "missing"
     );
     expect(response.status).toBe(404);
-    expect(getAlert).toHaveBeenCalledWith(expect.anything(), "missing", "testuser");
+    expect(mockService.getAlert).toHaveBeenCalledWith("missing", "testuser");
   });
 
   it("updates alerts via PUT", async () => {
-    const updated = { id: "3", status: "active", username: "testuser" } as any;
-    vi.mocked(updateAlert).mockResolvedValue(updated);
-    const response = await handleAlertsRequest(
+    const updated = {
+      id: "550e8400-e29b-41d4-a716-446655440002",
+      symbol: "AAPL",
+      direction: "above" as const,
+      threshold: 200,
+      status: "paused" as const,
+      channel: "notification" as const,
+      notes: null,
+      username: "testuser",
+      createdAt: "2024-01-01T00:00:00.000Z",
+      updatedAt: "2024-01-02T00:00:00.000Z",
+    };
+    vi.mocked(mockService.updateAlert).mockResolvedValue(updated);
+    const response = await controller.updateAlert(
       createRequest({
         method: "PUT",
-        path: "/v1/api/alerts/3",
+        path: "/v1/api/alerts/550e8400-e29b-41d4-a716-446655440002",
         body: JSON.stringify({ status: "paused" }),
+        headers: { "Content-Type": "application/json" }
       }),
-      env as any,
-      createMockLogger()
+      "550e8400-e29b-41d4-a716-446655440002"
     );
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual(updated);
-    expect(updateAlert).toHaveBeenCalledWith(expect.anything(), "3", expect.objectContaining({ status: "paused" }), "testuser");
+    const data = await response.json();
+    expect(data.alert.id).toBe(updated.id);
+    expect(data.alert.status).toBe("paused");
+    expect(mockService.updateAlert).toHaveBeenCalledWith("550e8400-e29b-41d4-a716-446655440002", expect.objectContaining({ status: "paused" }), "testuser");
   });
 
-  it("deletes alerts and clears KV state", async () => {
-    vi.mocked(deleteAlert).mockResolvedValue(true);
-    const response = await handleAlertsRequest(
+  it("deletes alerts", async () => {
+    vi.mocked(mockService.deleteAlert).mockResolvedValue(undefined);
+    const response = await controller.deleteAlert(
       createRequest({ method: "DELETE", path: "/v1/api/alerts/123" }),
-      env as any,
-      createMockLogger()
+      "123"
     );
     expect(response.status).toBe(200);
-    expect(deleteAlert).toHaveBeenCalledWith(expect.anything(), "123", "testuser");
-    expect(deleteAlertState).toHaveBeenCalledWith(env.alertsKv, "123");
+    expect(mockService.deleteAlert).toHaveBeenCalledWith("123", "testuser");
   });
 });

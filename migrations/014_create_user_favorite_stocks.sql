@@ -21,3 +21,4 @@ CREATE INDEX IF NOT EXISTS idx_user_favorite_stocks_symbol ON user_favorite_stoc
 
 
 
+

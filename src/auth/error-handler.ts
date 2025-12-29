@@ -24,7 +24,12 @@ export type AuthErrorCode =
   | "RATE_LIMIT_EXCEEDED"
   | "NETWORK_ERROR"
   | "INTERNAL_ERROR"
-  | "USER_NOT_FOUND";
+  | "USER_NOT_FOUND"
+  | "ALERT_NOT_FOUND"
+  | "INVALID_INPUT"
+  | "UPDATE_FAILED"
+  | "DELETE_FAILED"
+  | "CREATE_FAILED";
 
 /**
  * Create standardized error response
@@ -86,6 +91,11 @@ const ERROR_STATUS_MAP: Record<AuthErrorCode, number> = {
   NETWORK_ERROR: 503,
   INTERNAL_ERROR: 500,
   USER_NOT_FOUND: 404,
+  ALERT_NOT_FOUND: 404,
+  INVALID_INPUT: 400,
+  UPDATE_FAILED: 400,
+  DELETE_FAILED: 400,
+  CREATE_FAILED: 400,
 };
 
 /**

@@ -69,3 +69,4 @@ SELECT
   COUNT(DISTINCT email) as unique_emails
 FROM users;
 "
+
