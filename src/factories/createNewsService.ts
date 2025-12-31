@@ -10,6 +10,6 @@ import { NewsService } from '../services/news.service';
 
 export function createNewsService(env: Env, logger: Logger): NewsService {
   const newsRepo = new NewsRepository(env, logger);
-  return new NewsService(newsRepo);
+  return new NewsService(newsRepo, env, logger);
 }
 

@@ -44,3 +44,4 @@ CREATE INDEX IF NOT EXISTS idx_user_push_tokens_device_type ON user_push_tokens(
 
 
 
+

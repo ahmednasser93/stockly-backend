@@ -182,6 +182,13 @@ export class StockRepository implements IStockRepository {
   private normalizeProfile(rawProfile: any, symbol: string): StockProfile {
     const profile = Array.isArray(rawProfile) ? rawProfile[0] : rawProfile;
 
+    // Extract beta, handling various possible field names and types
+    let beta: number | undefined = undefined;
+    if (profile?.beta !== undefined && profile?.beta !== null) {
+      beta = typeof profile.beta === 'number' ? profile.beta : parseFloat(profile.beta);
+      if (isNaN(beta)) beta = undefined;
+    }
+
     return {
       companyName: profile?.companyName || profile?.name || "",
       industry: profile?.industry || "",
@@ -195,6 +202,7 @@ export class StockRepository implements IStockRepository {
       image:
         profile?.image ||
         `https://images.financialmodelingprep.com/symbol/${symbol}.png`,
+      beta,
     };
   }
 
@@ -412,6 +420,7 @@ export class StockRepository implements IStockRepository {
           description: "",
           website: "",
           image: `https://images.financialmodelingprep.com/symbol/${normalizedSymbol}.png`,
+          beta: undefined,
         };
       }
 

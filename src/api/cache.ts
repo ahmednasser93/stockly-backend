@@ -31,11 +31,22 @@ export function getCacheEntry(key: string): { data: any; cachedAt: number; expir
 
   const expired = Date.now() > entry.expiresAt;
   if (expired) {
-    cache.delete(key);
+    // Don't delete expired cache - it might be needed for stale cache access
     return { data: entry.data, cachedAt: entry.cachedAt, expired: true };
   }
 
   return { data: entry.data, cachedAt: entry.cachedAt, expired: false };
+}
+
+/**
+ * Get cache entry even if expired (stale cache)
+ * Returns null only if cache miss
+ */
+export function getStaleCacheEntry(key: string): { data: any; cachedAt: number } | null {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  
+  return { data: entry.data, cachedAt: entry.cachedAt };
 }
 
 /**

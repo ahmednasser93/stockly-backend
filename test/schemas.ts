@@ -133,6 +133,27 @@ export interface HealthCheckResponse {
 }
 
 // ============================================================================
+// MARKET SCHEMAS
+// ============================================================================
+
+export interface MarketStockItem {
+  symbol: string;
+  name: string;
+  price: number;
+  change?: number | null;
+  changesPercentage?: number | null;
+  volume?: number | null;
+  dayLow?: number | null;
+  dayHigh?: number | null;
+  marketCap?: number | null;
+  exchange?: string | null;
+  exchangeShortName?: string | null;
+  type?: string | null;
+}
+
+export interface MarketResponse extends Array<MarketStockItem> {}
+
+// ============================================================================
 // ADMIN CONFIG SCHEMAS
 // ============================================================================
 
@@ -247,5 +268,27 @@ export function validateErrorResponse(data: any): data is ErrorResponse {
     return true; // New format
   }
   return false;
+}
+
+export function validateMarketStockItem(data: any): data is MarketStockItem {
+  if (!data || typeof data !== "object") return false;
+  if (typeof data.symbol !== "string") return false;
+  if (typeof data.name !== "string") return false;
+  if (typeof data.price !== "number") return false;
+  if (data.change !== undefined && data.change !== null && typeof data.change !== "number") return false;
+  if (data.changesPercentage !== undefined && data.changesPercentage !== null && typeof data.changesPercentage !== "number") return false;
+  if (data.volume !== undefined && data.volume !== null && typeof data.volume !== "number") return false;
+  if (data.dayLow !== undefined && data.dayLow !== null && typeof data.dayLow !== "number") return false;
+  if (data.dayHigh !== undefined && data.dayHigh !== null && typeof data.dayHigh !== "number") return false;
+  if (data.marketCap !== undefined && data.marketCap !== null && typeof data.marketCap !== "number") return false;
+  if (data.exchange !== undefined && data.exchange !== null && typeof data.exchange !== "string") return false;
+  if (data.exchangeShortName !== undefined && data.exchangeShortName !== null && typeof data.exchangeShortName !== "string") return false;
+  if (data.type !== undefined && data.type !== null && typeof data.type !== "string") return false;
+  return true;
+}
+
+export function validateMarketResponse(data: any): data is MarketResponse {
+  if (!Array.isArray(data)) return false;
+  return data.every(validateMarketStockItem);
 }
 

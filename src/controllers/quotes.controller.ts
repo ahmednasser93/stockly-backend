@@ -9,6 +9,7 @@ import { fetchAndSaveHistoricalPrice } from '../api/historical-prices';
 import { sendFCMNotification } from '../notifications/fcm-sender';
 import { getCacheIfValid } from '../api/cache';
 import type { IDatabase } from '../infrastructure/database/IDatabase';
+import { MarketCacheRefreshService } from '../services/market-cache-refresh.service';
 
 type QuotesRepositoryWithStale = {
   getStaleQuote(symbol: string): Promise<any>;
@@ -246,6 +247,29 @@ export class QuotesController {
 
       const quotes = await this.quotesService.getQuotes(symbols);
       
+      // Step 3: Update market cache if stocks exist (side effect, non-blocking)
+      // This handles favorite stocks refresh case - updates market cache if any of these stocks are in the cache
+      if (quotes.length > 0) {
+        const updatedStocks = quotes
+          .filter((quote) => quote.price !== null && quote.price !== undefined)
+          .map((quote) => ({
+            symbol: quote.symbol,
+            price: quote.price!,
+            change: quote.change ?? null,
+            changePercent: quote.changePercent ?? null,
+            volume: quote.volume ?? null,
+          }));
+        
+        if (updatedStocks.length > 0) {
+          const cacheRefreshService = new MarketCacheRefreshService(this.env, this.logger);
+          // Fire and forget - don't wait for completion
+          cacheRefreshService.refreshMarketCacheOnPriceUpdate(updatedStocks).catch((error) => {
+            this.logger.warn('Market cache refresh failed (non-blocking)', error);
+          });
+        }
+      }
+      
+      // Step 4: Return response
       // Return empty array if no quotes found (better UX than error)
       if (quotes.length === 0) {
         return json([], 200, request);

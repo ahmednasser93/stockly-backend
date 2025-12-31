@@ -131,3 +131,4 @@ ALTER TABLE user_push_tokens RENAME TO user_devices;
 This is a minimal change that improves clarity without requiring major refactoring.
 
 
+

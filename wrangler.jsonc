@@ -30,11 +30,12 @@
 	],
 	/**
 	 * Cron Triggers:
+	 * - Every 1 hour: Market data & news prefetch (gainers, losers, actives, sectors, general news) - warms cache
 	 * - Every 5 minutes: Price alerts evaluation
 	 * - Every 6 hours: News alerts for favorite stocks (runs at 00:00, 06:00, 12:00, 18:00 UTC)
 	 */
 	"triggers": {
-		"crons": ["*/5 * * * *", "0 */6 * * *"]
+		"crons": ["0 * * * *", "*/5 * * * *", "0 */6 * * *"]
 	},
 	/**
 	 * Smart Placement

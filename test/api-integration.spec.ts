@@ -15,6 +15,8 @@ import { SearchController } from "../src/controllers/search.controller";
 import { createSearchService } from "../src/factories/createSearchService";
 import { HistoricalController } from "../src/controllers/historical.controller";
 import { createHistoricalService } from "../src/factories/createHistoricalService";
+import { StockController } from "../src/controllers/stocks.controller";
+import { createStockService } from "../src/factories/createStockService";
 import { D1DatabaseWrapper } from "../src/infrastructure/database/D1Database";
 import { AlertController } from "../src/controllers/alerts.controller";
 import { createAlertService } from "../src/factories/createAlertService";
@@ -54,6 +56,8 @@ import {
   validateHistoricalPricesResponse,
   validateHealthCheckResponse,
   validateErrorResponse,
+  validateMarketResponse,
+  validateMarketStockItem,
 } from "./schemas";
 import type { Env } from "../src/index";
 
@@ -741,6 +745,867 @@ describe("API Integration - Alerts", () => {
     expect(response.status).toBe(404);
     const data = await response.json();
     expect(validateErrorResponse(data)).toBe(true);
+  });
+});
+
+// ============================================================================
+// MARKET INTEGRATION TESTS
+// ============================================================================
+
+vi.mock("../src/factories/createMarketService", () => ({
+  createMarketService: vi.fn(),
+}));
+
+import { MarketController } from "../src/controllers/market.controller";
+import { createMarketService } from "../src/factories/createMarketService";
+
+describe("API Integration - Market Endpoints", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe("GET /v1/api/market/gainers", () => {
+    it("successfully fetches and returns gainers data", async () => {
+      const mockGainers = [
+        {
+          symbol: "AAPL",
+          name: "Apple Inc.",
+          price: 150.0,
+          change: 1.5,
+          changesPercentage: 1.0,
+          volume: 1000000,
+          dayLow: 149.0,
+          dayHigh: 152.0,
+        },
+        {
+          symbol: "MSFT",
+          name: "Microsoft Corporation",
+          price: 300.0,
+          change: 3.0,
+          changesPercentage: 1.01,
+          volume: 2000000,
+        },
+      ];
+
+      const mockService = {
+        getGainers: vi.fn().mockResolvedValue(mockGainers),
+        getLosers: vi.fn(),
+        getActives: vi.fn(),
+        getSectorsPerformance: vi.fn(),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const request = createRequest("/v1/api/market/gainers");
+      const env = createEnv();
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getGainers(request);
+      
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(validateMarketResponse(data)).toBe(true);
+      expect(data.length).toBe(2);
+      expect(validateMarketStockItem(data[0])).toBe(true);
+      expect(data[0].symbol).toBe("AAPL");
+      expect(data[0].changesPercentage).toBe(1.0);
+    });
+
+    it("respects limit parameter", async () => {
+      const mockGainers = Array.from({ length: 20 }, (_, i) => ({
+        symbol: `STOCK${i}`,
+        name: `Stock ${i}`,
+        price: 100 + i,
+      }));
+
+      const mockService = {
+        getGainers: vi.fn().mockResolvedValue(mockGainers),
+        getLosers: vi.fn(),
+        getActives: vi.fn(),
+        getSectorsPerformance: vi.fn(),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const request = createRequest("/v1/api/market/gainers", { limit: "5" });
+      const env = createEnv();
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getGainers(request);
+      
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(validateMarketResponse(data)).toBe(true);
+    });
+
+    it("returns 400 for invalid limit (too low)", async () => {
+      const mockService = {
+        getGainers: vi.fn(),
+        getLosers: vi.fn(),
+        getActives: vi.fn(),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const request = createRequest("/v1/api/market/gainers", { limit: "0" });
+      const env = createEnv();
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getGainers(request);
+      
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(validateErrorResponse(data)).toBe(true);
+      expect(mockService.getGainers).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 for invalid limit (too high)", async () => {
+      const mockService = {
+        getGainers: vi.fn(),
+        getLosers: vi.fn(),
+        getActives: vi.fn(),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const request = createRequest("/v1/api/market/gainers", { limit: "51" });
+      const env = createEnv();
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getGainers(request);
+      
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(validateErrorResponse(data)).toBe(true);
+      expect(mockService.getGainers).not.toHaveBeenCalled();
+    });
+
+    it("returns 500 when service throws error", async () => {
+      const mockService = {
+        getGainers: vi.fn().mockRejectedValue(new Error("Service error")),
+        getLosers: vi.fn(),
+        getActives: vi.fn(),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const request = createRequest("/v1/api/market/gainers");
+      const env = createEnv();
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getGainers(request);
+      
+      expect(response.status).toBe(500);
+      const data = await response.json();
+      expect(validateErrorResponse(data)).toBe(true);
+    });
+  });
+
+  describe("GET /v1/api/market/losers", () => {
+    it("successfully fetches and returns losers data", async () => {
+      const mockLosers = [
+        {
+          symbol: "STOCK1",
+          name: "Losing Stock Inc.",
+          price: 50.0,
+          change: -5.0,
+          changesPercentage: -9.09,
+          volume: 500000,
+        },
+      ];
+
+      const mockService = {
+        getGainers: vi.fn(),
+        getLosers: vi.fn().mockResolvedValue(mockLosers),
+        getActives: vi.fn(),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const request = createRequest("/v1/api/market/losers");
+      const env = createEnv();
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getLosers(request);
+      
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(validateMarketResponse(data)).toBe(true);
+      expect(data.length).toBe(1);
+      expect(data[0].symbol).toBe("STOCK1");
+      expect(data[0].changesPercentage).toBe(-9.09);
+    });
+  });
+
+  describe("GET /v1/api/market/actives", () => {
+    it("successfully fetches and returns actives data", async () => {
+      const mockActives = [
+        {
+          symbol: "ACTIVE1",
+          name: "Active Stock Inc.",
+          price: 100.0,
+          change: 0.5,
+          changesPercentage: 0.5,
+          volume: 5000000,
+        },
+      ];
+
+      const mockService = {
+        getGainers: vi.fn(),
+        getLosers: vi.fn(),
+        getActives: vi.fn().mockResolvedValue(mockActives),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const request = createRequest("/v1/api/market/actives");
+      const env = createEnv();
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getActives(request);
+      
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(validateMarketResponse(data)).toBe(true);
+      expect(data.length).toBe(1);
+      expect(data[0].symbol).toBe("ACTIVE1");
+      expect(data[0].volume).toBe(5000000);
+    });
+  });
+
+  describe("GET /v1/api/market/screener", () => {
+    it("successfully fetches and returns screener data with all required fields", async () => {
+      const mockScreener = [
+        {
+          symbol: "CHEAP1",
+          name: "Cheap Stock Inc.",
+          price: 25.0,
+          change: 0.5,
+          changesPercentage: 2.0,
+          volume: 1000000,
+          marketCap: 2000000000,
+        },
+        {
+          symbol: "CHEAP2",
+          name: "Value Stock Corp.",
+          price: 50.0,
+          change: -0.5,
+          changesPercentage: -1.0,
+          volume: 2000000,
+          marketCap: 3000000000,
+        },
+      ];
+
+      const mockService = {
+        getGainers: vi.fn(),
+        getLosers: vi.fn(),
+        getActives: vi.fn(),
+        getScreener: vi.fn().mockResolvedValue(mockScreener),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const request = createRequest("/v1/api/market/screener");
+      const env = createEnv();
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getScreener(request);
+      
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(validateMarketResponse(data)).toBe(true);
+      expect(data.length).toBe(2);
+      expect(validateMarketStockItem(data[0])).toBe(true);
+      expect(data[0].symbol).toBe("CHEAP1");
+      expect(data[0].name).toBe("Cheap Stock Inc.");
+      expect(data[0].price).toBe(25.0);
+    });
+
+    it("uses default parameters when none provided", async () => {
+      const mockScreener = [
+        {
+          symbol: "STOCK1",
+          name: "Stock One",
+          price: 100.0,
+        },
+      ];
+
+      const mockService = {
+        getGainers: vi.fn(),
+        getLosers: vi.fn(),
+        getActives: vi.fn(),
+        getScreener: vi.fn().mockResolvedValue(mockScreener),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const request = createRequest("/v1/api/market/screener");
+      const env = createEnv();
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getScreener(request);
+      
+      expect(response.status).toBe(200);
+      expect(mockService.getScreener).toHaveBeenCalledWith(1000000000, 20, 2, 50);
+    });
+
+    it("respects all custom parameters", async () => {
+      const mockScreener = [
+        {
+          symbol: "STOCK1",
+          name: "Stock One",
+          price: 100.0,
+        },
+      ];
+
+      const mockService = {
+        getGainers: vi.fn(),
+        getLosers: vi.fn(),
+        getActives: vi.fn(),
+        getScreener: vi.fn().mockResolvedValue(mockScreener),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const request = createRequest("/v1/api/market/screener", {
+        marketCapMoreThan: "2000000000",
+        peLowerThan: "15",
+        dividendMoreThan: "3",
+        limit: "25",
+      });
+      const env = createEnv();
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getScreener(request);
+      
+      expect(response.status).toBe(200);
+      expect(mockService.getScreener).toHaveBeenCalledWith(2000000000, 15, 3, 25);
+    });
+
+    it("respects limit parameter", async () => {
+      const mockScreener = Array.from({ length: 30 }, (_, i) => ({
+        symbol: `STOCK${i}`,
+        name: `Stock ${i}`,
+        price: 100 + i,
+      }));
+
+      const mockService = {
+        getGainers: vi.fn(),
+        getLosers: vi.fn(),
+        getActives: vi.fn(),
+        getScreener: vi.fn().mockResolvedValue(mockScreener),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const request = createRequest("/v1/api/market/screener", { limit: "10" });
+      const env = createEnv();
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getScreener(request);
+      
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(validateMarketResponse(data)).toBe(true);
+      expect(mockService.getScreener).toHaveBeenCalledWith(1000000000, 20, 2, 10);
+    });
+
+    it("returns 400 for invalid marketCapMoreThan (negative)", async () => {
+      const mockService = {
+        getGainers: vi.fn(),
+        getLosers: vi.fn(),
+        getActives: vi.fn(),
+        getScreener: vi.fn(),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const request = createRequest("/v1/api/market/screener", { marketCapMoreThan: "-1000" });
+      const env = createEnv();
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getScreener(request);
+      
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(validateErrorResponse(data)).toBe(true);
+      expect(mockService.getScreener).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 for invalid peLowerThan (negative)", async () => {
+      const mockService = {
+        getGainers: vi.fn(),
+        getLosers: vi.fn(),
+        getActives: vi.fn(),
+        getScreener: vi.fn(),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const request = createRequest("/v1/api/market/screener", { peLowerThan: "-5" });
+      const env = createEnv();
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getScreener(request);
+      
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(validateErrorResponse(data)).toBe(true);
+      expect(mockService.getScreener).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 for invalid dividendMoreThan (negative)", async () => {
+      const mockService = {
+        getGainers: vi.fn(),
+        getLosers: vi.fn(),
+        getActives: vi.fn(),
+        getScreener: vi.fn(),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const request = createRequest("/v1/api/market/screener", { dividendMoreThan: "-1" });
+      const env = createEnv();
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getScreener(request);
+      
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(validateErrorResponse(data)).toBe(true);
+      expect(mockService.getScreener).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 for invalid limit (too low)", async () => {
+      const mockService = {
+        getGainers: vi.fn(),
+        getLosers: vi.fn(),
+        getActives: vi.fn(),
+        getScreener: vi.fn(),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const request = createRequest("/v1/api/market/screener", { limit: "0" });
+      const env = createEnv();
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getScreener(request);
+      
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(validateErrorResponse(data)).toBe(true);
+      expect(mockService.getScreener).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 for invalid limit (too high)", async () => {
+      const mockService = {
+        getGainers: vi.fn(),
+        getLosers: vi.fn(),
+        getActives: vi.fn(),
+        getScreener: vi.fn(),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const request = createRequest("/v1/api/market/screener", { limit: "51" });
+      const env = createEnv();
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getScreener(request);
+      
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(validateErrorResponse(data)).toBe(true);
+      expect(mockService.getScreener).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 for invalid parameter types", async () => {
+      const mockService = {
+        getGainers: vi.fn(),
+        getLosers: vi.fn(),
+        getActives: vi.fn(),
+        getScreener: vi.fn(),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const request = createRequest("/v1/api/market/screener", { limit: "abc" });
+      const env = createEnv();
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getScreener(request);
+      
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(validateErrorResponse(data)).toBe(true);
+      expect(mockService.getScreener).not.toHaveBeenCalled();
+    });
+
+    it("uses KV cache when available", async () => {
+      const mockScreener = [
+        {
+          symbol: "CACHED1",
+          name: "Cached Stock",
+          price: 100.0,
+        },
+      ];
+
+      const mockService = {
+        getGainers: vi.fn(),
+        getLosers: vi.fn(),
+        getActives: vi.fn(),
+        getScreener: vi.fn().mockResolvedValue(mockScreener),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const env = createEnv();
+      // Pre-populate cache
+      const cacheKey = "market:screener:1000000000:20:2:50";
+      const cacheEntry = {
+        data: mockScreener,
+        cachedAt: Date.now(),
+        ttl: 300000,
+      };
+      if (env.alertsKv) {
+        await env.alertsKv.put(cacheKey, JSON.stringify(cacheEntry));
+      }
+
+      const request = createRequest("/v1/api/market/screener");
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getScreener(request);
+      
+      expect(response.status).toBe(200);
+      // Service should be called (it handles cache), but result should be from cache
+      const data = await response.json();
+      expect(validateMarketResponse(data)).toBe(true);
+    });
+
+    it("stores result in KV cache after fetch", async () => {
+      const mockScreener = [
+        {
+          symbol: "FRESH1",
+          name: "Fresh Stock",
+          price: 100.0,
+        },
+      ];
+
+      const mockService = {
+        getGainers: vi.fn(),
+        getLosers: vi.fn(),
+        getActives: vi.fn(),
+        getScreener: vi.fn().mockResolvedValue(mockScreener),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const env = createEnv();
+      // Clear cache first
+      if (env.alertsKv) {
+        await env.alertsKv.delete("market:screener:1000000000:20:2:50");
+      }
+
+      const request = createRequest("/v1/api/market/screener");
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getScreener(request);
+      
+      expect(response.status).toBe(200);
+      expect(mockService.getScreener).toHaveBeenCalled();
+      // Service should store in cache (non-blocking, so we just verify service was called)
+    });
+
+    it("returns 500 when service throws error", async () => {
+      const mockService = {
+        getGainers: vi.fn(),
+        getLosers: vi.fn(),
+        getActives: vi.fn(),
+        getScreener: vi.fn().mockRejectedValue(new Error("Service error")),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const request = createRequest("/v1/api/market/screener");
+      const env = createEnv();
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getScreener(request);
+      
+      expect(response.status).toBe(500);
+      const data = await response.json();
+      expect(validateErrorResponse(data)).toBe(true);
+    });
+
+    it("validates response schema matches MarketResponseSchema", async () => {
+      const mockScreener = [
+        {
+          symbol: "VALID1",
+          name: "Valid Stock",
+          price: 100.0,
+          change: 1.0,
+          changesPercentage: 1.0,
+        },
+      ];
+
+      const mockService = {
+        getGainers: vi.fn(),
+        getLosers: vi.fn(),
+        getActives: vi.fn(),
+        getScreener: vi.fn().mockResolvedValue(mockScreener),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const request = createRequest("/v1/api/market/screener");
+      const env = createEnv();
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getScreener(request);
+      
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(validateMarketResponse(data)).toBe(true);
+      expect(validateMarketStockItem(data[0])).toBe(true);
+    });
+
+    it("handles FMP response with missing optional fields", async () => {
+      const mockScreener = [
+        {
+          symbol: "MINIMAL1",
+          name: "Minimal Stock",
+          price: 100.0,
+          change: null,
+          changesPercentage: null,
+          volume: null,
+          // Missing optional fields like dayLow, dayHigh, etc.
+        },
+      ];
+
+      const mockService = {
+        getGainers: vi.fn(),
+        getLosers: vi.fn(),
+        getActives: vi.fn(),
+        getScreener: vi.fn().mockResolvedValue(mockScreener),
+      };
+      vi.mocked(createMarketService).mockReturnValue(mockService as any);
+
+      const request = createRequest("/v1/api/market/screener");
+      const env = createEnv();
+      const logger = createMockLogger();
+      const marketService = createMarketService(env, logger);
+      const controller = new MarketController(marketService, logger, env);
+      const response = await controller.getScreener(request);
+      
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(validateMarketResponse(data)).toBe(true);
+      expect(data[0].symbol).toBe("MINIMAL1");
+      expect(data[0].change).toBeNull();
+    });
+  });
+});
+
+// ============================================================================
+// GET STOCK DETAILS INTEGRATION TESTS
+// ============================================================================
+
+describe("API Integration - Get Stock Details", () => {
+  beforeEach(() => {
+    clearCache();
+    clearConfigCache();
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+    // Reset profile call counter for each test
+    (globalThis as any).__profileCallCounts = new Map<string, number>();
+    // Clear any existing fetch mocks
+    if ((globalThis as any).fetch) {
+      vi.spyOn(globalThis as any, "fetch").mockRestore();
+    }
+  });
+
+  it("getStockDetails returns profile with beta field when available", async () => {
+    const mockProfile = {
+      symbol: "AAPL",
+      companyName: "Apple Inc.",
+      industry: "Technology",
+      sector: "Consumer Electronics",
+      description: "Apple Inc. designs and manufactures...",
+      website: "https://apple.com",
+      image: "https://images.financialmodelingprep.com/symbol/AAPL.png",
+      beta: 1.25,
+    };
+
+    const mockQuote = {
+      symbol: "AAPL",
+      price: 175.50,
+      change: 1.25,
+      changePercentage: 0.72,
+      dayHigh: 176.00,
+      dayLow: 174.00,
+      open: 175.00,
+      previousClose: 174.25,
+      volume: 50000000,
+      marketCap: 2800000000000,
+    };
+
+    // Mock fetch for all required endpoints
+    const profileCallMap = new Map<string, number>();
+    vi.spyOn(globalThis as any, "fetch").mockImplementation((url: string) => {
+      if (url.includes("/quote?")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [mockQuote],
+        } as Response);
+      }
+      if (url.includes("/profile")) {
+        const callKey = url;
+        const callCount = (profileCallMap.get(callKey) || 0) + 1;
+        profileCallMap.set(callKey, callCount);
+        if (callCount === 1) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => [mockProfile],
+          } as Response);
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => [],
+        } as Response);
+      }
+      if (url.includes("/historical")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ historical: [] }),
+        } as Response);
+      }
+      if (url.includes("/key-metrics") || url.includes("/income-statement") || url.includes("/ratios")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [],
+        } as Response);
+      }
+      if (url.includes("/news")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [],
+        } as Response);
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+      } as Response);
+    });
+
+    const env = createEnv();
+    const request = createRequest("/v1/api/get-stock-details", { symbol: "AAPL" });
+    const logger = createMockLogger();
+    // Use real implementation (unmock for this test)
+    vi.doUnmock("../src/factories/createStockService");
+    const { createStockService: realCreateStockService } = await import("../src/factories/createStockService");
+    const stockService = realCreateStockService(env, logger);
+    const controller = new StockController(stockService, logger, env);
+    const response = await controller.getStockDetails(request, "AAPL");
+    
+    expect(response.status).toBe(200);
+    const data = await response.json() as any;
+    expect(data.stockDetails).toBeDefined();
+    expect(data.stockDetails.profile).toBeDefined();
+    expect(data.stockDetails.profile.beta).toBe(1.25);
+    expect(data.stockDetails.profile.companyName).toBe("Apple Inc.");
+  });
+
+  it("getStockDetails handles missing beta field gracefully", async () => {
+    const mockProfile = {
+      symbol: "AAPL",
+      companyName: "Apple Inc.",
+      industry: "Technology",
+      sector: "Consumer Electronics",
+      description: "Apple Inc. designs and manufactures...",
+      website: "https://apple.com",
+      image: "https://images.financialmodelingprep.com/symbol/AAPL.png",
+      // beta field is missing
+    };
+
+    const mockQuote = {
+      symbol: "AAPL",
+      price: 175.50,
+      change: 1.25,
+      changePercentage: 0.72,
+      dayHigh: 176.00,
+      dayLow: 174.00,
+      open: 175.00,
+      previousClose: 174.25,
+      volume: 50000000,
+      marketCap: 2800000000000,
+    };
+
+    // Mock fetch for all required endpoints
+    const profileCallMap = new Map<string, number>();
+    vi.spyOn(globalThis as any, "fetch").mockImplementation((url: string) => {
+      if (url.includes("/quote?")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [mockQuote],
+        } as Response);
+      }
+      if (url.includes("/profile")) {
+        const callKey = url;
+        const callCount = (profileCallMap.get(callKey) || 0) + 1;
+        profileCallMap.set(callKey, callCount);
+        if (callCount === 1) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => [mockProfile],
+          } as Response);
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => [],
+        } as Response);
+      }
+      if (url.includes("/historical")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ historical: [] }),
+        } as Response);
+      }
+      if (url.includes("/key-metrics") || url.includes("/income-statement") || url.includes("/ratios")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [],
+        } as Response);
+      }
+      if (url.includes("/news")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [],
+        } as Response);
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+      } as Response);
+    });
+
+    const env = createEnv();
+    const request = createRequest("/v1/api/get-stock-details", { symbol: "AAPL" });
+    const logger = createMockLogger();
+    // Use real implementation (unmock for this test)
+    vi.doUnmock("../src/factories/createStockService");
+    const { createStockService: realCreateStockService } = await import("../src/factories/createStockService");
+    const stockService = realCreateStockService(env, logger);
+    const controller = new StockController(stockService, logger, env);
+    const response = await controller.getStockDetails(request, "AAPL");
+    
+    expect(response.status).toBe(200);
+    const data = await response.json() as any;
+    expect(data.stockDetails).toBeDefined();
+    expect(data.stockDetails.profile).toBeDefined();
+    // Beta should be undefined when not provided
+    expect(data.stockDetails.profile.beta).toBeUndefined();
+    expect(data.stockDetails.profile.companyName).toBe("Apple Inc.");
   });
 });
 

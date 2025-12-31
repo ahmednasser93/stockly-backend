@@ -10,6 +10,18 @@ export interface AdminConfig {
     maxAlerts: number;
     windowSeconds: number;
   };
+  marketCache?: {
+    marketDataTtlSec: number; // Cache TTL for gainers/losers/actives (default: 300 = 5 minutes)
+    sectorsTtlSec: number; // Cache TTL for sectors performance (default: 2700 = 45 minutes)
+    newsTtlSec?: number; // Cache TTL for general news (default: 3600 = 1 hour)
+    prefetchCronInterval: string; // Cron expression for prefetch (default: "0 * * * *" = hourly)
+  };
+  workingHours?: {
+    enabled: boolean; // Enable/disable working hours feature
+    startHour: number; // 0-23 (default: 10)
+    endHour: number; // 0-23 (default: 23)
+    timezone: string; // IANA timezone (default: "Europe/Madrid")
+  };
   featureFlags: {
     alerting: boolean;
     sandboxMode: boolean;
@@ -23,6 +35,18 @@ const DEFAULT_CONFIG: AdminConfig = {
   primaryProvider: "alpha-feed",
   backupProvider: "beta-feed",
   alertThrottle: { maxAlerts: 100, windowSeconds: 60 },
+  marketCache: {
+    marketDataTtlSec: 300, // 5 minutes
+    sectorsTtlSec: 2700, // 45 minutes
+    newsTtlSec: 3600, // 1 hour
+    prefetchCronInterval: "0 * * * *", // Every 1 hour (hourly)
+  },
+  workingHours: {
+    enabled: true, // Working hours feature enabled by default
+    startHour: 10, // 10 AM
+    endHour: 23, // 11 PM
+    timezone: "Europe/Madrid", // Madrid timezone
+  },
   featureFlags: {
     alerting: true,
     sandboxMode: false,
@@ -79,6 +103,14 @@ export async function getConfig(env: Env): Promise<AdminConfig> {
         ...DEFAULT_CONFIG.alertThrottle,
         ...(parsed.alertThrottle || {}),
       },
+      marketCache: {
+        ...DEFAULT_CONFIG.marketCache!,
+        ...(parsed.marketCache || {}),
+      },
+      workingHours: {
+        ...DEFAULT_CONFIG.workingHours!,
+        ...(parsed.workingHours || {}),
+      },
       featureFlags: {
         ...DEFAULT_CONFIG.featureFlags,
         ...(parsed.featureFlags || {}),
@@ -123,6 +155,12 @@ export async function updateConfig(
       alertThrottle: updates.alertThrottle
         ? { ...current.alertThrottle, ...updates.alertThrottle }
         : current.alertThrottle,
+      marketCache: updates.marketCache
+        ? { ...(current.marketCache || DEFAULT_CONFIG.marketCache!), ...updates.marketCache }
+        : current.marketCache || DEFAULT_CONFIG.marketCache,
+      workingHours: updates.workingHours
+        ? { ...(current.workingHours || DEFAULT_CONFIG.workingHours!), ...updates.workingHours }
+        : current.workingHours || DEFAULT_CONFIG.workingHours,
       featureFlags: updates.featureFlags
         ? { ...current.featureFlags, ...updates.featureFlags }
         : current.featureFlags,

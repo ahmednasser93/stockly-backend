@@ -24,15 +24,22 @@ import { FavoriteStocksController } from "./controllers/favorite-stocks.controll
 import { getAllUsers, getUserByUsername, getUserDevices, getUserAlerts, getUserFavoriteStocks } from "./api/users";
 import { runAlertCron } from "./cron/alerts-cron";
 import { runNewsAlertCron } from "./cron/news-alert-cron";
+import { runMarketPrefetchCron } from "./cron/market-prefetch-cron";
 import { createHistoricalService } from "./factories/createHistoricalService";
 import { HistoricalController } from "./controllers/historical.controller";
+import { createMarketService } from "./factories/createMarketService";
+import { MarketController } from "./controllers/market.controller";
 import { getOpenApiSpec } from "./api/openapi";
+import { createCommonStocksService } from "./factories/createCommonStocksService";
+import { CommonStocksController } from "./controllers/common-stocks.controller";
 import {
   getConfigEndpoint,
   updateConfigEndpoint,
   simulateProviderFailureEndpoint,
   disableProviderFailureEndpoint,
+  getConfig,
 } from "./api/config";
+import { isWithinWorkingHours } from "./utils/working-hours";
 import {
   handleGoogleAuth,
   checkUsernameAvailability,
@@ -52,6 +59,7 @@ import { D1DatabaseWrapper } from "./infrastructure/database/D1Database";
 export interface Env {
   stockly: D1Database;
   alertsKv?: KVNamespace;
+  marketKv?: KVNamespace;
   FCM_SERVICE_ACCOUNT?: string; // Google Cloud Service Account JSON as string
   FMP_API_KEY?: string; // Financial Modeling Prep API key (optional, falls back to hardcoded in util.ts)
   LOKI_URL?: string; // Grafana Loki endpoint URL (e.g., "https://logs-prod-us-central-0.grafana.net")
@@ -289,6 +297,28 @@ export default {
         response = await sendTestNotification(request, loggedEnv, logger);
       } else if (pathname === "/v1/api/devices" && request.method === "DELETE") {
         response = await deleteDevice(request, loggedEnv, logger);
+      } else if (pathname === "/v1/api/admin/common-stocks" && request.method === "GET") {
+        const commonStocksService = createCommonStocksService(loggedEnv, logger);
+        const controller = new CommonStocksController(commonStocksService, logger, loggedEnv);
+        response = await controller.getCommonStocks(request);
+      } else if (pathname === "/v1/api/admin/common-stocks" && request.method === "POST") {
+        const commonStocksService = createCommonStocksService(loggedEnv, logger);
+        const controller = new CommonStocksController(commonStocksService, logger, loggedEnv);
+        response = await controller.addCommonStock(request);
+      } else if (pathname === "/v1/api/admin/common-stocks/bulk" && request.method === "POST") {
+        const commonStocksService = createCommonStocksService(loggedEnv, logger);
+        const controller = new CommonStocksController(commonStocksService, logger, loggedEnv);
+        response = await controller.bulkAddCommonStocks(request);
+      } else if (pathname.startsWith("/v1/api/admin/common-stocks/") && request.method === "PUT") {
+        const symbol = pathname.split("/v1/api/admin/common-stocks/")[1];
+        const commonStocksService = createCommonStocksService(loggedEnv, logger);
+        const controller = new CommonStocksController(commonStocksService, logger, loggedEnv);
+        response = await controller.updateCommonStock(request, symbol);
+      } else if (pathname.startsWith("/v1/api/admin/common-stocks/") && request.method === "DELETE") {
+        const symbol = pathname.split("/v1/api/admin/common-stocks/")[1];
+        const commonStocksService = createCommonStocksService(loggedEnv, logger);
+        const controller = new CommonStocksController(commonStocksService, logger, loggedEnv);
+        response = await controller.deleteCommonStock(request, symbol);
       } else if (pathname === "/config/get" && request.method === "GET") {
         response = await getConfigEndpoint(loggedEnv, logger);
       } else if (pathname === "/config/update" && request.method === "POST") {
@@ -317,6 +347,26 @@ export default {
         response = await controller.updateProfile(request);
       } else if (pathname === "/v1/api/auth/logout" && request.method === "POST") {
         response = await logout(request, loggedEnv, logger);
+      } else if (pathname === "/v1/api/market/gainers" && request.method === "GET") {
+        const marketService = createMarketService(loggedEnv, logger);
+        const controller = new MarketController(marketService, logger, loggedEnv);
+        response = await controller.getGainers(request);
+      } else if (pathname === "/v1/api/market/losers" && request.method === "GET") {
+        const marketService = createMarketService(loggedEnv, logger);
+        const controller = new MarketController(marketService, logger, loggedEnv);
+        response = await controller.getLosers(request);
+      } else if (pathname === "/v1/api/market/actives" && request.method === "GET") {
+        const marketService = createMarketService(loggedEnv, logger);
+        const controller = new MarketController(marketService, logger, loggedEnv);
+        response = await controller.getActives(request);
+      } else if (pathname === "/v1/api/market/screener" && request.method === "GET") {
+        const marketService = createMarketService(loggedEnv, logger);
+        const controller = new MarketController(marketService, logger, loggedEnv);
+        response = await controller.getScreener(request);
+      } else if (pathname === "/v1/api/market/sectors-performance" && request.method === "GET") {
+        const marketService = createMarketService(loggedEnv, logger);
+        const controller = new MarketController(marketService, logger, loggedEnv);
+        response = await controller.getSectorsPerformance(request);
       } else {
         logger.warn("Route not found", { pathname, method: request.method });
         response = json({ error: "Not Found" }, 404, request);
@@ -343,6 +393,22 @@ export default {
     return response;
   },
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+    // Check working hours before running any cron job
+    const config = await getConfig(env);
+    if (!isWithinWorkingHours(config)) {
+      const logger = new Logger({
+        traceId: `cron-${Date.now()}`,
+        userId: null,
+        path: '/cron',
+        service: 'stockly-api',
+      });
+      logger.info('Skipping cron job - outside working hours', {
+        cron: event.cron,
+        workingHours: config.workingHours,
+      });
+      return;
+    }
+
     // Run price alerts every 5 minutes (default cron)
     if (event.cron === "*/5 * * * *" || !event.cron) {
       ctx.waitUntil(runAlertCron(env, ctx));
@@ -351,6 +417,13 @@ export default {
     // Run news alerts every 6 hours (at 00:00, 06:00, 12:00, 18:00)
     if (event.cron === "0 */6 * * *") {
       ctx.waitUntil(runNewsAlertCron(env, ctx));
+    }
+
+    // Run market data & news prefetch every 1 hour (hourly) to warm cache
+    // The actual interval is configurable via AdminConfig, but wrangler.jsonc needs a valid cron expression
+    // This ensures cache is always fresh when users request data
+    if (event.cron === "0 * * * *") {
+      ctx.waitUntil(runMarketPrefetchCron(env, ctx));
     }
   },
 };

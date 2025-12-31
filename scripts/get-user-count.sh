@@ -47,3 +47,4 @@ SELECT
   (SELECT COUNT(*) FROM alerts WHERE status = 'active') as active_alerts;
 "
 
+

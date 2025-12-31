@@ -10,6 +10,6 @@ import { StockService } from '../services/stocks.service';
 
 export function createStockService(env: Env, logger: Logger): StockService {
   const stockRepo = new StockRepository(env, logger);
-  return new StockService(stockRepo);
+  return new StockService(stockRepo, env, logger);
 }
 

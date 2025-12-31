@@ -1,6 +1,7 @@
 import { API_KEY, API_URL } from "../util";
 import type { Env } from "../index";
 import { evaluateAlerts } from "../alerts/evaluate-alerts";
+import { MarketCacheRefreshService } from "../services/market-cache-refresh.service";
 import type { AlertRecord } from "../alerts/types";
 import type { Alert } from "@stockly/shared/types";
 import { sendFCMNotification } from "../notifications/fcm-sender";
@@ -110,6 +111,25 @@ export async function runAlertCron(env: Env, ctx?: ExecutionContext): Promise<vo
       timestamp: Date.now(),
     });
 
+    // Step 3: Update market cache if stocks exist (side effect, non-blocking)
+    // Convert priceBySymbol to format expected by cache refresh service
+    const updatedStocks = Object.entries(priceBySymbol).map(([symbol, price]) => ({
+      symbol,
+      price,
+      change: null,
+      changePercent: null,
+      volume: null,
+    }));
+    
+    if (updatedStocks.length > 0) {
+      const cacheRefreshService = new MarketCacheRefreshService(env, logger);
+      // Fire and forget - don't wait for completion
+      cacheRefreshService.refreshMarketCacheOnPriceUpdate(updatedStocks).catch((error) => {
+        logger.warn('Market cache refresh failed (non-blocking)', error);
+      });
+    }
+
+    // Step 4: Continue alert logic (update states, send notifications, etc.)
     // Update states in memory cache (queued for batched KV write)
     // This does NOT write to KV immediately - writes are batched
     for (const [id, snapshot] of Object.entries(result.stateUpdates)) {

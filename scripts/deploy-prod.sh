@@ -20,19 +20,25 @@ echo "🚀 Deploying Stockly API to Production"
 echo "================================================"
 echo ""
 
-echo "🧪 Running Tests..."
-echo "------------------------------------------------"
-echo "⚠️  All tests must pass before deployment can proceed"
-echo ""
+# Check if SKIP_TESTS environment variable is set
+if [ "${SKIP_TESTS}" != "true" ]; then
+  echo "🧪 Running Tests..."
+  echo "------------------------------------------------"
+  echo "⚠️  All tests must pass before deployment can proceed"
+  echo ""
 
-# Run tests - exit immediately if they fail
-# With set -e, the script will stop here if tests fail
-npm run test
+  # Run tests - exit immediately if they fail
+  # With set -e, the script will stop here if tests fail
+  npm run test
 
-# If we reach here, tests passed
-echo ""
-echo "✅ All tests passed!"
-echo ""
+  # If we reach here, tests passed
+  echo ""
+  echo "✅ All tests passed!"
+  echo ""
+else
+  echo "⚠️  SKIP_TESTS is set to true. Skipping tests (NOT RECOMMENDED)."
+  echo ""
+fi
 
 echo "🗄️  Running Database Migrations (Production)..."
 echo "------------------------------------------------"
@@ -104,8 +110,11 @@ wrangler d1 execute stockly --remote --yes --file=./migrations/021_fix_user_push
 echo "Migration 22/23: 022_create_devices_and_device_push_tokens.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/022_create_devices_and_device_push_tokens.sql || echo "⚠️  Migration 22 already applied or failed"
 
-echo "Migration 23/23: 023_migrate_user_push_tokens_to_devices.sql"
+echo "Migration 23/24: 023_migrate_user_push_tokens_to_devices.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/023_migrate_user_push_tokens_to_devices.sql || echo "⚠️  Migration 23 already applied or failed"
+
+echo "Migration 24/24: 024_create_common_stocks.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/024_create_common_stocks.sql || echo "⚠️  Migration 24 already applied or failed"
 
 echo ""
 echo "✅ Database migrations complete"

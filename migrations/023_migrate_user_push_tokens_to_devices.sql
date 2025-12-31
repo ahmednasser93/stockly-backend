@@ -49,3 +49,4 @@ WHERE device_identifier IS NULL;
 -- It can be removed in a future migration after verifying the new schema works correctly
 
 
+

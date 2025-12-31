@@ -54,6 +54,10 @@ vi.mock("../src/api/config", () => ({
   updateConfigEndpoint: vi.fn(),
   simulateProviderFailureEndpoint: vi.fn(),
   disableProviderFailureEndpoint: vi.fn(),
+  getConfig: vi.fn(),
+}));
+vi.mock("../src/utils/working-hours", () => ({
+  isWithinWorkingHours: vi.fn(),
 }));
 vi.mock("../src/api/auth", () => ({
   handleGoogleAuth: vi.fn(),
@@ -96,6 +100,7 @@ import * as createHistoricalServiceMock from "../src/factories/createHistoricalS
 import * as openapiMock from "../src/api/openapi";
 import * as configMock from "../src/api/config";
 import * as authMock from "../src/api/auth";
+import * as workingHoursMock from "../src/utils/working-hours";
 import type { Env } from "../src/index";
 
 const makeRequest = (path: string, method: string = "GET") =>
@@ -133,6 +138,30 @@ describe("worker router", () => {
 
     // Default valid responses
     vi.mocked(healthMock.healthCheck).mockReturnValue(new Response("ok"));
+    // Default working hours - enabled, within hours
+    vi.mocked(configMock.getConfig).mockResolvedValue({
+      pollingIntervalSec: 30,
+      kvWriteIntervalSec: 3600,
+      primaryProvider: 'alpha-feed',
+      backupProvider: 'beta-feed',
+      alertThrottle: { maxAlerts: 100, windowSeconds: 60 },
+      marketCache: {
+        marketDataTtlSec: 300,
+        sectorsTtlSec: 2700,
+      },
+      workingHours: {
+        enabled: true,
+        startHour: 10,
+        endHour: 23,
+        timezone: 'Europe/Madrid',
+      },
+      featureFlags: {
+        alerting: true,
+        sandboxMode: false,
+        simulateProviderFailure: false,
+      },
+    } as any);
+    vi.mocked(workingHoursMock.isWithinWorkingHours).mockReturnValue(true);
     // Add other defaults as needed
   });
 
@@ -401,6 +430,31 @@ describe("worker router", () => {
       expect(newsAlertCronMock.runNewsAlertCron).toHaveBeenCalled();
       expect(mockCtx.waitUntil).toHaveBeenCalled();
     });
+
+    it("skips cron jobs when outside working hours", async () => {
+      // Arrange - mock outside working hours
+      vi.mocked(workingHoursMock.isWithinWorkingHours).mockReturnValue(false);
+
+      // Act
+      await worker.scheduled({ cron: "*/5 * * * *" } as any, mockEnv, mockCtx);
+
+      // Assert - cron should not run
+      expect(alertsCronMock.runAlertCron).not.toHaveBeenCalled();
+      expect(configMock.getConfig).toHaveBeenCalledWith(mockEnv);
+    });
+
+    it("runs cron jobs when within working hours", async () => {
+      // Arrange - mock within working hours
+      vi.mocked(workingHoursMock.isWithinWorkingHours).mockReturnValue(true);
+
+      // Act
+      await worker.scheduled({ cron: "*/5 * * * *" } as any, mockEnv, mockCtx);
+
+      // Assert - cron should run
+      expect(alertsCronMock.runAlertCron).toHaveBeenCalled();
+      expect(mockCtx.waitUntil).toHaveBeenCalled();
+    });
+
     it("handles unhandled errors", async () => {
       // Mock health check to throw error
       vi.mocked(healthMock.healthCheck).mockImplementationOnce(() => {

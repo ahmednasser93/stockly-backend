@@ -33,6 +33,10 @@ export async function getOpenApiSpec(): Promise<Response> {
         description: "Real-time stock quote endpoints",
       },
       {
+        name: "Market",
+        description: "Market data endpoints (gainers, losers, actives)",
+      },
+      {
         name: "Historical Prices",
         description: "Historical stock price data endpoints",
       },
@@ -201,6 +205,177 @@ export async function getOpenApiSpec(): Promise<Response> {
                         exchangeFullName: { type: "string" },
                       },
                     },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/v1/api/market/gainers": {
+        get: {
+          summary: "Get top gainers",
+          description: "Get stocks with the biggest percentage gains today. Results are cached in Cloudflare KV for 5 minutes to minimize API calls.",
+          tags: ["Market"],
+          parameters: [
+            {
+              name: "limit",
+              in: "query",
+              required: false,
+              description: "Maximum number of results (default: 10, min: 1, max: 50)",
+              schema: {
+                type: "integer",
+                minimum: 1,
+                maximum: 50,
+                default: 10,
+              },
+              example: 10,
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Successful response",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "array",
+                    items: {
+                      $ref: "#/components/schemas/MarketStockItem",
+                    },
+                  },
+                },
+              },
+            },
+            "400": {
+              description: "Bad request - invalid limit parameter",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            "500": {
+              description: "Server error",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/v1/api/market/losers": {
+        get: {
+          summary: "Get top losers",
+          description: "Get stocks with the biggest percentage losses today. Results are cached in Cloudflare KV for 5 minutes to minimize API calls.",
+          tags: ["Market"],
+          parameters: [
+            {
+              name: "limit",
+              in: "query",
+              required: false,
+              description: "Maximum number of results (default: 10, min: 1, max: 50)",
+              schema: {
+                type: "integer",
+                minimum: 1,
+                maximum: 50,
+                default: 10,
+              },
+              example: 10,
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Successful response",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "array",
+                    items: {
+                      $ref: "#/components/schemas/MarketStockItem",
+                    },
+                  },
+                },
+              },
+            },
+            "400": {
+              description: "Bad request - invalid limit parameter",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            "500": {
+              description: "Server error",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/v1/api/market/actives": {
+        get: {
+          summary: "Get most active stocks",
+          description: "Get stocks with the highest trading volume. Results are cached in Cloudflare KV for 5 minutes to minimize API calls.",
+          tags: ["Market"],
+          parameters: [
+            {
+              name: "limit",
+              in: "query",
+              required: false,
+              description: "Maximum number of results (default: 10, min: 1, max: 50)",
+              schema: {
+                type: "integer",
+                minimum: 1,
+                maximum: 50,
+                default: 10,
+              },
+              example: 10,
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Successful response",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "array",
+                    items: {
+                      $ref: "#/components/schemas/MarketStockItem",
+                    },
+                  },
+                },
+              },
+            },
+            "400": {
+              description: "Bad request - invalid limit parameter",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            "500": {
+              description: "Server error",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
                   },
                 },
               },
@@ -1139,6 +1314,81 @@ export async function getOpenApiSpec(): Promise<Response> {
             symbol: { type: "string", example: "AAPL" },
             name: { type: "string", example: "Apple Inc." },
             price: { type: "number", nullable: true, example: 150.25 },
+          },
+        },
+        MarketStockItem: {
+          type: "object",
+          required: ["symbol", "name", "price"],
+          properties: {
+            symbol: {
+              type: "string",
+              description: "Stock ticker symbol",
+              example: "AAPL",
+            },
+            name: {
+              type: "string",
+              description: "Company name",
+              example: "Apple Inc.",
+            },
+            price: {
+              type: "number",
+              description: "Current stock price",
+              example: 150.0,
+            },
+            change: {
+              type: "number",
+              nullable: true,
+              description: "Price change from previous close",
+              example: 1.5,
+            },
+            changesPercentage: {
+              type: "number",
+              nullable: true,
+              description: "Percentage change from previous close",
+              example: 1.0,
+            },
+            volume: {
+              type: "number",
+              nullable: true,
+              description: "Trading volume",
+              example: 1000000,
+            },
+            dayLow: {
+              type: "number",
+              nullable: true,
+              description: "Lowest price of the day",
+              example: 149.0,
+            },
+            dayHigh: {
+              type: "number",
+              nullable: true,
+              description: "Highest price of the day",
+              example: 152.0,
+            },
+            marketCap: {
+              type: "number",
+              nullable: true,
+              description: "Market capitalization",
+              example: 2500000000000,
+            },
+            exchange: {
+              type: "string",
+              nullable: true,
+              description: "Stock exchange",
+              example: "NASDAQ",
+            },
+            exchangeShortName: {
+              type: "string",
+              nullable: true,
+              description: "Short exchange name",
+              example: "NASDAQ",
+            },
+            type: {
+              type: "string",
+              nullable: true,
+              description: "Security type",
+              example: "stock",
+            },
           },
         },
         StockNewsResponse: {

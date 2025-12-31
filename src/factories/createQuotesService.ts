@@ -7,6 +7,6 @@ import { D1DatabaseWrapper } from '../infrastructure/database/D1Database';
 export function createQuotesService(env: Env, logger: Logger): QuotesService {
   const db = new D1DatabaseWrapper(env.stockly, logger);
   const quotesRepo = new QuotesRepository(db, env, logger);
-  return new QuotesService(quotesRepo);
+  return new QuotesService(quotesRepo, env, logger);
 }
 

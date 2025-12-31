@@ -18,3 +18,4 @@ CREATE INDEX IF NOT EXISTS idx_notifications_log_user_id ON notifications_log(us
 
 
 
+
