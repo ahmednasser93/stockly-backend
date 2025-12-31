@@ -1,33 +1,29 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<testsuites name="vitest tests" tests="14" failures="0" errors="0" time="0.078">
-    <testsuite name="src/services/__tests__/market.service.test.ts" timestamp="2025-12-31T09:57:51.317Z" hostname="sngvahmed" tests="14" failures="0" errors="0" skipped="0" time="0.078">
-        <testcase classname="src/services/__tests__/market.service.test.ts" name="MarketService &gt; getGainers &gt; should return cached data when KV cache hit" time="0.01">
+<testsuites name="vitest tests" tests="12" failures="0" errors="0" time="0.067">
+    <testsuite name="src/services/__tests__/dividend-edge-cases.test.ts" timestamp="2025-12-31T10:23:19.490Z" hostname="sngvahmed" tests="12" failures="0" errors="0" skipped="0" time="0.067">
+        <testcase classname="src/services/__tests__/dividend-edge-cases.test.ts" name="DividendService - Edge Cases &gt; calculateDGR - Edge Cases &gt; should handle zero DGR (no growth)" time="0.008">
         </testcase>
-        <testcase classname="src/services/__tests__/market.service.test.ts" name="MarketService &gt; getGainers &gt; should fetch from FMP and cache when KV cache miss" time="0.005">
+        <testcase classname="src/services/__tests__/dividend-edge-cases.test.ts" name="DividendService - Edge Cases &gt; calculateDGR - Edge Cases &gt; should handle negative DGR (dividend cuts)" time="0.005">
         </testcase>
-        <testcase classname="src/services/__tests__/market.service.test.ts" name="MarketService &gt; getGainers &gt; should fetch from FMP and cache when KV cache expired" time="0.004">
+        <testcase classname="src/services/__tests__/dividend-edge-cases.test.ts" name="DividendService - Edge Cases &gt; calculateDGR - Edge Cases &gt; should handle very high DGR (&gt;50%)" time="0.004">
         </testcase>
-        <testcase classname="src/services/__tests__/market.service.test.ts" name="MarketService &gt; getGainers &gt; should return stale cache when FMP API fails" time="0.005">
+        <testcase classname="src/services/__tests__/dividend-edge-cases.test.ts" name="DividendService - Edge Cases &gt; calculateDGR - Edge Cases &gt; should handle zero yield" time="0.003">
         </testcase>
-        <testcase classname="src/services/__tests__/market.service.test.ts" name="MarketService &gt; getGainers &gt; should return empty array when FMP fails and no stale cache available" time="0.005">
+        <testcase classname="src/services/__tests__/dividend-edge-cases.test.ts" name="DividendService - Edge Cases &gt; calculateDGR - Edge Cases &gt; should handle very large initial investment" time="0.014">
         </testcase>
-        <testcase classname="src/services/__tests__/market.service.test.ts" name="MarketService &gt; getGainers &gt; should return stale cache when outside working hours and no fresh cache" time="0.005">
+        <testcase classname="src/services/__tests__/dividend-edge-cases.test.ts" name="DividendService - Edge Cases &gt; calculateDGR - Edge Cases &gt; should handle very small initial investment" time="0.003">
         </testcase>
-        <testcase classname="src/services/__tests__/market.service.test.ts" name="MarketService &gt; getGainers &gt; should return empty array when outside working hours and no cache available" time="0.004">
+        <testcase classname="src/services/__tests__/dividend-edge-cases.test.ts" name="DividendService - Edge Cases &gt; calculateDGR - Edge Cases &gt; should handle single year of data" time="0.003">
         </testcase>
-        <testcase classname="src/services/__tests__/market.service.test.ts" name="MarketService &gt; getLosers &gt; should return cached data when KV cache hit" time="0.005">
+        <testcase classname="src/services/__tests__/dividend-edge-cases.test.ts" name="DividendService - Edge Cases &gt; calculateDGR - Edge Cases &gt; should handle missing dividend data in some years" time="0.003">
         </testcase>
-        <testcase classname="src/services/__tests__/market.service.test.ts" name="MarketService &gt; getLosers &gt; should fetch from FMP and cache when KV cache miss" time="0.004">
+        <testcase classname="src/services/__tests__/dividend-edge-cases.test.ts" name="DividendService - Edge Cases &gt; calculateDGR - Edge Cases &gt; should handle projection with zero DGR" time="0.003">
         </testcase>
-        <testcase classname="src/services/__tests__/market.service.test.ts" name="MarketService &gt; getActives &gt; should return cached data when KV cache hit" time="0.003">
+        <testcase classname="src/services/__tests__/dividend-edge-cases.test.ts" name="DividendService - Edge Cases &gt; calculateDGR - Edge Cases &gt; should handle projection with negative DGR" time="0.004">
         </testcase>
-        <testcase classname="src/services/__tests__/market.service.test.ts" name="MarketService &gt; getActives &gt; should fetch from FMP and cache when KV cache miss" time="0.003">
+        <testcase classname="src/services/__tests__/dividend-edge-cases.test.ts" name="DividendService - Edge Cases &gt; generateInsight - Edge Cases &gt; should generate insight for very small dividend" time="0.003">
         </testcase>
-        <testcase classname="src/services/__tests__/market.service.test.ts" name="MarketService &gt; getSectorsPerformance &gt; should return cached data when KV cache hit" time="0.003">
-        </testcase>
-        <testcase classname="src/services/__tests__/market.service.test.ts" name="MarketService &gt; getSectorsPerformance &gt; should fetch from FMP and cache when KV cache miss" time="0.003">
-        </testcase>
-        <testcase classname="src/services/__tests__/market.service.test.ts" name="MarketService &gt; getSectorsPerformance &gt; should return stale cache when FMP API fails" time="0.003">
+        <testcase classname="src/services/__tests__/dividend-edge-cases.test.ts" name="DividendService - Edge Cases &gt; generateInsight - Edge Cases &gt; should generate insight for very large dividend" time="0.003">
         </testcase>
     </testsuite>
 </testsuites>

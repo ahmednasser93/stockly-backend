@@ -52,6 +52,10 @@ export async function getOpenApiSpec(): Promise<Response> {
         name: "Health",
         description: "Health check endpoint",
       },
+      {
+        name: "Dividends",
+        description: "Dividend data and projections",
+      },
     ],
     paths: {
       "/v1/api/health": {
@@ -1054,10 +1058,62 @@ export async function getOpenApiSpec(): Promise<Response> {
               description: "Alert deleted successfully",
             },
           },
+      },
+      "/v1/api/dividends/data": {
+        get: {
+          summary: "Get dividend data",
+          description: "Get dividend data for a stock including current yield, dividend growth rate, and historical dividends. Results are cached in Cloudflare KV for 24 hours.",
+          tags: ["Dividends"],
+          parameters: [
+            {
+              name: "symbol",
+              in: "query",
+              required: true,
+              description: "Stock ticker symbol",
+              schema: {
+                type: "string",
+                maxLength: 10,
+              },
+              example: "KO",
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Successful response",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/DividendData",
+                  },
+                },
+              },
+            },
+            "400": {
+              description: "Invalid parameters",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            "500": {
+              description: "Server error",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+          },
         },
       },
     },
-    components: {
+  },
+  components: {
       schemas: {
         HistoricalPricesResponse: {
           type: "object",
@@ -1465,6 +1521,151 @@ export async function getOpenApiSpec(): Promise<Response> {
             image: { type: "string", nullable: true, example: "https://example.com/image.jpg" },
             site: { type: "string", example: "TechCrunch", description: "News source/site name" },
             type: { type: "string", example: "news", description: "Type of content" },
+          },
+        },
+        DividendData: {
+          type: "object",
+          required: ["symbol", "last5YearsDividends", "hasInsufficientData"],
+          properties: {
+            symbol: {
+              type: "string",
+              description: "Stock ticker symbol",
+              example: "KO",
+            },
+            currentYield: {
+              type: "number",
+              nullable: true,
+              description: "Current dividend yield (as decimal, e.g., 0.03 for 3%)",
+              example: 0.03,
+            },
+            dividendGrowthRate: {
+              type: "number",
+              nullable: true,
+              description: "Dividend growth rate (as decimal, e.g., 0.05 for 5%)",
+              example: 0.05,
+            },
+            last5YearsDividends: {
+              type: "array",
+              items: {
+                $ref: "#/components/schemas/DividendHistory",
+              },
+            },
+            hasInsufficientData: {
+              type: "boolean",
+              description: "True if less than 2 years of dividend history",
+              example: false,
+            },
+          },
+        },
+        DividendHistory: {
+          type: "object",
+          required: ["date", "dividend"],
+          properties: {
+            date: {
+              type: "string",
+              format: "date",
+              description: "Dividend payment date (YYYY-MM-DD)",
+              example: "2024-01-15",
+            },
+            dividend: {
+              type: "number",
+              description: "Dividend amount per share",
+              example: 0.46,
+            },
+          },
+        },
+        ProjectionRequest: {
+          type: "object",
+          required: ["symbol", "initialInvestment"],
+          properties: {
+            symbol: {
+              type: "string",
+              description: "Stock ticker symbol",
+              example: "KO",
+            },
+            initialInvestment: {
+              type: "number",
+              minimum: 100,
+              maximum: 100000000,
+              description: "Initial investment amount in USD",
+              example: 10000,
+            },
+            years: {
+              type: "integer",
+              minimum: 1,
+              maximum: 30,
+              default: 10,
+              description: "Number of years to project (default: 10)",
+              example: 10,
+            },
+          },
+        },
+        ProjectionResult: {
+          type: "object",
+          required: ["years", "totalDividendsReinvested", "totalDividendsSpent", "finalPrincipalReinvested", "insight"],
+          properties: {
+            years: {
+              type: "array",
+              items: {
+                $ref: "#/components/schemas/ProjectionYear",
+              },
+            },
+            totalDividendsReinvested: {
+              type: "number",
+              description: "Total dividends earned if reinvested",
+              example: 5000.0,
+            },
+            totalDividendsSpent: {
+              type: "number",
+              description: "Total dividends earned if spent",
+              example: 3000.0,
+            },
+            finalPrincipalReinvested: {
+              type: "number",
+              description: "Final portfolio value if dividends were reinvested",
+              example: 15000.0,
+            },
+            insight: {
+              type: "string",
+              description: "Generated insight message",
+              example: "In 10 years, your KO position could pay for your monthly groceries ($450/mo).",
+            },
+          },
+        },
+        ProjectionYear: {
+          type: "object",
+          required: ["year", "dividendReinvested", "dividendSpent", "cumulativeReinvested", "cumulativeSpent", "principalReinvested"],
+          properties: {
+            year: {
+              type: "integer",
+              description: "Year number (1-10)",
+              example: 1,
+            },
+            dividendReinvested: {
+              type: "number",
+              description: "Dividend earned this year if reinvested",
+              example: 300.0,
+            },
+            dividendSpent: {
+              type: "number",
+              description: "Dividend earned this year if spent",
+              example: 300.0,
+            },
+            cumulativeReinvested: {
+              type: "number",
+              description: "Cumulative dividends if reinvested",
+              example: 300.0,
+            },
+            cumulativeSpent: {
+              type: "number",
+              description: "Cumulative dividends if spent",
+              example: 300.0,
+            },
+            principalReinvested: {
+              type: "number",
+              description: "Principal value if dividends were reinvested",
+              example: 10300.0,
+            },
           },
         },
         Alert: {

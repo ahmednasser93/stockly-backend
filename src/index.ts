@@ -29,6 +29,8 @@ import { createHistoricalService } from "./factories/createHistoricalService";
 import { HistoricalController } from "./controllers/historical.controller";
 import { createMarketService } from "./factories/createMarketService";
 import { MarketController } from "./controllers/market.controller";
+import { createDividendService } from "./factories/createDividendService";
+import { DividendController } from "./controllers/dividend.controller";
 import { getOpenApiSpec } from "./api/openapi";
 import { createCommonStocksService } from "./factories/createCommonStocksService";
 import { CommonStocksController } from "./controllers/common-stocks.controller";
@@ -367,6 +369,14 @@ export default {
         const marketService = createMarketService(loggedEnv, logger);
         const controller = new MarketController(marketService, logger, loggedEnv);
         response = await controller.getSectorsPerformance(request);
+      } else if (pathname === "/v1/api/dividends/data" && request.method === "GET") {
+        const dividendService = createDividendService(loggedEnv, logger);
+        const controller = new DividendController(dividendService, logger, loggedEnv);
+        response = await controller.getDividendData(request);
+      } else if (pathname === "/v1/api/dividends/project" && request.method === "POST") {
+        const dividendService = createDividendService(loggedEnv, logger);
+        const controller = new DividendController(dividendService, logger, loggedEnv);
+        response = await controller.calculateProjection(request);
       } else {
         logger.warn("Route not found", { pathname, method: request.method });
         response = json({ error: "Not Found" }, 404, request);
