@@ -10,7 +10,7 @@ import type { Env } from '../../index';
 import type { Logger } from '../../logging/logger';
 import { createErrorResponse } from '../../auth/error-handler';
 import type { MarketStockItem, SectorPerformanceItem } from '@stockly/shared/types';
-import { MarketResponseSchema, GetMarketRequestSchema, SectorsResponseSchema, PaginatedMarketResponseSchema } from '@stockly/shared/schemas';
+import { MarketResponseSchema, GetMarketRequestSchema, SectorsResponseSchema, PaginatedMarketResponseSchema, MarketStatusResponseSchema } from '@stockly/shared/schemas';
 
 describe('MarketController', () => {
   let controller: MarketController;
@@ -35,6 +35,7 @@ describe('MarketController', () => {
       getActives: vi.fn(),
       getSectorsPerformance: vi.fn(),
       getScreener: vi.fn(),
+      getMarketStatus: vi.fn(),
     } as any;
 
     controller = new MarketController(mockService, mockLogger, mockEnv);
@@ -307,6 +308,56 @@ describe('MarketController', () => {
       // Assert
       expect(response.status).toBe(200);
       expect(json).toEqual([]);
+    });
+  });
+
+  describe('getMarketStatus', () => {
+    it('should return market status data successfully', async () => {
+      // Arrange
+      const mockData = { isTheStockMarketOpen: true };
+      vi.mocked(mockService.getMarketStatus).mockResolvedValue(mockData);
+      const request = new Request('https://example.com/v1/api/market/status');
+
+      // Act
+      const response = await controller.getMarketStatus(request);
+      const json = await response.json();
+
+      // Assert
+      expect(response.status).toBe(200);
+      expect(json).toEqual(mockData);
+      expect(MarketStatusResponseSchema.safeParse(json).success).toBe(true);
+      expect(mockService.getMarketStatus).toHaveBeenCalledTimes(1);
+    });
+
+    it('should return 500 when service fails', async () => {
+      // Arrange
+      vi.mocked(mockService.getMarketStatus).mockRejectedValue(new Error('Service error'));
+      const request = new Request('https://example.com/v1/api/market/status');
+
+      // Act
+      const response = await controller.getMarketStatus(request);
+
+      // Assert
+      expect(response.status).toBe(500);
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'Failed to get market status',
+        expect.any(Error)
+      );
+    });
+
+    it('should handle market closed status', async () => {
+      // Arrange
+      const mockData = { isTheStockMarketOpen: false };
+      vi.mocked(mockService.getMarketStatus).mockResolvedValue(mockData);
+      const request = new Request('https://example.com/v1/api/market/status');
+
+      // Act
+      const response = await controller.getMarketStatus(request);
+      const json = await response.json();
+
+      // Assert
+      expect(response.status).toBe(200);
+      expect(json).toEqual({ isTheStockMarketOpen: false });
     });
   });
 });

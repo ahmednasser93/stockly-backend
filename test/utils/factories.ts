@@ -93,6 +93,7 @@ export function createMockRequest(
   return new Request(absoluteUrl, {
     method,
     headers: {
+      "Origin": "http://localhost:5173", // Add Origin header for client authentication in tests
       "Content-Type": "application/json",
       ...headers,
     },
@@ -213,6 +214,12 @@ export function createTestRequest(
     init.body = JSON.stringify(body);
   }
   
-  return new Request(url, init);
+  return new Request(url, {
+    ...init,
+    headers: {
+      "Origin": "http://localhost:5173", // Add Origin header for client authentication in tests
+      ...init?.headers,
+    }
+  });
 }
 

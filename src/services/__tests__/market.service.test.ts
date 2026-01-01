@@ -65,6 +65,7 @@ describe('MarketService', () => {
       getLosers: vi.fn(),
       getActives: vi.fn(),
       getSectorsPerformance: vi.fn(),
+      getMarketStatus: vi.fn(),
       fetchPricesForStocks: vi.fn(),
     } as any;
 
@@ -128,7 +129,7 @@ describe('MarketService', () => {
       // Assert
       // Should return first 10 items (default limit)
       expect(result).toEqual(cachedData.slice(0, 10));
-      expect(getMarketDataFromKV).toHaveBeenCalledWith(mockKv, 'market:gainers:top50');
+      expect(getMarketDataFromKV).toHaveBeenCalledWith(mockKv, 'market:gainers:top50', expect.any(Object));
       expect(mockRepository.getGainers).not.toHaveBeenCalled();
       expect(setMarketDataToKV).not.toHaveBeenCalled();
     });
@@ -158,13 +159,14 @@ describe('MarketService', () => {
       // Assert
       // Should return first 10 items (default limit)
       expect(result).toEqual(freshData.slice(0, 10));
-      expect(getMarketDataFromKV).toHaveBeenCalledWith(mockKv, 'market:gainers:top50');
+      expect(getMarketDataFromKV).toHaveBeenCalledWith(mockKv, 'market:gainers:top50', expect.any(Object));
       expect(mockRepository.getGainers).toHaveBeenCalledTimes(1);
       // Should cache the full list, not the limited list
       expect(setMarketDataToKV).toHaveBeenCalledWith(
         mockKv,
         'market:gainers:top50',
         freshData,
+        expect.any(Object),
         300
       );
     });
@@ -221,7 +223,7 @@ describe('MarketService', () => {
       // Assert
       // Should return first 10 items from stale cache
       expect(result).toEqual(staleData.slice(0, 10));
-      expect(getStaleMarketDataFromKV).toHaveBeenCalledWith(mockKv, 'market:gainers:full');
+      expect(getStaleMarketDataFromKV).toHaveBeenCalledWith(mockKv, 'market:gainers:full', expect.any(Object));
       expect(mockLogger.warn).toHaveBeenCalled();
     });
 
@@ -271,7 +273,7 @@ describe('MarketService', () => {
       // Assert
       // Should return first 10 items from stale cache
       expect(result).toEqual(staleData.slice(0, 10));
-      expect(getStaleMarketDataFromKV).toHaveBeenCalledWith(mockKv, 'market:gainers:full');
+      expect(getStaleMarketDataFromKV).toHaveBeenCalledWith(mockKv, 'market:gainers:full', expect.any(Object));
       expect(mockLogger?.warn).toHaveBeenCalledWith(
         expect.stringContaining('Using stale cache for gainers as last resort'),
         expect.any(Object)
@@ -334,7 +336,7 @@ describe('MarketService', () => {
 
       // Assert
       expect(result).toEqual(cachedData.slice(0, 10));
-      expect(getMarketDataFromKV).toHaveBeenCalledWith(mockKv, 'market:losers:top50');
+      expect(getMarketDataFromKV).toHaveBeenCalledWith(mockKv, 'market:losers:top50', expect.any(Object));
       expect(mockRepository.getLosers).not.toHaveBeenCalled();
     });
 
@@ -367,6 +369,7 @@ describe('MarketService', () => {
         mockKv,
         'market:losers:top50',
         freshData,
+        expect.any(Object),
         300
       );
     });
@@ -400,7 +403,7 @@ describe('MarketService', () => {
 
       // Assert
       expect(result).toEqual(cachedData.slice(0, 10));
-      expect(getMarketDataFromKV).toHaveBeenCalledWith(mockKv, 'market:actives:top50');
+      expect(getMarketDataFromKV).toHaveBeenCalledWith(mockKv, 'market:actives:top50', expect.any(Object));
       expect(mockRepository.getActives).not.toHaveBeenCalled();
     });
 
@@ -433,6 +436,7 @@ describe('MarketService', () => {
         mockKv,
         'market:actives:top50',
         freshData,
+        expect.any(Object),
         300
       );
     });
@@ -462,7 +466,7 @@ describe('MarketService', () => {
 
       // Assert
       expect(result).toEqual(cachedData);
-      expect(getSectorsDataFromKV).toHaveBeenCalledWith(mockKv, 'market:sectors-performance');
+      expect(getSectorsDataFromKV).toHaveBeenCalledWith(mockKv, 'market:sectors-performance', expect.any(Object));
       expect(mockRepository.getSectorsPerformance).not.toHaveBeenCalled();
       expect(setSectorsDataToKV).not.toHaveBeenCalled();
     });
@@ -490,6 +494,7 @@ describe('MarketService', () => {
         mockKv,
         'market:sectors-performance',
         freshData,
+        expect.any(Object),
         2700 // 45 minutes
       );
     });
@@ -517,6 +522,74 @@ describe('MarketService', () => {
       expect(result).toEqual(staleData);
       expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining('FMP API failed, returning stale cache for sectors performance')
+      );
+    });
+  });
+
+  describe('getMarketStatus', () => {
+    it('should return cached data when KV cache hit', async () => {
+      // Arrange
+      const cachedData = { isTheStockMarketOpen: true };
+      const mockKvGet = vi.fn().mockResolvedValue(JSON.stringify({
+        data: cachedData,
+        cachedAt: Date.now(),
+        expiresAt: Date.now() + 60000,
+      }));
+
+      mockKv.get = mockKvGet;
+
+      // Act
+      const result = await service.getMarketStatus();
+
+      // Assert
+      expect(result).toEqual(cachedData);
+      expect(mockKvGet).toHaveBeenCalledWith('market:status');
+      expect(mockRepository.getMarketStatus).not.toHaveBeenCalled();
+    });
+
+    it('should fetch from FMP and cache when KV cache miss', async () => {
+      // Arrange
+      const freshData = { isTheStockMarketOpen: false };
+      const mockKvGet = vi.fn().mockResolvedValue(null);
+      const mockKvPut = vi.fn().mockResolvedValue(undefined);
+
+      mockKv.get = mockKvGet;
+      mockKv.put = mockKvPut;
+      vi.mocked(mockRepository.getMarketStatus).mockResolvedValue(freshData);
+
+      // Act
+      const result = await service.getMarketStatus();
+
+      // Assert
+      expect(result).toEqual(freshData);
+      expect(mockRepository.getMarketStatus).toHaveBeenCalledTimes(1);
+      expect(mockKvPut).toHaveBeenCalled();
+      const putCall = mockKvPut.mock.calls[0];
+      expect(putCall[0]).toBe('market:status');
+      const cachedEntry = JSON.parse(putCall[1] as string);
+      expect(cachedEntry.data).toEqual(freshData);
+    });
+
+    it('should return stale cache when FMP API fails', async () => {
+      // Arrange
+      const staleData = { isTheStockMarketOpen: true };
+      const mockKvGet = vi.fn()
+        .mockResolvedValueOnce(null) // First call (cache miss)
+        .mockResolvedValueOnce(JSON.stringify({ // Second call (stale cache)
+          data: staleData,
+          cachedAt: Date.now() - 3600000, // 1 hour ago
+        }));
+
+      mockKv.get = mockKvGet;
+      vi.mocked(mockRepository.getMarketStatus).mockRejectedValue(new Error('FMP API failed'));
+
+      // Act
+      const result = await service.getMarketStatus();
+
+      // Assert
+      expect(result).toEqual(staleData);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('FMP API failed, returning stale cache for market status')
       );
     });
   });

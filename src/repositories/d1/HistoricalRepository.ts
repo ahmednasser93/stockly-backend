@@ -2,9 +2,10 @@ import type { IHistoricalRepository } from '../interfaces/IHistoricalRepository'
 import type { IDatabase } from '../../infrastructure/database/IDatabase';
 import type { HistoricalPriceData, IntradayCandle } from '@stockly/shared/types';
 import { getHistoricalPricesByDateRange, fetchAndSaveHistoricalPrice } from '../../api/historical-prices';
-import { API_KEY, API_URL } from '../../util';
+import { API_KEY } from '../../util';
 import type { Env } from '../../index';
 import type { Logger } from '../../logging/logger';
+import type { DatalakeService } from '../../services/datalake.service';
 
 /**
  * Parse interval string to minutes
@@ -128,9 +129,15 @@ function aggregateToInterval(
 }
 
 /**
- * Fetch 30-minute data from FMP API
+ * Fetch 30-minute data using datalake adapter
  */
-async function fetch30MinuteData(symbol: string, fromDate: string, toDate: string, env: Env): Promise<Array<{
+async function fetch30MinuteData(
+  symbol: string, 
+  fromDate: string, 
+  toDate: string, 
+  env: Env,
+  datalakeService?: DatalakeService
+): Promise<Array<{
   date: string;
   open: number;
   high: number;
@@ -141,16 +148,51 @@ async function fetch30MinuteData(symbol: string, fromDate: string, toDate: strin
   const normalizedSymbol = symbol.trim().toUpperCase();
   const apiKey = env.FMP_API_KEY ?? API_KEY;
 
-  const apiUrl = `${API_URL}/historical-chart/30min?symbol=${normalizedSymbol}&apikey=${apiKey}&from=${fromDate}&to=${toDate}`;
+  let data: any;
 
-  const response = await fetch(apiUrl);
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '');
-    throw new Error(`Failed to fetch 30-minute data: HTTP ${response.status}`);
+  // Try datalake adapter first
+  if (datalakeService) {
+    try {
+      const adapter = await datalakeService.getAdapterForEndpoint('historical-chart-30min', apiKey);
+      if (adapter) {
+        data = await adapter.fetch('/historical-chart/30min', {
+          symbol: normalizedSymbol,
+          from: fromDate,
+          to: toDate,
+        });
+      } else {
+        // Fallback to direct FMP
+        const { API_URL } = await import('../../util');
+        const apiUrl = `${API_URL}/historical-chart/30min?symbol=${normalizedSymbol}&apikey=${apiKey}&from=${fromDate}&to=${toDate}`;
+        const response = await fetch(apiUrl);
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => '');
+          throw new Error(`Failed to fetch 30-minute data: HTTP ${response.status}`);
+        }
+        data = await response.json();
+      }
+    } catch (error) {
+      // Fallback to direct FMP on error
+      const { API_URL } = await import('../../util');
+      const apiUrl = `${API_URL}/historical-chart/30min?symbol=${normalizedSymbol}&apikey=${apiKey}&from=${fromDate}&to=${toDate}`;
+      const response = await fetch(apiUrl);
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        throw new Error(`Failed to fetch 30-minute data: HTTP ${response.status}`);
+      }
+      data = await response.json();
+    }
+  } else {
+    // Fallback to direct FMP
+    const { API_URL } = await import('../../util');
+    const apiUrl = `${API_URL}/historical-chart/30min?symbol=${normalizedSymbol}&apikey=${apiKey}&from=${fromDate}&to=${toDate}`;
+    const response = await fetch(apiUrl);
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`Failed to fetch 30-minute data: HTTP ${response.status}`);
+    }
+    data = await response.json();
   }
-
-  const data = await response.json();
 
   // Check for API errors
   if (data && typeof data === 'object' && !Array.isArray(data)) {
@@ -185,7 +227,12 @@ function formatDate(date: Date): string {
 }
 
 export class HistoricalRepository implements IHistoricalRepository {
-  constructor(private db: IDatabase, private env: Env, private logger: Logger) {}
+  constructor(
+    private db: IDatabase, 
+    private env: Env, 
+    private logger: Logger,
+    private datalakeService?: DatalakeService
+  ) {}
 
   async getHistoricalPrices(symbol: string, fromDate: Date, toDate: Date): Promise<HistoricalPriceData[]> {
     const normalizedSymbol = symbol.trim().toUpperCase();
@@ -225,8 +272,8 @@ export class HistoricalRepository implements IHistoricalRepository {
     const fromDateStr = formatDate(fromDate);
     const toDateStr = formatDate(toDate);
 
-    // Fetch 30-minute data from FMP API
-    const thirtyMinData = await fetch30MinuteData(normalizedSymbol, fromDateStr, toDateStr, this.env);
+    // Fetch 30-minute data using datalake adapter
+    const thirtyMinData = await fetch30MinuteData(normalizedSymbol, fromDateStr, toDateStr, this.env, this.datalakeService);
 
     if (thirtyMinData.length === 0) {
       return [];

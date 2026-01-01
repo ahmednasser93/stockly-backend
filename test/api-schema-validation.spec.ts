@@ -67,7 +67,11 @@ const createUrl = (path: string, params: Record<string, string> = {}) => {
 
 const createRequest = (path: string, params: Record<string, string> = {}) => {
   const url = createUrl(path, params);
-  return new Request(url.toString());
+  return new Request(url.toString(), {
+    headers: {
+      "Origin": "http://localhost:5173", // Add Origin header for client authentication in tests
+    }
+  });
 };
 
 const createEnv = (): Env => {
@@ -404,7 +408,10 @@ describe("API Schema Validation - Alerts", () => {
     };
     vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
-    const request = new Request("https://example.com/v1/api/alerts", { method: "GET" });
+    const request = new Request("https://example.com/v1/api/alerts", { 
+      method: "GET",
+      headers: { "Origin": "http://localhost:5173" }
+    });
     const env = createEnv();
     const logger = createMockLogger();
     const alertService = createAlertService(env, logger);
@@ -449,7 +456,10 @@ describe("API Schema Validation - Alerts", () => {
 
     const request = new Request("https://example.com/v1/api/alerts", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Origin": "http://localhost:5173",
+        "Content-Type": "application/json" 
+      },
       body: JSON.stringify(createRequest),
     });
     const env = createEnv();
@@ -491,7 +501,10 @@ describe("API Schema Validation - Alerts", () => {
 
     const request = new Request(`https://example.com/v1/api/alerts/${alertId}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Origin": "http://localhost:5173",
+        "Content-Type": "application/json" 
+      },
       body: JSON.stringify(updateRequest),
     });
     const env = createEnv();
@@ -525,7 +538,10 @@ describe("API Schema Validation - Alerts", () => {
     };
     vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
-    const request = new Request(`https://example.com/v1/api/alerts/${alertId}`, { method: "GET" });
+    const request = new Request(`https://example.com/v1/api/alerts/${alertId}`, { 
+      method: "GET",
+      headers: { "Origin": "http://localhost:5173" }
+    });
     const env = createEnv();
     const logger = createMockLogger();
     const alertService = createAlertService(env, logger);

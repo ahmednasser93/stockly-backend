@@ -13,6 +13,7 @@ import { createCommonStocksService } from '../factories/createCommonStocksServic
 import { getConfig } from '../api/config';
 import { MarketRepository } from '../repositories/external/MarketRepository';
 import { MarketCalculationService } from '../services/market-calculation.service';
+import { createDatalakeService } from '../factories/createDatalakeService';
 import {
   setMarketDataFullToKV,
   setMarketDataTop50ToKV,
@@ -40,7 +41,9 @@ export async function runMarketPrefetchCron(env: Env, ctx?: ExecutionContext): P
     const marketService = createMarketService(env, logger);
     const newsService = createNewsService(env, logger);
     const commonStocksService = createCommonStocksService(env, logger);
-    const marketRepository = new MarketRepository(env, logger);
+    // Create MarketRepository with DatalakeService for cron job
+    const datalakeService = createDatalakeService(env, logger);
+    const marketRepository = new MarketRepository(env, logger, datalakeService);
     const calculationService = new MarketCalculationService();
 
     if (!env.alertsKv) {
@@ -69,23 +72,24 @@ export async function runMarketPrefetchCron(env: Env, ctx?: ExecutionContext): P
       });
 
       // Store full lists and top 50 slices in cache
+      // Note: config is already defined above (line 34)
       const cachePromises = [
-        setMarketDataFullToKV(env.alertsKv, 'market:gainers:full', gainers, 3600).then(() => {
+        setMarketDataFullToKV(env.alertsKv, 'market:gainers:full', gainers, config, 3600).then(() => {
           logger.info('Cached gainers full list');
         }),
-        setMarketDataTop50ToKV(env.alertsKv, 'market:gainers:top50', gainers, 3600).then(() => {
+        setMarketDataTop50ToKV(env.alertsKv, 'market:gainers:top50', gainers, config, 3600).then(() => {
           logger.info('Cached gainers top 50');
         }),
-        setMarketDataFullToKV(env.alertsKv, 'market:losers:full', losers, 3600).then(() => {
+        setMarketDataFullToKV(env.alertsKv, 'market:losers:full', losers, config, 3600).then(() => {
           logger.info('Cached losers full list');
         }),
-        setMarketDataTop50ToKV(env.alertsKv, 'market:losers:top50', losers, 3600).then(() => {
+        setMarketDataTop50ToKV(env.alertsKv, 'market:losers:top50', losers, config, 3600).then(() => {
           logger.info('Cached losers top 50');
         }),
-        setMarketDataFullToKV(env.alertsKv, 'market:actives:full', actives, 3600).then(() => {
+        setMarketDataFullToKV(env.alertsKv, 'market:actives:full', actives, config, 3600).then(() => {
           logger.info('Cached actives full list');
         }),
-        setMarketDataTop50ToKV(env.alertsKv, 'market:actives:top50', actives, 3600).then(() => {
+        setMarketDataTop50ToKV(env.alertsKv, 'market:actives:top50', actives, config, 3600).then(() => {
           logger.info('Cached actives top 50');
         }),
       ];

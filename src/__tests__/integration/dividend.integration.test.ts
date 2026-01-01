@@ -8,8 +8,8 @@ import { DividendRepository } from '../../repositories/external/DividendReposito
 import { DividendService } from '../../services/dividend.service';
 import type { Env } from '../../index';
 
-// These tests make real API calls - skip in CI if needed
-describe.skipIf(process.env.CI === 'true')('Dividend Integration Tests', () => {
+// These tests make real API calls - skip unless FMP_API_KEY is set and valid
+describe.skipIf(!process.env.FMP_API_KEY || process.env.FMP_API_KEY === 'test-key')('Dividend Integration Tests', () => {
   let repository: DividendRepository;
   let service: DividendService;
   let env: Env;

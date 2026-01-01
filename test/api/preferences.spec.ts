@@ -136,10 +136,20 @@ describe("Preferences API", () => {
         first: vi.fn().mockResolvedValue({ id: "user-123" }),
       };
 
-      // Mock preferences check
+      // Mock preferences check (exists)
       const checkStmt = {
         bind: vi.fn().mockReturnThis(),
         first: vi.fn().mockResolvedValue({ username: "testuser" }),
+      };
+
+      // Mock fetch existing senator alert values
+      const existingRowStmt = {
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue({
+          senator_alerts_enabled: 1,
+          senator_alert_holdings_only: 0,
+          senator_alert_followed_only: 0,
+        }),
       };
 
       // Mock update
@@ -151,6 +161,7 @@ describe("Preferences API", () => {
       mockDb.prepare
         .mockReturnValueOnce(userStmt)
         .mockReturnValueOnce(checkStmt)
+        .mockReturnValueOnce(existingRowStmt)
         .mockReturnValueOnce(updateStmt);
 
       const request = createMockRequest("/v1/api/preferences", {

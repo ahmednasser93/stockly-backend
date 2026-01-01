@@ -119,7 +119,7 @@ describe('NewsService', () => {
       // Assert
       expect(result.news).toEqual(cachedNews);
       expect(result.pagination).toEqual(pagination);
-      expect(getNewsDataFromKV).toHaveBeenCalledWith(mockKv, 'news:general:latest');
+      expect(getNewsDataFromKV).toHaveBeenCalledWith(mockKv, 'news:general:latest', expect.any(Object));
       expect(mockRepository.getGeneralNews).not.toHaveBeenCalled();
       expect(setNewsDataToKV).not.toHaveBeenCalled();
       expect(mockLogger.info).toHaveBeenCalledWith(
@@ -159,12 +159,13 @@ describe('NewsService', () => {
       // Assert
       expect(result.news).toEqual(freshNews);
       expect(result.pagination).toEqual(pagination);
-      expect(getNewsDataFromKV).toHaveBeenCalledWith(mockKv, 'news:general:latest');
+      expect(getNewsDataFromKV).toHaveBeenCalledWith(mockKv, 'news:general:latest', expect.any(Object));
       expect(mockRepository.getGeneralNews).toHaveBeenCalledWith(undefined);
       expect(setNewsDataToKV).toHaveBeenCalledWith(
         mockKv,
         'news:general:latest',
         { news: freshNews, pagination },
+        expect.any(Object),
         3600
       );
     });
@@ -190,6 +191,11 @@ describe('NewsService', () => {
         mockKv,
         'news:general:latest',
         expect.any(Object),
+        expect.objectContaining({
+          marketCache: expect.objectContaining({
+            newsTtlSec: customTTL,
+          }),
+        }),
         customTTL
       );
     });

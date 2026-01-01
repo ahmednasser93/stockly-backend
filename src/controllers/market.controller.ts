@@ -8,7 +8,7 @@ import type { Logger } from '../logging/logger';
 import type { Env } from '../index';
 import { json } from '../util';
 import { createErrorResponse } from '../auth/error-handler';
-import { MarketResponseSchema, GetMarketRequestSchema, GetScreenerRequestSchema, SectorsResponseSchema, PaginatedMarketResponseSchema, PaginationMetaSchema } from '@stockly/shared/schemas';
+import { MarketResponseSchema, GetMarketRequestSchema, GetScreenerRequestSchema, SectorsResponseSchema, PaginatedMarketResponseSchema, PaginationMetaSchema, MarketStatusResponseSchema, GetSocialSentimentRequestSchema } from '@stockly/shared/schemas';
 
 export class MarketController {
   constructor(
@@ -225,6 +225,123 @@ export class MarketController {
     } catch (error) {
       this.logger.error('Failed to get sectors performance', error);
       return createErrorResponse('FETCH_FAILED', 'Failed to fetch sectors performance', undefined, 500, request).response;
+    }
+  }
+
+  /**
+   * Get market status
+   * GET /v1/api/market/status
+   */
+  async getMarketStatus(request: Request): Promise<Response> {
+    try {
+      // Fetch data from service (no query parameters needed)
+      const data = await this.marketService.getMarketStatus();
+      
+      // Validate and return response
+      const responseData = MarketStatusResponseSchema.parse(data);
+      return json(responseData, 200, request);
+    } catch (error) {
+      this.logger.error('Failed to get market status', error);
+      return createErrorResponse('FETCH_FAILED', 'Failed to fetch market status', undefined, 500, request).response;
+    }
+  }
+
+  /**
+   * Get social sentiment
+   * GET /v1/api/market/social-sentiment?type=bullish&limit=10&offset=0
+   */
+  async getSocialSentiment(request: Request): Promise<Response> {
+    try {
+      const url = new URL(request.url);
+      const queryParams = Object.fromEntries(url.searchParams.entries());
+      
+      // Validate request
+      let validated;
+      try {
+        validated = GetSocialSentimentRequestSchema.parse(queryParams);
+      } catch (validationError: any) {
+        if (validationError?.issues) {
+          const errorMessage = validationError.issues[0]?.message || 'Invalid parameters';
+          return createErrorResponse('INVALID_INPUT', errorMessage, undefined, 400, request).response;
+        }
+        throw validationError;
+      }
+
+      const type = validated.type ?? 'bullish';
+      const limit = validated.limit ?? 10;
+      const offset = validated.offset ?? 0;
+      
+      // Fetch data from service
+      const data = await this.marketService.getSocialSentiment(type, limit, offset);
+      
+      // Build pagination metadata
+      const hasMore = data.length === limit;
+      const pagination = {
+        offset,
+        limit,
+        total: offset + data.length + (hasMore ? 1 : 0),
+        hasMore,
+      };
+
+      // Validate and return response
+      const responseData = PaginatedMarketResponseSchema.parse({
+        data,
+        pagination,
+      });
+      return json(responseData, 200, request);
+    } catch (error: any) {
+      const errorMessage = error?.message || String(error) || 'Unknown error';
+      this.logger.error('Failed to get social sentiment', error, { errorMessage });
+      return createErrorResponse('FETCH_FAILED', `Failed to fetch social sentiment: ${errorMessage}`, undefined, 500, request).response;
+    }
+  }
+
+  /**
+   * Get crypto quotes
+   * GET /v1/api/market/crypto?limit=10&offset=0
+   */
+  async getCryptoQuotes(request: Request): Promise<Response> {
+    try {
+      const url = new URL(request.url);
+      const queryParams = Object.fromEntries(url.searchParams.entries());
+      
+      // Validate request
+      let validated;
+      try {
+        validated = GetMarketRequestSchema.parse(queryParams);
+      } catch (validationError: any) {
+        if (validationError?.issues) {
+          const errorMessage = validationError.issues[0]?.message || 'Invalid parameters';
+          return createErrorResponse('INVALID_INPUT', errorMessage, undefined, 400, request).response;
+        }
+        throw validationError;
+      }
+
+      const limit = validated.limit ?? 10;
+      const offset = validated.offset ?? 0;
+      
+      // Fetch data from service
+      const data = await this.marketService.getCryptoQuotes(limit, offset);
+      
+      // Build pagination metadata
+      const hasMore = data.length === limit;
+      const pagination = {
+        offset,
+        limit,
+        total: offset + data.length + (hasMore ? 1 : 0),
+        hasMore,
+      };
+
+      // Validate and return response
+      const responseData = PaginatedMarketResponseSchema.parse({
+        data,
+        pagination,
+      });
+      return json(responseData, 200, request);
+    } catch (error: any) {
+      const errorMessage = error?.message || String(error) || 'Unknown error';
+      this.logger.error('Failed to get crypto quotes', error, { errorMessage });
+      return createErrorResponse('FETCH_FAILED', `Failed to fetch crypto quotes: ${errorMessage}`, undefined, 500, request).response;
     }
   }
 }

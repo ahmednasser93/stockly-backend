@@ -391,5 +391,85 @@ describe('MarketRepository', () => {
       expect(result[0].changesPercentage).toBeNull();
     });
   });
+
+  describe('getMarketStatus', () => {
+    it('should fetch market status from FMP API', async () => {
+      // Arrange
+      const mockFmpResponse = {
+        isTheStockMarketOpen: true,
+      };
+
+      const mockApiResponse = {
+        ok: true,
+        json: async () => mockFmpResponse,
+      } as Response;
+
+      vi.mocked(global.fetch).mockResolvedValue(mockApiResponse);
+
+      // Act
+      const result = await repository.getMarketStatus();
+
+      // Assert
+      expect(result).toEqual({ isTheStockMarketOpen: true });
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining(`${API_URL}/is-the-market-open`),
+        expect.any(Object)
+      );
+    });
+
+    it('should handle array response from FMP', async () => {
+      // Arrange
+      const mockFmpResponse = [
+        {
+          isTheStockMarketOpen: false,
+        },
+      ];
+
+      const mockApiResponse = {
+        ok: true,
+        json: async () => mockFmpResponse,
+      } as Response;
+
+      vi.mocked(global.fetch).mockResolvedValue(mockApiResponse);
+
+      // Act
+      const result = await repository.getMarketStatus();
+
+      // Assert
+      expect(result).toEqual({ isTheStockMarketOpen: false });
+    });
+
+    it('should default to false if response is missing field', async () => {
+      // Arrange
+      const mockFmpResponse = {};
+
+      const mockApiResponse = {
+        ok: true,
+        json: async () => mockFmpResponse,
+      } as Response;
+
+      vi.mocked(global.fetch).mockResolvedValue(mockApiResponse);
+
+      // Act
+      const result = await repository.getMarketStatus();
+
+      // Assert
+      expect(result).toEqual({ isTheStockMarketOpen: false });
+    });
+
+    it('should handle API errors', async () => {
+      // Arrange
+      const mockApiResponse = {
+        ok: false,
+        status: 500,
+        text: async () => 'Internal Server Error',
+      } as Response;
+
+      vi.mocked(global.fetch).mockResolvedValue(mockApiResponse);
+
+      // Act & Assert
+      await expect(repository.getMarketStatus()).rejects.toThrow();
+    });
+  });
 });
 

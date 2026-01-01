@@ -1,10 +1,13 @@
 /**
  * Market Cache Helper
  * KV cache utilities for market data (gainers, losers, actives, sectors)
+ * Skips KV operations outside working hours to save on KV operations
  */
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 import type { MarketStockItem, SectorPerformanceItem } from '@stockly/shared/types';
+import type { AdminConfig } from './config';
+import { kvGetWithWorkingHours, kvPutWithWorkingHours } from '../utils/kv-working-hours';
 
 interface MarketCacheEntry {
   data: MarketStockItem[];
@@ -16,14 +19,15 @@ const DEFAULT_TTL_SECONDS = 300; // 5 minutes
 
 /**
  * Get market data from KV cache if valid (not expired)
- * Returns null if cache miss or expired
+ * Returns null if cache miss, expired, or outside working hours
  */
 export async function getMarketDataFromKV(
-  kv: KVNamespace,
-  key: string
+  kv: KVNamespace | undefined,
+  key: string,
+  config: AdminConfig
 ): Promise<{ data: MarketStockItem[]; cachedAt: number } | null> {
   try {
-    const raw = await kv.get(key);
+    const raw = await kvGetWithWorkingHours(kv, key, config);
     if (!raw) {
       return null; // Cache miss
     }
@@ -54,14 +58,15 @@ export async function getMarketDataFromKV(
 
 /**
  * Get market data from KV cache even if expired (stale cache)
- * Returns null only if cache miss or invalid entry
+ * Returns null only if cache miss, invalid entry, or outside working hours
  */
 export async function getStaleMarketDataFromKV(
-  kv: KVNamespace,
-  key: string
+  kv: KVNamespace | undefined,
+  key: string,
+  config: AdminConfig
 ): Promise<{ data: MarketStockItem[]; cachedAt: number } | null> {
   try {
-    const raw = await kv.get(key);
+    const raw = await kvGetWithWorkingHours(kv, key, config);
     if (!raw) {
       return null; // Cache miss
     }
@@ -87,11 +92,13 @@ export async function getStaleMarketDataFromKV(
 
 /**
  * Store market data in KV with TTL
+ * Skips write outside working hours to save on KV operations
  */
 export async function setMarketDataToKV(
-  kv: KVNamespace,
+  kv: KVNamespace | undefined,
   key: string,
   data: MarketStockItem[],
+  config: AdminConfig,
   ttlSeconds: number = DEFAULT_TTL_SECONDS
 ): Promise<void> {
   try {
@@ -102,7 +109,7 @@ export async function setMarketDataToKV(
       expiresAt: now + ttlSeconds * 1000,
     };
 
-    await kv.put(key, JSON.stringify(cacheEntry));
+    await kvPutWithWorkingHours(kv, key, JSON.stringify(cacheEntry), config, { expirationTtl: ttlSeconds });
   } catch (error) {
     console.error(`[Market Cache] Failed to write cache for key ${key}:`, error);
     // Don't throw - caching is best-effort
@@ -117,14 +124,15 @@ interface SectorCacheEntry {
 
 /**
  * Get sector performance data from KV cache if valid (not expired)
- * Returns null if cache miss or expired
+ * Returns null if cache miss, expired, or outside working hours
  */
 export async function getSectorsDataFromKV(
-  kv: KVNamespace,
-  key: string
+  kv: KVNamespace | undefined,
+  key: string,
+  config: AdminConfig
 ): Promise<{ data: SectorPerformanceItem[]; cachedAt: number } | null> {
   try {
-    const raw = await kv.get(key);
+    const raw = await kvGetWithWorkingHours(kv, key, config);
     if (!raw) {
       return null; // Cache miss
     }
@@ -155,14 +163,15 @@ export async function getSectorsDataFromKV(
 
 /**
  * Get sector performance data from KV cache even if expired (stale cache)
- * Returns null only if cache miss or invalid entry
+ * Returns null only if cache miss, invalid entry, or outside working hours
  */
 export async function getStaleSectorsDataFromKV(
-  kv: KVNamespace,
-  key: string
+  kv: KVNamespace | undefined,
+  key: string,
+  config: AdminConfig
 ): Promise<{ data: SectorPerformanceItem[]; cachedAt: number } | null> {
   try {
-    const raw = await kv.get(key);
+    const raw = await kvGetWithWorkingHours(kv, key, config);
     if (!raw) {
       return null; // Cache miss
     }
@@ -188,11 +197,13 @@ export async function getStaleSectorsDataFromKV(
 
 /**
  * Store sector performance data in KV with TTL
+ * Skips write outside working hours to save on KV operations
  */
 export async function setSectorsDataToKV(
-  kv: KVNamespace,
+  kv: KVNamespace | undefined,
   key: string,
   data: SectorPerformanceItem[],
+  config: AdminConfig,
   ttlSeconds: number = DEFAULT_TTL_SECONDS
 ): Promise<void> {
   try {
@@ -203,7 +214,7 @@ export async function setSectorsDataToKV(
       expiresAt: now + ttlSeconds * 1000,
     };
 
-    await kv.put(key, JSON.stringify(cacheEntry));
+    await kvPutWithWorkingHours(kv, key, JSON.stringify(cacheEntry), config, { expirationTtl: ttlSeconds });
   } catch (error) {
     console.error(`[Market Cache] Failed to write cache for key ${key}:`, error);
     // Don't throw - caching is best-effort
@@ -212,15 +223,16 @@ export async function setSectorsDataToKV(
 
 /**
  * Get paginated slice from full cache
- * Returns null if cache miss or expired
+ * Returns null if cache miss, expired, or outside working hours
  */
 export async function getMarketDataSliceFromKV(
-  kv: KVNamespace,
+  kv: KVNamespace | undefined,
   key: string,
   offset: number,
-  limit: number
+  limit: number,
+  config: AdminConfig
 ): Promise<{ data: MarketStockItem[]; cachedAt: number; total: number } | null> {
-  const cached = await getMarketDataFromKV(kv, key);
+  const cached = await getMarketDataFromKV(kv, key, config);
   if (!cached) {
     return null;
   }
@@ -235,40 +247,46 @@ export async function getMarketDataSliceFromKV(
 
 /**
  * Store full list of market data in KV
+ * Skips write outside working hours to save on KV operations
  */
 export async function setMarketDataFullToKV(
-  kv: KVNamespace,
+  kv: KVNamespace | undefined,
   key: string,
   data: MarketStockItem[],
+  config: AdminConfig,
   ttlSeconds: number = DEFAULT_TTL_SECONDS
 ): Promise<void> {
-  return setMarketDataToKV(kv, key, data, ttlSeconds);
+  return setMarketDataToKV(kv, key, data, config, ttlSeconds);
 }
 
 /**
  * Store top 50 slice of market data in KV (for fast responses)
+ * Skips write outside working hours to save on KV operations
  */
 export async function setMarketDataTop50ToKV(
-  kv: KVNamespace,
+  kv: KVNamespace | undefined,
   key: string,
   data: MarketStockItem[],
+  config: AdminConfig,
   ttlSeconds: number = DEFAULT_TTL_SECONDS
 ): Promise<void> {
   const top50 = data.slice(0, 50);
-  return setMarketDataToKV(kv, key, top50, ttlSeconds);
+  return setMarketDataToKV(kv, key, top50, config, ttlSeconds);
 }
 
 /**
  * Update a stock's price in cached market data if it exists
  * Updates all cache keys that might contain this stock (gainers, losers, actives)
+ * Skips updates outside working hours to save on KV operations
  */
 export async function updateStockPriceInCache(
-  kv: KVNamespace,
+  kv: KVNamespace | undefined,
   symbol: string,
   newPrice: number,
   newChange: number | null,
   newChangePercent: number | null,
-  newVolume: number | null
+  newVolume: number | null,
+  config: AdminConfig
 ): Promise<number> {
   const cacheKeys = [
     'market:gainers:full',
@@ -283,7 +301,7 @@ export async function updateStockPriceInCache(
 
   for (const key of cacheKeys) {
     try {
-      const cached = await getMarketDataFromKV(kv, key);
+      const cached = await getMarketDataFromKV(kv, key, config);
       if (!cached) {
         continue; // Cache miss or expired, skip
       }
@@ -306,7 +324,7 @@ export async function updateStockPriceInCache(
 
       if (found) {
         // Update the cache with modified data
-        await setMarketDataToKV(kv, key, updatedData, DEFAULT_TTL_SECONDS);
+        await setMarketDataToKV(kv, key, updatedData, config, DEFAULT_TTL_SECONDS);
         updatedCount++;
       }
     } catch (error) {
@@ -321,16 +339,18 @@ export async function updateStockPriceInCache(
 /**
  * Refresh market cache if any of the updated stocks exist in the cache
  * Non-blocking operation - returns immediately
+ * Skips refresh outside working hours to save on KV operations
  */
 export async function refreshMarketCacheIfNeeded(
-  kv: KVNamespace,
+  kv: KVNamespace | undefined,
   updatedStocks: Array<{
     symbol: string;
     price: number;
     change?: number | null;
     changePercent?: number | null;
     volume?: number | null;
-  }>
+  }>,
+  config: AdminConfig
 ): Promise<void> {
   // This is a fire-and-forget operation
   // We update each stock in parallel and don't wait for completion
@@ -342,7 +362,8 @@ export async function refreshMarketCacheIfNeeded(
         stock.price,
         stock.change ?? null,
         stock.changePercent ?? null,
-        stock.volume ?? null
+        stock.volume ?? null,
+        config
       )
     )
   ).catch((error) => {

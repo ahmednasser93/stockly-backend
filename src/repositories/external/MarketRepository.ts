@@ -4,9 +4,10 @@
  */
 
 import type { MarketStockItem, SectorPerformanceItem } from '@stockly/shared/types';
-import { API_URL, API_KEY } from '../../util';
+import { API_KEY } from '../../util';
 import type { Env } from '../../index';
 import type { Logger } from '../../logging/logger';
+import type { DatalakeService } from '../../services/datalake.service';
 
 // Note: We use FMP's dedicated endpoints for gainers/losers/actives
 // No need for a predefined stock list
@@ -14,8 +15,18 @@ import type { Logger } from '../../logging/logger';
 export class MarketRepository {
   constructor(
     private env: Env,
-    private logger?: Logger
+    private logger?: Logger,
+    private datalakeService?: DatalakeService
   ) {}
+
+  /**
+   * Get adapter for an endpoint, with fallback to direct FMP if datalake service not available
+   */
+  private async getAdapter(endpointId: string): Promise<import('../../infrastructure/datalake/DatalakeAdapter').DatalakeAdapter | null> {
+    if (!this.datalakeService) return null;
+    const envApiKey = this.env.FMP_API_KEY || API_KEY;
+    return this.datalakeService.getAdapterForEndpoint(endpointId, envApiKey);
+  }
 
   /**
    * Fetch from FMP API with retry logic for rate limits and timeouts
@@ -154,13 +165,22 @@ export class MarketRepository {
   }
   
   /**
-   * Fetch quotes using FMP's batch endpoint (comma-separated symbols)
+   * Fetch quotes using datalake adapter batch endpoint
    */
   private async fetchBatchQuotes(symbols: string[], apiKey: string): Promise<MarketStockItem[]> {
     const symbolsParam = symbols.join(',');
-    const url = `${API_URL}/quote?symbol=${symbolsParam}&apikey=${apiKey}`;
     
-    const data = await this.fetchWithRetry(url, 2);
+    const adapter = await this.getAdapter('quote');
+    let data: any;
+
+    if (adapter) {
+      data = await adapter.fetch('/quote', { symbol: symbolsParam });
+    } else {
+      // Fallback to direct FMP
+      const { API_URL } = await import('../../util');
+      const url = `${API_URL}/quote?symbol=${symbolsParam}&apikey=${apiKey}`;
+      data = await this.fetchWithRetry(url, 2);
+    }
     
     // FMP returns an array for batch requests
     const quotes = Array.isArray(data) ? data : [data];
@@ -207,12 +227,21 @@ export class MarketRepository {
   }
   
   /**
-   * Fetch a single stock quote from FMP API
+   * Fetch a single stock quote using datalake adapter
    */
   private async fetchSingleQuote(symbol: string, apiKey: string): Promise<MarketStockItem | null> {
     try {
-      const url = `${API_URL}/quote?symbol=${symbol}&apikey=${apiKey}`;
-      const data = await this.fetchWithRetry(url, 1); // Single retry for faster batch operations
+      const adapter = await this.getAdapter('quote');
+      let data: any;
+
+      if (adapter) {
+        data = await adapter.fetch('/quote', { symbol });
+      } else {
+        // Fallback to direct FMP
+        const { API_URL } = await import('../../util');
+        const url = `${API_URL}/quote?symbol=${symbol}&apikey=${apiKey}`;
+        data = await this.fetchWithRetry(url, 1);
+      }
       
       const quote = Array.isArray(data) ? data[0] : data;
       if (!quote || !quote.symbol) {
@@ -247,13 +276,30 @@ export class MarketRepository {
   }
 
   /**
-   * Fetch top gainers from FMP's dedicated endpoint
+   * Fetch top gainers using datalake adapter
    * Falls back to building from popular stocks if dedicated endpoint fails
    */
   async getGainers(): Promise<MarketStockItem[]> {
     const apiKey = this.env.FMP_API_KEY ?? API_KEY;
     
-    // Try dedicated endpoint first
+    // Try datalake adapter first
+    const adapter = await this.getAdapter('stock-market-gainers');
+    if (adapter) {
+      try {
+        const data = await adapter.fetch('/v3/stock_market/gainers', {});
+        const items = Array.isArray(data) ? data : [];
+        if (items.length > 0) {
+          return items
+            .map(item => this.normalizeMarketItem(item))
+            .filter(item => item.symbol);
+        }
+      } catch (error) {
+        this.logger?.warn('Gainers endpoint failed via adapter, trying fallback', { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    
+    // Fallback: Try direct FMP endpoints
+    const { API_URL } = await import('../../util');
     const endpoints = [
       `${API_URL}/v3/stock_market/gainers?apikey=${apiKey}`,
       `https://financialmodelingprep.com/api/v3/stock_market/gainers?apikey=${apiKey}`,
@@ -263,13 +309,12 @@ export class MarketRepository {
     for (const url of endpoints) {
       try {
         this.logger?.info(`Trying gainers endpoint: ${url.replace(apiKey, '***')}`);
-        const data = await this.fetchWithRetry(url, 1); // Single retry per endpoint
+        const data = await this.fetchWithRetry(url, 1);
         const items = Array.isArray(data) ? data : [];
         
-        // Check if we got an error message (legacy endpoint error)
         if (items.length === 0 && typeof data === 'object' && 'Error Message' in data) {
           this.logger?.warn('Legacy endpoint error, will try fallback method');
-          break; // Try fallback
+          break;
         }
         
         if (items.length > 0) {
@@ -283,7 +328,7 @@ export class MarketRepository {
       }
     }
     
-    // Fallback: Build gainers from popular stocks
+    // Final fallback: Build gainers from popular stocks
     this.logger?.info('Dedicated gainers endpoint unavailable, building from popular stocks');
     return await this.buildGainersFromPopularStocks(apiKey);
   }
@@ -320,13 +365,30 @@ export class MarketRepository {
   }
 
   /**
-   * Fetch top losers from FMP's dedicated endpoint
+   * Fetch top losers using datalake adapter
    * Falls back to building from popular stocks if dedicated endpoint fails
    */
   async getLosers(): Promise<MarketStockItem[]> {
     const apiKey = this.env.FMP_API_KEY ?? API_KEY;
     
-    // Try dedicated endpoint first
+    // Try datalake adapter first
+    const adapter = await this.getAdapter('stock-market-losers');
+    if (adapter) {
+      try {
+        const data = await adapter.fetch('/v3/stock_market/losers', {});
+        const items = Array.isArray(data) ? data : [];
+        if (items.length > 0) {
+          return items
+            .map(item => this.normalizeMarketItem(item))
+            .filter(item => item.symbol);
+        }
+      } catch (error) {
+        this.logger?.warn('Losers endpoint failed via adapter, trying fallback', { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    
+    // Fallback: Try direct FMP endpoints
+    const { API_URL } = await import('../../util');
     const endpoints = [
       `${API_URL}/v3/stock_market/losers?apikey=${apiKey}`,
       `https://financialmodelingprep.com/api/v3/stock_market/losers?apikey=${apiKey}`,
@@ -355,7 +417,7 @@ export class MarketRepository {
       }
     }
     
-    // Fallback: Build losers from popular stocks
+    // Final fallback: Build losers from popular stocks
     this.logger?.info('Dedicated losers endpoint unavailable, building from popular stocks');
     return await this.buildLosersFromPopularStocks(apiKey);
   }
@@ -391,13 +453,30 @@ export class MarketRepository {
   }
 
   /**
-   * Fetch most active stocks from FMP's dedicated endpoint
+   * Fetch most active stocks using datalake adapter
    * Falls back to building from popular stocks if dedicated endpoint fails
    */
   async getActives(): Promise<MarketStockItem[]> {
     const apiKey = this.env.FMP_API_KEY ?? API_KEY;
     
-    // Try dedicated endpoint first
+    // Try datalake adapter first
+    const adapter = await this.getAdapter('stock-market-actives');
+    if (adapter) {
+      try {
+        const data = await adapter.fetch('/v3/stock_market/actives', {});
+        const items = Array.isArray(data) ? data : [];
+        if (items.length > 0) {
+          return items
+            .map(item => this.normalizeMarketItem(item))
+            .filter(item => item.symbol);
+        }
+      } catch (error) {
+        this.logger?.warn('Actives endpoint failed via adapter, trying fallback', { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    
+    // Fallback: Try direct FMP endpoints
+    const { API_URL } = await import('../../util');
     const endpoints = [
       `${API_URL}/v3/stock_market/actives?apikey=${apiKey}`,
       `https://financialmodelingprep.com/api/v3/stock_market/actives?apikey=${apiKey}`,
@@ -426,7 +505,7 @@ export class MarketRepository {
       }
     }
     
-    // Fallback: Build actives from popular stocks
+    // Final fallback: Build actives from popular stocks
     this.logger?.info('Dedicated actives endpoint unavailable, building from popular stocks');
     return await this.buildActivesFromPopularStocks(apiKey);
   }
@@ -462,7 +541,7 @@ export class MarketRepository {
   }
 
   /**
-   * Fetch stocks from screener with filters
+   * Fetch stocks from screener with filters using datalake adapter
    * @param marketCapMoreThan Minimum market cap in dollars (default: 1000000000)
    * @param peLowerThan Maximum P/E ratio (default: 20)
    * @param dividendMoreThan Minimum dividend yield percentage (default: 2)
@@ -475,16 +554,30 @@ export class MarketRepository {
     limit: number = 50
   ): Promise<MarketStockItem[]> {
     const apiKey = this.env.FMP_API_KEY ?? API_KEY;
-    const url = `${API_URL}/v3/stock-screener?marketCapMoreThan=${marketCapMoreThan}&peLowerThan=${peLowerThan}&dividendMoreThan=${dividendMoreThan}&limit=${limit}&apikey=${apiKey}`;
     
     try {
-      const data = await this.fetchWithRetry(url);
+      const adapter = await this.getAdapter('stock-screener');
+      let data: any;
+
+      if (adapter) {
+        data = await adapter.fetch('/v3/stock-screener', {
+          marketCapMoreThan: marketCapMoreThan.toString(),
+          peLowerThan: peLowerThan.toString(),
+          dividendMoreThan: dividendMoreThan.toString(),
+          limit: limit.toString(),
+        });
+      } else {
+        // Fallback to direct FMP
+        const { API_URL } = await import('../../util');
+        const url = `${API_URL}/v3/stock-screener?marketCapMoreThan=${marketCapMoreThan}&peLowerThan=${peLowerThan}&dividendMoreThan=${dividendMoreThan}&limit=${limit}&apikey=${apiKey}`;
+        data = await this.fetchWithRetry(url);
+      }
+
       const items = Array.isArray(data) ? data : [];
-      // Limit results to the requested limit
       const limitedItems = items.slice(0, limit);
       return limitedItems.map(item => this.normalizeMarketItem(item));
     } catch (error) {
-      this.logger?.error('Failed to fetch screener data from FMP API', error);
+      this.logger?.error('Failed to fetch screener data', error);
       throw error;
     }
   }
@@ -500,18 +593,112 @@ export class MarketRepository {
   }
 
   /**
-   * Fetch sectors performance from FMP API
+   * Fetch sectors performance using datalake adapter
    */
   async getSectorsPerformance(): Promise<SectorPerformanceItem[]> {
     const apiKey = this.env.FMP_API_KEY ?? API_KEY;
-    const url = `${API_URL}/v3/sectors-performance?apikey=${apiKey}`;
     
     try {
-      const data = await this.fetchWithRetry(url);
+      const adapter = await this.getAdapter('sectors-performance');
+      let data: any;
+
+      if (adapter) {
+        data = await adapter.fetch('/v3/sectors-performance', {});
+      } else {
+        // Fallback to direct FMP
+        const { API_URL } = await import('../../util');
+        const url = `${API_URL}/v3/sectors-performance?apikey=${apiKey}`;
+        data = await this.fetchWithRetry(url);
+      }
+
       const items = Array.isArray(data) ? data : [];
       return items.map(item => this.normalizeSectorItem(item));
     } catch (error) {
-      this.logger?.error('Failed to fetch sectors performance from FMP API', error);
+      this.logger?.error('Failed to fetch sectors performance', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch market status using datalake adapter
+   * Returns whether the stock market is currently open
+   */
+  async getMarketStatus(): Promise<{ isTheStockMarketOpen: boolean }> {
+    const apiKey = this.env.FMP_API_KEY ?? API_KEY;
+    
+    try {
+      const adapter = await this.getAdapter('market-status');
+      let data: any;
+
+      if (adapter) {
+        data = await adapter.fetch('/is-the-market-open', {});
+      } else {
+        // Fallback to direct FMP
+        const { API_URL } = await import('../../util');
+        const url = `${API_URL}/is-the-market-open?apikey=${apiKey}`;
+        data = await this.fetchWithRetry(url, 1);
+      }
+
+      // FMP returns: { isTheStockMarketOpen: boolean } or array
+      const result = Array.isArray(data) ? data[0] : data;
+      return { isTheStockMarketOpen: result?.isTheStockMarketOpen ?? false };
+    } catch (error) {
+      this.logger?.error('Failed to fetch market status', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch social sentiment trending stocks using datalake adapter
+   * @param type - 'bullish' or 'bearish'
+   */
+  async getSocialSentiment(type: 'bullish' | 'bearish' = 'bullish'): Promise<MarketStockItem[]> {
+    const apiKey = this.env.FMP_API_KEY ?? API_KEY;
+    
+    try {
+      const adapter = await this.getAdapter('social-sentiment-trending');
+      let data: any;
+
+      if (adapter) {
+        data = await adapter.fetch('/social-sentiment/trending', { type });
+      } else {
+        // Fallback to direct FMP
+        const { API_URL } = await import('../../util');
+        const url = `${API_URL}/social-sentiment/trending?type=${type}&apikey=${apiKey}`;
+        data = await this.fetchWithRetry(url);
+      }
+
+      const items = Array.isArray(data) ? data : [];
+      return items.map(item => this.normalizeMarketItem(item));
+    } catch (error) {
+      this.logger?.error('Failed to fetch social sentiment', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch crypto quotes using datalake adapter
+   */
+  async getCryptoQuotes(): Promise<MarketStockItem[]> {
+    const apiKey = this.env.FMP_API_KEY ?? API_KEY;
+    
+    try {
+      const adapter = await this.getAdapter('crypto-quotes');
+      let data: any;
+
+      if (adapter) {
+        data = await adapter.fetch('/quotes/crypto', {});
+      } else {
+        // Fallback to direct FMP
+        const { API_URL } = await import('../../util');
+        const url = `${API_URL}/quotes/crypto?apikey=${apiKey}`;
+        data = await this.fetchWithRetry(url);
+      }
+
+      const items = Array.isArray(data) ? data : [];
+      return items.map(item => this.normalizeMarketItem(item));
+    } catch (error) {
+      this.logger?.error('Failed to fetch crypto quotes', error);
       throw error;
     }
   }

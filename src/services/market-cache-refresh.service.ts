@@ -38,7 +38,8 @@ export class MarketCacheRefreshService {
     }
 
     // This is fire-and-forget - we don't wait for completion
-    refreshMarketCacheIfNeeded(this.env.alertsKv, updatedStocks)
+    const config = await getConfig(this.env);
+    refreshMarketCacheIfNeeded(this.env.alertsKv, updatedStocks, config)
       .then(() => {
         this.logger?.info(`Refreshed market cache with ${updatedStocks.length} updated stock prices`);
       })

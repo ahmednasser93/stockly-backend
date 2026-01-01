@@ -23,6 +23,17 @@ vi.mock('../../auth/middleware', () => ({
 
 import { authenticateRequestWithAdmin } from '../../auth/middleware';
 
+// Helper to add Origin header for client authentication in tests
+const createTestRequest = (url: string, init?: RequestInit): Request => {
+  return new Request(url, {
+    ...init,
+    headers: {
+      "Origin": "http://localhost:5173",
+      ...init?.headers,
+    }
+  });
+};
+
 describe('CommonStocksController', () => {
   let controller: CommonStocksController;
   let mockService: CommonStocksService;
@@ -49,6 +60,7 @@ describe('CommonStocksController', () => {
       addStock: vi.fn(),
       updateStock: vi.fn(),
       deleteStock: vi.fn(),
+      removeStock: vi.fn(), // Alias used by controller
       bulkAddStocks: vi.fn(),
       getStocksCount: vi.fn(),
     } as any;
@@ -86,7 +98,7 @@ describe('CommonStocksController', () => {
 
       vi.mocked(mockService.getAllActiveStocks).mockResolvedValue(mockStocks);
       vi.mocked(mockService.getStocksCount).mockResolvedValue(2);
-      const request = new Request('https://example.com/v1/api/admin/common-stocks?activeOnly=true');
+      const request = createTestRequest('https://example.com/v1/api/admin/common-stocks?activeOnly=true');
 
       // Act
       const response = await controller.getCommonStocks(request);
@@ -123,7 +135,7 @@ describe('CommonStocksController', () => {
 
       vi.mocked(mockService.getAllStocks).mockResolvedValue(mockStocks);
       vi.mocked(mockService.getStocksCount).mockResolvedValue(2);
-      const request = new Request('https://example.com/v1/api/admin/common-stocks?activeOnly=false');
+      const request = createTestRequest('https://example.com/v1/api/admin/common-stocks?activeOnly=false');
 
       // Act
       const response = await controller.getCommonStocks(request);
@@ -143,7 +155,7 @@ describe('CommonStocksController', () => {
         username: 'user',
         isAdmin: false,
       } as any);
-      const request = new Request('https://example.com/v1/api/admin/common-stocks');
+      const request = createTestRequest('https://example.com/v1/api/admin/common-stocks');
 
       // Act
       const response = await controller.getCommonStocks(request);
@@ -158,7 +170,7 @@ describe('CommonStocksController', () => {
     it('should return 500 when service throws error', async () => {
       // Arrange
       vi.mocked(mockService.getAllActiveStocks).mockRejectedValue(new Error('Service error'));
-      const request = new Request('https://example.com/v1/api/admin/common-stocks');
+      const request = createTestRequest('https://example.com/v1/api/admin/common-stocks');
 
       // Act
       const response = await controller.getCommonStocks(request);
@@ -183,7 +195,7 @@ describe('CommonStocksController', () => {
       };
 
       vi.mocked(mockService.addStock).mockResolvedValue(mockStock);
-      const request = new Request('https://example.com/v1/api/admin/common-stocks', {
+      const request = createTestRequest('https://example.com/v1/api/admin/common-stocks', {
         method: 'POST',
         body: JSON.stringify({
           symbol: 'TSLA',
@@ -206,7 +218,7 @@ describe('CommonStocksController', () => {
 
     it('should return 400 for invalid request body', async () => {
       // Arrange
-      const request = new Request('https://example.com/v1/api/admin/common-stocks', {
+      const request = createTestRequest('https://example.com/v1/api/admin/common-stocks', {
         method: 'POST',
         body: JSON.stringify({}), // Missing required symbol
       });
@@ -228,7 +240,7 @@ describe('CommonStocksController', () => {
         username: 'user',
         isAdmin: false,
       } as any);
-      const request = new Request('https://example.com/v1/api/admin/common-stocks', {
+      const request = createTestRequest('https://example.com/v1/api/admin/common-stocks', {
         method: 'POST',
         body: JSON.stringify({ symbol: 'TSLA' }),
       });
@@ -254,7 +266,7 @@ describe('CommonStocksController', () => {
       };
 
       vi.mocked(mockService.updateStock).mockResolvedValue(mockStock);
-      const request = new Request('https://example.com/v1/api/admin/common-stocks/AAPL', {
+      const request = createTestRequest('https://example.com/v1/api/admin/common-stocks/AAPL', {
         method: 'PUT',
         body: JSON.stringify({
           name: 'Apple Inc. Updated',
@@ -262,7 +274,7 @@ describe('CommonStocksController', () => {
       });
 
       // Act
-      const response = await controller.updateCommonStock(request);
+      const response = await controller.updateCommonStock(request, 'AAPL');
       const json = await response.json();
 
       // Assert
@@ -274,14 +286,14 @@ describe('CommonStocksController', () => {
 
     it('should return 404 when stock not found', async () => {
       // Arrange
-      vi.mocked(mockService.updateStock).mockResolvedValue(null);
-      const request = new Request('https://example.com/v1/api/admin/common-stocks/NONEXISTENT', {
+      vi.mocked(mockService.updateStock).mockRejectedValue(new Error('Stock with symbol NONEXISTENT not found'));
+      const request = createTestRequest('https://example.com/v1/api/admin/common-stocks/NONEXISTENT', {
         method: 'PUT',
         body: JSON.stringify({ name: 'Updated Name' }),
       });
 
       // Act
-      const response = await controller.updateCommonStock(request);
+      const response = await controller.updateCommonStock(request, 'NONEXISTENT');
       const json = await response.json();
 
       // Assert
@@ -293,8 +305,8 @@ describe('CommonStocksController', () => {
   describe('deleteCommonStock', () => {
     it('should delete (deactivate) a stock successfully', async () => {
       // Arrange
-      vi.mocked(mockService.removeStock).mockResolvedValue(undefined);
-      const request = new Request('https://example.com/v1/api/admin/common-stocks/AAPL', {
+      vi.mocked(mockService.removeStock).mockResolvedValue(true);
+      const request = createTestRequest('https://example.com/v1/api/admin/common-stocks/AAPL', {
         method: 'DELETE',
       });
 
@@ -312,7 +324,7 @@ describe('CommonStocksController', () => {
     it('should return 404 when stock not found', async () => {
       // Arrange
       vi.mocked(mockService.removeStock).mockRejectedValue(new Error('Stock with symbol NONEXISTENT not found'));
-      const request = new Request('https://example.com/v1/api/admin/common-stocks/NONEXISTENT', {
+      const request = createTestRequest('https://example.com/v1/api/admin/common-stocks/NONEXISTENT', {
         method: 'DELETE',
       });
 
@@ -336,7 +348,7 @@ describe('CommonStocksController', () => {
       };
 
       vi.mocked(mockService.bulkAddStocks).mockResolvedValue(mockResult);
-      const request = new Request('https://example.com/v1/api/admin/common-stocks/bulk', {
+      const request = createTestRequest('https://example.com/v1/api/admin/common-stocks/bulk', {
         method: 'POST',
         body: JSON.stringify({
           stocks: [
@@ -369,7 +381,7 @@ describe('CommonStocksController', () => {
       };
 
       vi.mocked(mockService.bulkAddStocks).mockResolvedValue(mockResult);
-      const request = new Request('https://example.com/v1/api/admin/common-stocks/bulk', {
+      const request = createTestRequest('https://example.com/v1/api/admin/common-stocks/bulk', {
         method: 'POST',
         body: JSON.stringify({
           stocks: [
@@ -392,7 +404,7 @@ describe('CommonStocksController', () => {
 
     it('should return 400 for invalid request body', async () => {
       // Arrange
-      const request = new Request('https://example.com/v1/api/admin/common-stocks/bulk', {
+      const request = createTestRequest('https://example.com/v1/api/admin/common-stocks/bulk', {
         method: 'POST',
         body: JSON.stringify({ stocks: 'invalid' }), // Should be array
       });

@@ -1,10 +1,13 @@
 /**
  * News Cache Helper
  * KV cache utilities for general news data
+ * Skips KV operations outside working hours to save on KV operations
  */
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 import type { NewsItem, NewsPagination, NewsOptions } from '@stockly/shared/types';
+import type { AdminConfig } from './config';
+import { kvGetWithWorkingHours, kvPutWithWorkingHours } from '../utils/kv-working-hours';
 import { flushPendingWritesToKV } from '../alerts/state-cache';
 
 interface NewsCacheEntry {
@@ -20,14 +23,15 @@ const DEFAULT_TTL_SECONDS = 3600; // 1 hour
 
 /**
  * Get news data from KV cache if valid (not expired)
- * Returns null if cache miss or expired
+ * Returns null if cache miss, expired, or outside working hours
  */
 export async function getNewsDataFromKV(
-  kv: KVNamespace,
-  key: string
+  kv: KVNamespace | undefined,
+  key: string,
+  config: AdminConfig
 ): Promise<{ data: { news: NewsItem[]; pagination: NewsPagination }; cachedAt: number } | null> {
   try {
-    const raw = await kv.get(key);
+    const raw = await kvGetWithWorkingHours(kv, key, config);
     if (!raw) {
       return null; // Cache miss
     }
@@ -58,14 +62,15 @@ export async function getNewsDataFromKV(
 
 /**
  * Get news data from KV cache even if expired (stale cache)
- * Returns null only if cache miss or invalid entry
+ * Returns null only if cache miss, invalid entry, or outside working hours
  */
 export async function getStaleNewsDataFromKV(
-  kv: KVNamespace,
-  key: string
+  kv: KVNamespace | undefined,
+  key: string,
+  config: AdminConfig
 ): Promise<{ data: { news: NewsItem[]; pagination: NewsPagination }; cachedAt: number } | null> {
   try {
-    const raw = await kv.get(key);
+    const raw = await kvGetWithWorkingHours(kv, key, config);
     if (!raw) {
       return null; // Cache miss
     }
@@ -91,11 +96,13 @@ export async function getStaleNewsDataFromKV(
 
 /**
  * Store news data in KV with TTL
+ * Skips write outside working hours to save on KV operations
  */
 export async function setNewsDataToKV(
-  kv: KVNamespace,
+  kv: KVNamespace | undefined,
   key: string,
   data: { news: NewsItem[]; pagination: NewsPagination },
+  config: AdminConfig,
   ttlSeconds: number = DEFAULT_TTL_SECONDS
 ): Promise<void> {
   try {
@@ -106,7 +113,7 @@ export async function setNewsDataToKV(
       expiresAt: now + ttlSeconds * 1000,
     };
 
-    await kv.put(key, JSON.stringify(cacheEntry));
+    await kvPutWithWorkingHours(kv, key, JSON.stringify(cacheEntry), config, { expirationTtl: ttlSeconds });
   } catch (error) {
     console.error(`[News Cache] Failed to write cache for key ${key}:`, error);
     // Don't throw - caching is best-effort
@@ -136,17 +143,19 @@ export function generateCacheKey(symbols: string[], options?: NewsOptions): stri
 /**
  * Get cached news from KV (legacy function for NewsRepository compatibility)
  * Uses pollingIntervalSec to determine if cache is still valid
+ * Skips KV read outside working hours to save on KV operations
  */
 export async function getCachedNews(
   kv: KVNamespace | undefined,
   key: string,
-  pollingIntervalSec: number
+  pollingIntervalSec: number,
+  config: AdminConfig
 ): Promise<{ data: { news: NewsItem[]; pagination: NewsPagination }; cachedAt: number } | null> {
   if (!kv) {
     return null;
   }
 
-  const cached = await getNewsDataFromKV(kv, key);
+  const cached = await getNewsDataFromKV(kv, key, config);
   if (!cached) {
     return null;
   }

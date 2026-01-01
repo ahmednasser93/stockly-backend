@@ -1,5 +1,6 @@
 import { json } from "../util";
 import type { Env } from "../index";
+import { kvPutWithWorkingHours } from '../utils/kv-working-hours';
 
 export interface AdminConfig {
   pollingIntervalSec: number;
@@ -36,7 +37,7 @@ const DEFAULT_CONFIG: AdminConfig = {
   backupProvider: "beta-feed",
   alertThrottle: { maxAlerts: 100, windowSeconds: 60 },
   marketCache: {
-    marketDataTtlSec: 300, // 5 minutes
+    marketDataTtlSec: 600, // 10 minutes (increased from 5 min to reduce KV writes)
     sectorsTtlSec: 2700, // 45 minutes
     newsTtlSec: 3600, // 1 hour
     prefetchCronInterval: "0 * * * *", // Every 1 hour (hourly)
@@ -166,7 +167,10 @@ export async function updateConfig(
         : current.featureFlags,
     };
 
-    await env.alertsKv.put(CONFIG_KEY, JSON.stringify(merged));
+    // Skip KV write outside working hours to save on KV operations
+    // Note: We use the current config (before update) to check working hours
+    // This allows config updates during working hours even if the new config changes working hours
+    await kvPutWithWorkingHours(env.alertsKv, CONFIG_KEY, JSON.stringify(merged), current);
     
     // Update cache immediately with new config (invalidate old cache)
     cachedConfig = merged;

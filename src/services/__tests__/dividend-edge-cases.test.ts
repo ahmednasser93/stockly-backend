@@ -8,6 +8,12 @@ import { DividendService } from '../dividend.service';
 import type { DividendRepository } from '../../repositories/external/DividendRepository';
 import type { Env } from '../../index';
 import type { Logger } from '../../logging/logger';
+import { getConfig } from '../../api/config';
+
+// Mock dependencies
+vi.mock('../../api/config', () => ({
+  getConfig: vi.fn(),
+}));
 
 describe('DividendService - Edge Cases', () => {
   let service: DividendService;
@@ -36,6 +42,34 @@ describe('DividendService - Edge Cases', () => {
     } as any;
 
     service = new DividendService(mockRepository, mockEnv, mockLogger);
+    
+    // Default config mock
+    vi.mocked(getConfig).mockResolvedValue({
+      pollingIntervalSec: 30,
+      kvWriteIntervalSec: 3600,
+      primaryProvider: 'alpha-feed',
+      backupProvider: 'beta-feed',
+      alertThrottle: { maxAlerts: 100, windowSeconds: 60 },
+      marketCache: {
+        marketDataTtlSec: 300,
+        sectorsTtlSec: 2700,
+        newsTtlSec: 3600,
+        prefetchCronInterval: '0 * * * *',
+      },
+      workingHours: {
+        enabled: false,
+        startHour: 0,
+        endHour: 23,
+        timezone: 'UTC',
+      },
+      featureFlags: {
+        alerting: true,
+        sandboxMode: false,
+        simulateProviderFailure: false,
+      },
+    } as any);
+    
+    vi.clearAllMocks();
   });
 
   describe('calculateDGR - Edge Cases', () => {

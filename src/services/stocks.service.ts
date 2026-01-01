@@ -9,7 +9,7 @@ import type { Env } from '../index';
 import type { Logger } from '../logging/logger';
 import { getConfig } from '../api/config';
 import { isWithinWorkingHours } from '../utils/working-hours';
-import { getStaleCacheEntry } from '../api/cache';
+import { getStaleCacheEntry, setCache, getCacheIfValid } from '../api/cache';
 
 export class StockService {
   constructor(
@@ -82,6 +82,167 @@ export class StockService {
     }
 
     return this.stockRepo.watchStockDetails(normalizedSymbol);
+  }
+
+  /**
+   * Get key executives for a stock
+   * Caching: 24 hours (executives change infrequently)
+   */
+  async getKeyExecutives(symbol: string): Promise<any[]> {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    if (normalizedSymbol.length === 0 || normalizedSymbol.length > 10) {
+      throw new Error('Invalid symbol format');
+    }
+
+    const cacheKey = `stock:executives:${normalizedSymbol}`;
+    const ttl = 86400; // 24 hours
+
+    // Check in-memory cache first
+    const cached = getCacheIfValid(cacheKey, ttl);
+    if (cached) {
+      this.logger?.info('Cache hit for key executives', {
+        symbol: normalizedSymbol,
+        cachedAt: cached.cachedAt,
+      });
+      return cached.data as any[];
+    }
+
+    // Fetch from repository
+    const data = await this.stockRepo.getKeyExecutives(normalizedSymbol);
+
+    // Cache the result
+    setCache(cacheKey, data, ttl);
+
+    return data;
+  }
+
+  /**
+   * Get analyst estimates for a stock
+   * Caching: 1 hour (estimates update periodically)
+   */
+  async getAnalystEstimates(symbol: string, period: 'annual' | 'quarter' = 'annual'): Promise<any[]> {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    if (normalizedSymbol.length === 0 || normalizedSymbol.length > 10) {
+      throw new Error('Invalid symbol format');
+    }
+
+    const cacheKey = `stock:analyst-estimates:${normalizedSymbol}:${period}`;
+    const ttl = 3600; // 1 hour
+
+    // Check in-memory cache first
+    const cached = getCacheIfValid(cacheKey, ttl);
+    if (cached) {
+      this.logger?.info('Cache hit for analyst estimates', {
+        symbol: normalizedSymbol,
+        period,
+        cachedAt: cached.cachedAt,
+      });
+      return cached.data as any[];
+    }
+
+    // Fetch from repository
+    const data = await this.stockRepo.getAnalystEstimates(normalizedSymbol, period);
+
+    // Cache the result
+    setCache(cacheKey, data, ttl);
+
+    return data;
+  }
+
+  /**
+   * Get financial growth metrics for a stock
+   * Caching: 24 hours (annual data)
+   */
+  async getFinancialGrowth(symbol: string): Promise<any[]> {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    if (normalizedSymbol.length === 0 || normalizedSymbol.length > 10) {
+      throw new Error('Invalid symbol format');
+    }
+
+    const cacheKey = `stock:financial-growth:${normalizedSymbol}`;
+    const ttl = 86400; // 24 hours
+
+    // Check in-memory cache first
+    const cached = getCacheIfValid(cacheKey, ttl);
+    if (cached) {
+      this.logger?.info('Cache hit for financial growth', {
+        symbol: normalizedSymbol,
+        cachedAt: cached.cachedAt,
+      });
+      return cached.data as any[];
+    }
+
+    // Fetch from repository
+    const data = await this.stockRepo.getFinancialGrowth(normalizedSymbol);
+
+    // Cache the result
+    setCache(cacheKey, data, ttl);
+
+    return data;
+  }
+
+  /**
+   * Get DCF valuation for a stock
+   * Caching: 24 hours
+   */
+  async getDCF(symbol: string): Promise<any> {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    if (normalizedSymbol.length === 0 || normalizedSymbol.length > 10) {
+      throw new Error('Invalid symbol format');
+    }
+
+    const cacheKey = `stock:dcf:${normalizedSymbol}`;
+    const ttl = 86400; // 24 hours
+
+    // Check in-memory cache first
+    const cached = getCacheIfValid(cacheKey, ttl);
+    if (cached) {
+      this.logger?.info('Cache hit for DCF', {
+        symbol: normalizedSymbol,
+        cachedAt: cached.cachedAt,
+      });
+      return cached.data;
+    }
+
+    // Fetch from repository
+    const data = await this.stockRepo.getDCF(normalizedSymbol);
+
+    // Cache the result
+    setCache(cacheKey, data, ttl);
+
+    return data;
+  }
+
+  /**
+   * Get financial scores for a stock
+   * Caching: 24 hours
+   */
+  async getFinancialScores(symbol: string): Promise<any> {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    if (normalizedSymbol.length === 0 || normalizedSymbol.length > 10) {
+      throw new Error('Invalid symbol format');
+    }
+
+    const cacheKey = `stock:financial-scores:${normalizedSymbol}`;
+    const ttl = 86400; // 24 hours
+
+    // Check in-memory cache first
+    const cached = getCacheIfValid(cacheKey, ttl);
+    if (cached) {
+      this.logger?.info('Cache hit for financial scores', {
+        symbol: normalizedSymbol,
+        cachedAt: cached.cachedAt,
+      });
+      return cached.data;
+    }
+
+    // Fetch from repository
+    const data = await this.stockRepo.getFinancialScores(normalizedSymbol);
+
+    // Cache the result
+    setCache(cacheKey, data, ttl);
+
+    return data;
   }
 }
 

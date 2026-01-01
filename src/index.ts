@@ -25,15 +25,21 @@ import { getAllUsers, getUserByUsername, getUserDevices, getUserAlerts, getUserF
 import { runAlertCron } from "./cron/alerts-cron";
 import { runNewsAlertCron } from "./cron/news-alert-cron";
 import { runMarketPrefetchCron } from "./cron/market-prefetch-cron";
+import { runSenateTradingCron } from "./cron/senate-trading-cron";
 import { createHistoricalService } from "./factories/createHistoricalService";
 import { HistoricalController } from "./controllers/historical.controller";
 import { createMarketService } from "./factories/createMarketService";
 import { MarketController } from "./controllers/market.controller";
 import { createDividendService } from "./factories/createDividendService";
 import { DividendController } from "./controllers/dividend.controller";
+import { createCalendarService } from "./factories/createCalendarService";
+import { CalendarController } from "./controllers/calendar.controller";
 import { getOpenApiSpec } from "./api/openapi";
 import { createCommonStocksService } from "./factories/createCommonStocksService";
 import { CommonStocksController } from "./controllers/common-stocks.controller";
+import { SenateTradingController } from "./controllers/senate-trading.controller";
+import { createDatalakeService } from "./factories/createDatalakeService";
+import { DatalakeController } from "./controllers/datalake.controller";
 import {
   getConfigEndpoint,
   updateConfigEndpoint,
@@ -57,6 +63,7 @@ import { sendLogsToLoki } from "./logging/loki-shipper";
 import { LoggedD1Database } from "./logging/d1-wrapper";
 import { LoggedKVNamespace } from "./logging/kv-wrapper";
 import { D1DatabaseWrapper } from "./infrastructure/database/D1Database";
+import { validateClientAuth } from "./middleware/clientAuth";
 
 export interface Env {
   stockly: D1Database;
@@ -64,6 +71,7 @@ export interface Env {
   marketKv?: KVNamespace;
   FCM_SERVICE_ACCOUNT?: string; // Google Cloud Service Account JSON as string
   FMP_API_KEY?: string; // Financial Modeling Prep API key (optional, falls back to hardcoded in util.ts)
+  MOBILE_APP_API_KEY?: string; // API key for mobile app authentication
   LOKI_URL?: string; // Grafana Loki endpoint URL (e.g., "https://logs-prod-us-central-0.grafana.net")
   LOKI_USERNAME?: string; // Grafana Cloud username (instance ID) for Basic Auth
   LOKI_PASSWORD?: string; // Grafana Cloud API token or password for Basic Auth
@@ -141,6 +149,45 @@ export default {
       return response;
     }
 
+    // Client authentication check (after CORS preflight, before route matching)
+    const clientAuthResult = validateClientAuth(request, {
+      allowedWebappOrigins: [
+        "https://stockly-webapp.pages.dev",
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:3000",
+      ],
+      mobileAppApiKey: env.MOBILE_APP_API_KEY || "",
+      publicEndpoints: ["/v1/api/health", "/openapi.json"],
+    });
+
+    if (!clientAuthResult.isValid) {
+      logger.warn(`Client authentication failed for ${pathname}`, {
+        clientType: clientAuthResult.clientType,
+        origin: request.headers.get("Origin"),
+        hasMobileApiKey: !!request.headers.get("X-Client-API-Key"),
+      });
+
+      const response = json(
+        { error: "Forbidden", message: "Client authentication required" },
+        403,
+        request
+      );
+
+      // Ship logs asynchronously (non-blocking)
+      if (env.LOKI_URL) {
+        ctx.waitUntil(
+          sendLogsToLoki(logger.getLogs(), {
+            url: env.LOKI_URL,
+            username: env.LOKI_USERNAME,
+            password: env.LOKI_PASSWORD,
+          })
+        );
+      }
+
+      return response;
+    }
+
     let response: Response;
 
     try {
@@ -167,6 +214,31 @@ export default {
         } else {
           response = await controller.getStockDetails(request, symbol);
         }
+      } else if (pathname.startsWith("/v1/api/stocks/") && pathname.endsWith("/executives") && request.method === "GET") {
+        const stockService = createStockService(loggedEnv, logger);
+        const controller = new StockController(stockService, logger, loggedEnv);
+        const symbol = pathname.replace("/v1/api/stocks/", "").replace("/executives", "");
+        response = await controller.getKeyExecutives(request, symbol);
+      } else if (pathname.startsWith("/v1/api/stocks/") && pathname.endsWith("/analyst-estimates") && request.method === "GET") {
+        const stockService = createStockService(loggedEnv, logger);
+        const controller = new StockController(stockService, logger, loggedEnv);
+        const symbol = pathname.replace("/v1/api/stocks/", "").replace("/analyst-estimates", "");
+        response = await controller.getAnalystEstimates(request, symbol);
+      } else if (pathname.startsWith("/v1/api/stocks/") && pathname.endsWith("/financial-growth") && request.method === "GET") {
+        const stockService = createStockService(loggedEnv, logger);
+        const controller = new StockController(stockService, logger, loggedEnv);
+        const symbol = pathname.replace("/v1/api/stocks/", "").replace("/financial-growth", "");
+        response = await controller.getFinancialGrowth(request, symbol);
+      } else if (pathname.startsWith("/v1/api/stocks/") && pathname.endsWith("/dcf") && request.method === "GET") {
+        const stockService = createStockService(loggedEnv, logger);
+        const controller = new StockController(stockService, logger, loggedEnv);
+        const symbol = pathname.replace("/v1/api/stocks/", "").replace("/dcf", "");
+        response = await controller.getDCF(request, symbol);
+      } else if (pathname.startsWith("/v1/api/stocks/") && pathname.endsWith("/financial-scores") && request.method === "GET") {
+        const stockService = createStockService(loggedEnv, logger);
+        const controller = new StockController(stockService, logger, loggedEnv);
+        const symbol = pathname.replace("/v1/api/stocks/", "").replace("/financial-scores", "");
+        response = await controller.getFinancialScores(request, symbol);
       } else if (pathname === "/v1/api/get-news") {
         const newsService = createNewsService(loggedEnv, logger);
         const controller = new NewsController(newsService, logger, loggedEnv);
@@ -256,6 +328,9 @@ export default {
         const favoriteStocksService = createFavoriteStocksService(loggedEnv, logger);
         const controller = new FavoriteStocksController(favoriteStocksService, logger, loggedEnv);
         response = await controller.deleteFavoriteStock(request, symbol);
+      } else if (pathname.startsWith("/v1/api/senate-trading")) {
+        const senateTradingController = new SenateTradingController(loggedEnv, logger);
+        response = await senateTradingController.handleRequest(request);
       } else if (pathname === "/v1/api/users/all" && request.method === "GET") {
         response = await getAllUsers(request, loggedEnv, logger);
       } else if (pathname.startsWith("/v1/api/users/") && request.method === "GET") {
@@ -321,6 +396,48 @@ export default {
         const commonStocksService = createCommonStocksService(loggedEnv, logger);
         const controller = new CommonStocksController(commonStocksService, logger, loggedEnv);
         response = await controller.deleteCommonStock(request, symbol);
+      } else if (pathname === "/v1/api/admin/datalakes" && request.method === "GET") {
+        const datalakeService = createDatalakeService(loggedEnv, logger);
+        const controller = new DatalakeController(datalakeService, logger, loggedEnv);
+        response = await controller.getAllDatalakes(request);
+      } else if (pathname === "/v1/api/admin/datalakes" && request.method === "POST") {
+        const datalakeService = createDatalakeService(loggedEnv, logger);
+        const controller = new DatalakeController(datalakeService, logger, loggedEnv);
+        response = await controller.createDatalake(request);
+      } else if (pathname.startsWith("/v1/api/admin/datalakes/") && pathname.split("/").length === 5 && request.method === "GET") {
+        const id = pathname.split("/v1/api/admin/datalakes/")[1];
+        const datalakeService = createDatalakeService(loggedEnv, logger);
+        const controller = new DatalakeController(datalakeService, logger, loggedEnv);
+        response = await controller.getDatalake(request, id);
+      } else if (pathname.startsWith("/v1/api/admin/datalakes/") && pathname.split("/").length === 5 && request.method === "PUT") {
+        const id = pathname.split("/v1/api/admin/datalakes/")[1];
+        const datalakeService = createDatalakeService(loggedEnv, logger);
+        const controller = new DatalakeController(datalakeService, logger, loggedEnv);
+        response = await controller.updateDatalake(request, id);
+      } else if (pathname.startsWith("/v1/api/admin/datalakes/") && pathname.split("/").length === 5 && request.method === "DELETE") {
+        const id = pathname.split("/v1/api/admin/datalakes/")[1];
+        const datalakeService = createDatalakeService(loggedEnv, logger);
+        const controller = new DatalakeController(datalakeService, logger, loggedEnv);
+        response = await controller.deleteDatalake(request, id);
+      } else if (pathname === "/v1/api/admin/api-endpoints" && request.method === "GET") {
+        const datalakeService = createDatalakeService(loggedEnv, logger);
+        const controller = new DatalakeController(datalakeService, logger, loggedEnv);
+        response = await controller.getAllApiEndpoints(request);
+      } else if (pathname.startsWith("/v1/api/admin/api-endpoints/") && pathname.endsWith("/mappings") && request.method === "GET") {
+        const endpointId = pathname.split("/v1/api/admin/api-endpoints/")[1].replace("/mappings", "");
+        const datalakeService = createDatalakeService(loggedEnv, logger);
+        const controller = new DatalakeController(datalakeService, logger, loggedEnv);
+        response = await controller.getEndpointMappings(request, endpointId);
+      } else if (pathname.startsWith("/v1/api/admin/api-endpoints/") && pathname.endsWith("/select-datalake") && request.method === "PUT") {
+        const endpointId = pathname.split("/v1/api/admin/api-endpoints/")[1].replace("/select-datalake", "");
+        const datalakeService = createDatalakeService(loggedEnv, logger);
+        const controller = new DatalakeController(datalakeService, logger, loggedEnv);
+        response = await controller.selectDatalakeForEndpoint(request, endpointId);
+      } else if (pathname.startsWith("/v1/api/admin/datalakes/") && pathname.endsWith("/mappings") && request.method === "GET") {
+        const datalakeId = pathname.split("/v1/api/admin/datalakes/")[1].replace("/mappings", "");
+        const datalakeService = createDatalakeService(loggedEnv, logger);
+        const controller = new DatalakeController(datalakeService, logger, loggedEnv);
+        response = await controller.getDatalakeMappings(request, datalakeId);
       } else if (pathname === "/config/get" && request.method === "GET") {
         response = await getConfigEndpoint(loggedEnv, logger);
       } else if (pathname === "/config/update" && request.method === "POST") {
@@ -369,6 +486,18 @@ export default {
         const marketService = createMarketService(loggedEnv, logger);
         const controller = new MarketController(marketService, logger, loggedEnv);
         response = await controller.getSectorsPerformance(request);
+      } else if (pathname === "/v1/api/market/status" && request.method === "GET") {
+        const marketService = createMarketService(loggedEnv, logger);
+        const controller = new MarketController(marketService, logger, loggedEnv);
+        response = await controller.getMarketStatus(request);
+      } else if (pathname === "/v1/api/market/social-sentiment" && request.method === "GET") {
+        const marketService = createMarketService(loggedEnv, logger);
+        const controller = new MarketController(marketService, logger, loggedEnv);
+        response = await controller.getSocialSentiment(request);
+      } else if (pathname === "/v1/api/market/crypto" && request.method === "GET") {
+        const marketService = createMarketService(loggedEnv, logger);
+        const controller = new MarketController(marketService, logger, loggedEnv);
+        response = await controller.getCryptoQuotes(request);
       } else if (pathname === "/v1/api/dividends/data" && request.method === "GET") {
         const dividendService = createDividendService(loggedEnv, logger);
         const controller = new DividendController(dividendService, logger, loggedEnv);
@@ -377,6 +506,22 @@ export default {
         const dividendService = createDividendService(loggedEnv, logger);
         const controller = new DividendController(dividendService, logger, loggedEnv);
         response = await controller.calculateProjection(request);
+      } else if (pathname === "/v1/api/calendar/earnings" && request.method === "GET") {
+        const calendarService = createCalendarService(loggedEnv, logger);
+        const controller = new CalendarController(calendarService, logger, loggedEnv);
+        response = await controller.getEarningsCalendar(request);
+      } else if (pathname === "/v1/api/calendar/dividends" && request.method === "GET") {
+        const calendarService = createCalendarService(loggedEnv, logger);
+        const controller = new CalendarController(calendarService, logger, loggedEnv);
+        response = await controller.getDividendCalendar(request);
+      } else if (pathname === "/v1/api/calendar/ipos" && request.method === "GET") {
+        const calendarService = createCalendarService(loggedEnv, logger);
+        const controller = new CalendarController(calendarService, logger, loggedEnv);
+        response = await controller.getIPOCalendar(request);
+      } else if (pathname === "/v1/api/calendar/splits" && request.method === "GET") {
+        const calendarService = createCalendarService(loggedEnv, logger);
+        const controller = new CalendarController(calendarService, logger, loggedEnv);
+        response = await controller.getStockSplitCalendar(request);
       } else {
         logger.warn("Route not found", { pathname, method: request.method });
         response = json({ error: "Not Found" }, 404, request);
@@ -427,6 +572,12 @@ export default {
     // Run news alerts every 6 hours (at 00:00, 06:00, 12:00, 18:00)
     if (event.cron === "0 */6 * * *") {
       ctx.waitUntil(runNewsAlertCron(env, ctx));
+    }
+
+    // Run senate trading sync and alerts every 6 hours (at 00:00, 06:00, 12:00, 18:00)
+    // Note: Using same schedule as news alerts, but could be separate
+    if (event.cron === "0 */6 * * *") {
+      ctx.waitUntil(runSenateTradingCron(env, ctx));
     }
 
     // Run market data & news prefetch every 1 hour (hourly) to warm cache

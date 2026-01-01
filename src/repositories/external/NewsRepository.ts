@@ -6,7 +6,7 @@
 
 import type { INewsRepository, NewsOptions } from '../interfaces/INewsRepository';
 import type { NewsItem, NewsPagination } from '@stockly/shared/types';
-import { API_URL, API_KEY } from '../../util';
+import { API_KEY } from '../../util';
 import type { Env } from '../../index';
 import type { Logger } from '../../logging/logger';
 import { getConfig } from '../../api/config';
@@ -16,11 +16,13 @@ import {
   generateCacheKey as generateNewsCacheKey,
   flushPendingWritesToKV,
 } from '../../api/news-cache';
+import type { DatalakeService } from '../../services/datalake.service';
 
 export class NewsRepository implements INewsRepository {
   constructor(
     private env: Env,
-    private logger?: Logger
+    private logger?: Logger,
+    private datalakeService?: DatalakeService
   ) {}
 
   /**
@@ -62,38 +64,41 @@ export class NewsRepository implements INewsRepository {
     options?: NewsOptions
   ): Promise<any[]> {
     const symbolsParam = symbols.join(',');
-    const params = new URLSearchParams({
-      symbols: symbolsParam,
-      apikey: API_KEY,
-    });
+    const params: Record<string, string> = { symbols: symbolsParam };
 
-    if (options?.from) {
-      params.append('from', options.from);
-    }
-    if (options?.to) {
-      params.append('to', options.to);
-    }
-    if (options?.page !== undefined) {
-      params.append('page', options.page.toString());
-    }
-    if (options?.limit !== undefined) {
-      params.append('limit', Math.min(options.limit, 250).toString());
-    }
-
-    const api = `${API_URL}/news/stock?${params.toString()}`;
+    if (options?.from) params.from = options.from;
+    if (options?.to) params.to = options.to;
+    if (options?.page !== undefined) params.page = options.page.toString();
+    if (options?.limit !== undefined) params.limit = Math.min(options.limit, 250).toString();
 
     try {
-      const res = await fetch(api, {
-        headers: {
-          Accept: 'application/json',
-        },
-      });
-
-      if (!res.ok) {
-        throw new Error(`FMP API failed: HTTP ${res.status}`);
+      let data: any;
+      
+      if (this.datalakeService) {
+        const envApiKey = this.env.FMP_API_KEY || API_KEY;
+        const adapter = await this.datalakeService.getAdapterForEndpoint('news-stock', envApiKey);
+        if (adapter) {
+          data = await adapter.fetch('/news/stock', params);
+        } else {
+          // Fallback to direct FMP
+          const { API_URL, API_KEY } = await import('../../util');
+          const urlParams = new URLSearchParams({ ...params, apikey: API_KEY });
+          const res = await fetch(`${API_URL}/news/stock?${urlParams.toString()}`, {
+            headers: { Accept: 'application/json' },
+          });
+          if (!res.ok) throw new Error(`FMP API failed: HTTP ${res.status}`);
+          data = await res.json();
+        }
+      } else {
+        // Fallback to direct FMP
+        const { API_URL, API_KEY } = await import('../../util');
+        const urlParams = new URLSearchParams({ ...params, apikey: API_KEY });
+        const res = await fetch(`${API_URL}/news/stock?${urlParams.toString()}`, {
+          headers: { Accept: 'application/json' },
+        });
+        if (!res.ok) throw new Error(`FMP API failed: HTTP ${res.status}`);
+        data = await res.json();
       }
-
-      const data = await res.json();
 
       // Check for FMP API error messages
       if (data && typeof data === 'object' && !Array.isArray(data)) {
@@ -113,31 +118,40 @@ export class NewsRepository implements INewsRepository {
    * Fetch general news from FMP API
    */
   private async fetchGeneralNewsFromApi(options?: NewsOptions): Promise<any[]> {
-    const params = new URLSearchParams({
-      apikey: API_KEY,
-    });
+    const params: Record<string, string> = {};
 
-    if (options?.page !== undefined) {
-      params.append('page', options.page.toString());
-    }
-    if (options?.limit !== undefined) {
-      params.append('limit', Math.min(options.limit, 250).toString());
-    }
-
-    const api = `${API_URL}/news/general-latest?${params.toString()}`;
+    if (options?.page !== undefined) params.page = options.page.toString();
+    if (options?.limit !== undefined) params.limit = Math.min(options.limit, 250).toString();
 
     try {
-      const res = await fetch(api, {
-        headers: {
-          Accept: 'application/json',
-        },
-      });
-
-      if (!res.ok) {
-        throw new Error(`FMP API failed: HTTP ${res.status}`);
+      let data: any;
+      
+      if (this.datalakeService) {
+        const envApiKey = this.env.FMP_API_KEY || API_KEY;
+        const adapter = await this.datalakeService.getAdapterForEndpoint('news-general-latest', envApiKey);
+        if (adapter) {
+          data = await adapter.fetch('/news/general-latest', params);
+        } else {
+          // Fallback to direct FMP
+          const { API_URL, API_KEY } = await import('../../util');
+          const urlParams = new URLSearchParams({ ...params, apikey: API_KEY });
+          const res = await fetch(`${API_URL}/news/general-latest?${urlParams.toString()}`, {
+            headers: { Accept: 'application/json' },
+          });
+          if (!res.ok) throw new Error(`FMP API failed: HTTP ${res.status}`);
+          data = await res.json();
+        }
+      } else {
+        // Fallback to direct FMP
+        const { API_URL, API_KEY } = await import('../../util');
+        const urlParams = new URLSearchParams({ ...params, apikey: API_KEY });
+        const res = await fetch(`${API_URL}/news/general-latest?${urlParams.toString()}`, {
+          headers: { Accept: 'application/json' },
+        });
+        if (!res.ok) throw new Error(`FMP API failed: HTTP ${res.status}`);
+        data = await res.json();
       }
 
-      const data = await res.json();
       return Array.isArray(data) ? data : [];
     } catch (error) {
       this.logger?.error('Failed to fetch general news from FMP API', error);
@@ -160,7 +174,7 @@ export class NewsRepository implements INewsRepository {
     const useCache = !options?.from && !options?.to && options?.page === undefined && options?.limit === undefined;
 
     if (useCache) {
-      const cachedEntry = await getCachedNews(this.env.alertsKv, cacheKey, pollingIntervalSec);
+      const cachedEntry = await getCachedNews(this.env.alertsKv, cacheKey, pollingIntervalSec, config);
 
       if (cachedEntry) {
         const ageSeconds = Math.floor((Date.now() - cachedEntry.cachedAt) / 1000);
@@ -265,7 +279,7 @@ export class NewsRepository implements INewsRepository {
     const useCache = options?.page === undefined || options.page === 0;
 
     if (useCache) {
-      const cachedEntry = await getCachedNews(this.env.alertsKv, cacheKey, pollingIntervalSec);
+      const cachedEntry = await getCachedNews(this.env.alertsKv, cacheKey, pollingIntervalSec, config);
 
       if (cachedEntry) {
         const pageNum = options?.page ?? 0;

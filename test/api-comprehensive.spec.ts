@@ -80,9 +80,18 @@ const createUrl = (path: string, params: Record<string, string> = {}) => {
   return url;
 };
 
+// Helper to add Origin header for client authentication
+const addOriginHeader = (init?: RequestInit): RequestInit => ({
+  ...init,
+  headers: {
+    "Origin": "http://localhost:5173", // Add Origin header for client authentication in tests
+    ...init?.headers,
+  }
+});
+
 const createRequest = (path: string, params: Record<string, string> = {}, init?: RequestInit) => {
   const url = createUrl(path, params);
-  return new Request(url.toString(), init);
+  return new Request(url.toString(), addOriginHeader(init));
 };
 
 const createEnv = (): Env => {
@@ -481,7 +490,7 @@ describe("API - Alerts", () => {
     };
     vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
-    const request = new Request("https://example.com/v1/api/alerts", { method: "GET" });
+    const request = new Request("https://example.com/v1/api/alerts", addOriginHeader({ method: "GET" }));
     const env = createEnv();
     const logger = createMockLogger();
     const alertService = createAlertService(env, logger);
@@ -520,11 +529,11 @@ describe("API - Alerts", () => {
     };
     vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
-    const request = new Request("https://example.com/v1/api/alerts", {
+    const request = new Request("https://example.com/v1/api/alerts", addOriginHeader({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(createRequest),
-    });
+    }));
     const env = createEnv();
     const logger = createMockLogger();
     const alertService = createAlertService(env, logger);
@@ -557,7 +566,7 @@ describe("API - Alerts", () => {
     vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
     const alertId = "550e8400-e29b-41d4-a716-446655440002";
-    const request = new Request(`https://example.com/v1/api/alerts/${alertId}`, { method: "GET" });
+    const request = new Request(`https://example.com/v1/api/alerts/${alertId}`, addOriginHeader({ method: "GET" }));
     const env = createEnv();
     const logger = createMockLogger();
     const alertService = createAlertService(env, logger);
@@ -591,11 +600,11 @@ describe("API - Alerts", () => {
     vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
     const alertId = "550e8400-e29b-41d4-a716-446655440003";
-    const request = new Request(`https://example.com/v1/api/alerts/${alertId}`, {
+    const request = new Request(`https://example.com/v1/api/alerts/${alertId}`, addOriginHeader({
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(updateRequest),
-    });
+    }));
     const env = createEnv();
     const logger = createMockLogger();
     const alertService = createAlertService(env, logger);
@@ -614,9 +623,9 @@ describe("API - Alerts", () => {
     vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
     const alertId = "550e8400-e29b-41d4-a716-446655440004";
-    const request = new Request(`https://example.com/v1/api/alerts/${alertId}`, {
+    const request = new Request(`https://example.com/v1/api/alerts/${alertId}`, addOriginHeader({
       method: "DELETE",
-    });
+    }));
     const env = createEnv();
     const logger = createMockLogger();
     const alertService = createAlertService(env, logger);
@@ -668,11 +677,11 @@ describe("API - Push Token", () => {
       return { bind };
     });
 
-    const request = new Request("https://example.com/v1/api/push-token", {
+    const request = new Request("https://example.com/v1/api/push-token", addOriginHeader({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-    });
+    }));
 
     const response = await registerPushToken(request, env, createMockLogger());
     
@@ -708,11 +717,11 @@ describe("API - Push Token", () => {
       return { bind };
     });
 
-    const request = new Request("https://example.com/v1/api/push-token", {
+    const request = new Request("https://example.com/v1/api/push-token", addOriginHeader({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-    });
+    }));
 
     const response = await registerPushToken(request, env, createMockLogger());
     
@@ -727,11 +736,11 @@ describe("API - Push Token", () => {
       token: "short-token", // Too short
     };
 
-    const request = new Request("https://example.com/v1/api/push-token", {
+    const request = new Request("https://example.com/v1/api/push-token", addOriginHeader({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-    });
+    }));
 
     const env = createEnv();
     // Mock user lookup (validation happens before token format check in some cases)
@@ -774,7 +783,7 @@ describe("API - Push Token", () => {
       return { bind };
     });
 
-    const request = new Request("https://example.com/v1/api/push-token");
+    const request = new Request("https://example.com/v1/api/push-token", addOriginHeader());
     const response = await getPushToken(request, env, createMockLogger());
     
     expect(response.status).toBe(200);
@@ -801,7 +810,7 @@ describe("API - Push Token", () => {
       return { bind };
     });
 
-    const request = new Request("https://example.com/v1/api/push-token");
+    const request = new Request("https://example.com/v1/api/push-token", addOriginHeader());
     const response = await getPushToken(request, env, createMockLogger());
     
     expect(response.status).toBe(404);
@@ -825,7 +834,7 @@ describe("API - Push Token", () => {
       return { bind };
     });
 
-    const request = new Request(`https://example.com/v1/api/push-token?check=true&token=${encodeURIComponent(testToken)}`);
+    const request = new Request(`https://example.com/v1/api/push-token?check=true&token=${encodeURIComponent(testToken)}`, addOriginHeader());
     const response = await getPushToken(request, env, createMockLogger());
     
     expect(response.status).toBe(200);
@@ -849,7 +858,7 @@ describe("API - Push Token", () => {
       return { bind };
     });
 
-    const request = new Request(`https://example.com/v1/api/push-token?check=true&token=${encodeURIComponent(testToken)}`);
+    const request = new Request(`https://example.com/v1/api/push-token?check=true&token=${encodeURIComponent(testToken)}`, addOriginHeader());
     const response = await getPushToken(request, env, createMockLogger());
     
     expect(response.status).toBe(200);
@@ -867,7 +876,7 @@ describe("API - Push Token", () => {
       return { bind };
     });
 
-    const request = new Request("https://example.com/v1/api/push-token?check=true");
+    const request = new Request("https://example.com/v1/api/push-token?check=true", addOriginHeader());
     const response = await getPushToken(request, env, createMockLogger());
     
     expect(response.status).toBe(400);
@@ -913,7 +922,7 @@ describe("API - Preferences", () => {
       return { bind };
     });
 
-    const request = new Request("https://example.com/v1/api/preferences");
+    const request = new Request("https://example.com/v1/api/preferences", addOriginHeader());
     const response = await getPreferences(request, env, createMockLogger());
     
     expect(response.status).toBe(200);
@@ -936,7 +945,7 @@ describe("API - Preferences", () => {
       return { bind };
     });
 
-    const request = new Request("https://example.com/v1/api/preferences");
+    const request = new Request("https://example.com/v1/api/preferences", addOriginHeader());
     const response = await getPreferences(request, env, createMockLogger());
     
     expect(response.status).toBe(200);
@@ -968,11 +977,11 @@ describe("API - Preferences", () => {
       return { bind };
     });
 
-    const request = new Request("https://example.com/v1/api/preferences", {
+    const request = new Request("https://example.com/v1/api/preferences", addOriginHeader({
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-    });
+    }));
 
     const response = await updatePreferences(request, env, createMockLogger());
     
@@ -1011,7 +1020,7 @@ describe("API - Settings", () => {
     });
     env.stockly.prepare = vi.fn().mockReturnValue({ bind });
 
-    const request = new Request("https://example.com/v1/api/settings");
+    const request = new Request("https://example.com/v1/api/settings", addOriginHeader());
     const response = await getSettings(request, env, logger);
     
     expect(response.status).toBe(200);
@@ -1037,7 +1046,7 @@ describe("API - Settings", () => {
       return { bind };
     });
 
-    const request = new Request("https://example.com/v1/api/settings");
+    const request = new Request("https://example.com/v1/api/settings", addOriginHeader());
     const response = await getSettings(request, env, logger);
     
     expect(response.status).toBe(200);
@@ -1070,11 +1079,11 @@ describe("API - Settings", () => {
       return { bind };
     });
 
-    const request = new Request("https://example.com/v1/api/settings", {
+    const request = new Request("https://example.com/v1/api/settings", addOriginHeader({
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-    });
+    }));
 
     const response = await updateSettings(request, env, logger);
     
@@ -1128,7 +1137,7 @@ describe("API - Notifications", () => {
       bind: vi.fn().mockReturnThis(),
     });
 
-    const request = new Request("https://example.com/v1/api/notifications/recent");
+    const request = new Request("https://example.com/v1/api/notifications/recent", addOriginHeader());
     const response = await getRecentNotifications(request, env, createMockLogger());
     
     expect(response.status).toBe(200);
@@ -1164,7 +1173,7 @@ describe("API - Notifications", () => {
       bind: vi.fn().mockReturnThis(),
     });
 
-    const request = new Request("https://example.com/v1/api/notifications/failed");
+    const request = new Request("https://example.com/v1/api/notifications/failed", addOriginHeader());
     const response = await getFailedNotifications(request, env, createMockLogger());
     
     expect(response.status).toBe(200);
@@ -1223,7 +1232,7 @@ describe("API - Notifications", () => {
       getRandomValues: vi.fn(),
     } as Crypto;
 
-    const request = new Request("https://example.com/v1/api/notifications/retry/notif-123");
+    const request = new Request("https://example.com/v1/api/notifications/retry/notif-123", addOriginHeader());
     const response = await retryNotification(request, "notif-123", env, createMockLogger());
     
     expect(response.status).toBe(200);
@@ -1294,7 +1303,7 @@ describe("API - Devices", () => {
       };
     });
 
-    const request = new Request("https://example.com/v1/api/devices");
+    const request = new Request("https://example.com/v1/api/devices", addOriginHeader());
     const response = await getAllDevices(request, env, createMockLogger());
     
     expect(response.status).toBe(200);
@@ -1353,7 +1362,7 @@ describe("API - Devices", () => {
       };
     });
 
-    const request = new Request("https://example.com/v1/api/devices?pushToken=fcm-token-12345678901234567890", { method: "DELETE" });
+    const request = new Request("https://example.com/v1/api/devices?pushToken=fcm-token-12345678901234567890", addOriginHeader({ method: "DELETE" }));
     const response = await deleteDevice(request, env, createMockLogger());
     
     expect(response.status).toBe(200);
@@ -1387,11 +1396,11 @@ describe("API - Admin Config", () => {
       },
     };
 
-    const request = new Request("https://example.com/config/update", {
+    const request = new Request("https://example.com/config/update", addOriginHeader({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-    });
+    }));
 
     const env = createEnv();
     const response = await updateConfigEndpoint(request, env);

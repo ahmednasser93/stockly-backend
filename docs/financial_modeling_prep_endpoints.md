@@ -4,6 +4,8 @@ This document lists all the Financial Modeling Prep (FMP) API endpoints currentl
 
 **Base URL**: `https://financialmodelingprep.com/stable` (Defined in `src/util.ts`)
 
+**Last Updated**: 2024 - Added 9 new features (Market Status, Social Sentiment, Crypto Quotes, Key Executives, Analyst Estimates, Financial Growth, DCF, Financial Scores, Calendar Events)
+
 ## Stock Data
 
 ### Quote
@@ -65,6 +67,106 @@ Fetches financial ratios.
 - **Endpoint**:
   ```http
   GET /ratios/{symbol}?limit=3&apikey={apikey}
+  ```
+
+### Key Executives
+Fetches key executives information (titles, names, pay).
+- **Reference**: `src/repositories/external/StockRepository.ts`
+- **Endpoint**:
+  ```http
+  GET /key-executives?symbol={symbol}&apikey={apikey}
+  ```
+
+### Analyst Estimates
+Fetches analyst estimates (revenue, EPS, etc.).
+- **Reference**: `src/repositories/external/StockRepository.ts`
+- **Endpoint**:
+  ```http
+  GET /analyst-estimates?symbol={symbol}&period={annual|quarter}&apikey={apikey}
+  ```
+
+### Financial Growth
+Fetches financial growth metrics (YoY revenue, net income, etc.).
+- **Reference**: `src/repositories/external/StockRepository.ts`
+- **Endpoint**:
+  ```http
+  GET /financial-growth?symbol={symbol}&apikey={apikey}
+  ```
+
+### Discounted Cash Flow (DCF)
+Fetches DCF valuation data.
+- **Reference**: `src/repositories/external/StockRepository.ts`
+- **Endpoint**:
+  ```http
+  GET /discounted-cash-flow?symbol={symbol}&apikey={apikey}
+  ```
+
+### Financial Scores
+Fetches financial scores (Altman Z-Score, Piotroski Score, etc.).
+- **Reference**: `src/repositories/external/StockRepository.ts`
+- **Endpoint**:
+  ```http
+  GET /financial-scores?symbol={symbol}&apikey={apikey}
+  ```
+
+## Market Data
+
+### Market Status
+Checks if the stock market is currently open.
+- **Reference**: `src/repositories/external/MarketRepository.ts`
+- **Endpoint**:
+  ```http
+  GET /is-the-market-open?apikey={apikey}
+  ```
+
+### Social Sentiment
+Fetches trending stocks with social sentiment (bullish/bearish).
+- **Reference**: `src/repositories/external/MarketRepository.ts`
+- **Endpoint**:
+  ```http
+  GET /social-sentiment/trending?type={bullish|bearish}&apikey={apikey}
+  ```
+
+### Crypto Quotes
+Fetches cryptocurrency quotes.
+- **Reference**: `src/repositories/external/MarketRepository.ts`
+- **Endpoint**:
+  ```http
+  GET /quotes/crypto?apikey={apikey}
+  ```
+
+## Calendar Events
+
+### Earnings Calendar
+Fetches upcoming earnings reports.
+- **Reference**: `src/repositories/external/CalendarRepository.ts`
+- **Endpoint**:
+  ```http
+  GET /earning_calendar?from={date}&to={date}&apikey={apikey}
+  ```
+
+### Dividend Calendar
+Fetches upcoming dividend ex-dates.
+- **Reference**: `src/repositories/external/CalendarRepository.ts`
+- **Endpoint**:
+  ```http
+  GET /stock_dividend_calendar?from={date}&to={date}&apikey={apikey}
+  ```
+
+### IPO Calendar
+Fetches upcoming IPOs.
+- **Reference**: `src/repositories/external/CalendarRepository.ts`
+- **Endpoint**:
+  ```http
+  GET /ipo_calendar?from={date}&to={date}&apikey={apikey}
+  ```
+
+### Stock Split Calendar
+Fetches upcoming stock splits.
+- **Reference**: `src/repositories/external/CalendarRepository.ts`
+- **Endpoint**:
+  ```http
+  GET /stock_split_calendar?from={date}&to={date}&apikey={apikey}
   ```
 
 ## News

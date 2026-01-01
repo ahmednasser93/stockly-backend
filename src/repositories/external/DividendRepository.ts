@@ -3,9 +3,10 @@
  * Fetches dividend data from FMP API
  */
 
-import { API_URL, API_KEY } from '../../util';
+import { API_KEY } from '../../util';
 import type { Env } from '../../index';
 import type { Logger } from '../../logging/logger';
+import type { DatalakeService } from '../../services/datalake.service';
 
 export interface DividendHistory {
   date: string; // YYYY-MM-DD
@@ -21,101 +22,47 @@ export interface ProfileData {
 export class DividendRepository {
   constructor(
     private env: Env,
-    private logger?: Logger
+    private logger?: Logger,
+    private datalakeService?: DatalakeService
   ) {}
 
   /**
-   * Fetch from FMP API with retry logic for rate limits and timeouts
+   * Get adapter for an endpoint, with fallback to direct FMP if datalake service not available
    */
-  private async fetchWithRetry(url: string, maxRetries: number = 3): Promise<any> {
-    const apiKey = this.env.FMP_API_KEY ?? API_KEY;
-    let lastError: Error | null = null;
-
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        this.logger?.info(`Fetching from FMP API (attempt ${i + 1}/${maxRetries}): ${url.replace(apiKey, '***')}`);
-        
-        const res = await fetch(url, {
-          headers: {
-            Accept: "application/json",
-          },
-          // 30 second timeout
-          signal: AbortSignal.timeout(30000),
-        });
-
-        if (res.status === 429) {
-          // Rate limited - wait and retry with exponential backoff
-          const delay = Math.pow(2, i) * 1000;
-          this.logger?.warn(`Rate limited, retrying in ${delay}ms...`);
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          continue;
-        }
-
-        // Handle 404 as "no data available" (valid response)
-        if (res.status === 404) {
-          this.logger?.info('FMP API returned 404 (no data available)');
-          return null;
-        }
-
-        if (!res.ok) {
-          const errorText = await res.text().catch(() => '');
-          throw new Error(`HTTP ${res.status}: ${errorText.substring(0, 200)}`);
-        }
-
-        const data = await res.json();
-        
-        // Check for FMP API error messages
-        if (data && typeof data === "object") {
-          if ("Error Message" in data) {
-            throw new Error(`FMP API error: ${data["Error Message"]}`);
-          }
-          if ("error" in data && typeof data.error === "string") {
-            throw new Error(`FMP API error: ${data.error}`);
-          }
-        }
-
-        return data;
-      } catch (error: any) {
-        lastError = error;
-        const errorMessage = error?.message || String(error);
-        this.logger?.warn(`FMP API fetch attempt ${i + 1} failed: ${errorMessage}`);
-        
-        // If it's a timeout or abort, retry
-        if (error.name === "AbortError" || error.name === "TimeoutError") {
-          if (i === maxRetries - 1) {
-            throw new Error(`Request timeout after ${maxRetries} attempts: ${errorMessage}`);
-          }
-          const delay = Math.pow(2, i) * 1000;
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          continue;
-        }
-
-        // If last retry, throw the error with more context
-        if (i === maxRetries - 1) {
-          throw new Error(`FMP API failed after ${maxRetries} attempts: ${errorMessage}`);
-        }
-
-        // Retry with exponential backoff
-        const delay = Math.pow(2, i) * 1000;
-        await new Promise((resolve) => setTimeout(resolve, delay));
-      }
-    }
-    
-    throw lastError || new Error("Max retries exceeded");
+  private async getAdapter(endpointId: string): Promise<import('../../infrastructure/datalake/DatalakeAdapter').DatalakeAdapter | null> {
+    if (!this.datalakeService) return null;
+    const envApiKey = this.env.FMP_API_KEY || API_KEY;
+    return this.datalakeService.getAdapterForEndpoint(endpointId, envApiKey);
   }
 
   /**
-   * Fetch historical dividend data from FMP API
+   * Fetch historical dividend data using datalake adapter
    * GET /v3/historical-price-full/stock_dividend/{symbol}
    */
   async getHistoricalDividends(symbol: string): Promise<DividendHistory[]> {
-    const apiKey = this.env.FMP_API_KEY ?? API_KEY;
     const normalizedSymbol = symbol.trim().toUpperCase();
     
-    const url = `${API_URL}/v3/historical-price-full/stock_dividend/${normalizedSymbol}?apikey=${apiKey}`;
-    
     try {
-      const data = await this.fetchWithRetry(url);
+      const adapter = await this.getAdapter('historical-dividend');
+      let data: any;
+
+      if (adapter) {
+        data = await adapter.fetch('/v3/historical-price-full/stock_dividend/{symbol}', { symbol: normalizedSymbol });
+      } else {
+        // Fallback to direct FMP
+        const { API_URL, API_KEY } = await import('../../util');
+        const apiKey = this.env.FMP_API_KEY ?? API_KEY;
+        const res = await fetch(`${API_URL}/v3/historical-price-full/stock_dividend/${normalizedSymbol}?apikey=${apiKey}`, {
+          headers: { Accept: "application/json" },
+          signal: AbortSignal.timeout(30000),
+        });
+        if (res.status === 404) {
+          this.logger?.info(`No historical dividend data found for ${normalizedSymbol}`);
+          return [];
+        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        data = await res.json();
+      }
       
       // Handle empty or null response
       if (!data || !data.historical) {
@@ -143,18 +90,34 @@ export class DividendRepository {
   }
 
   /**
-   * Fetch current dividend yield from FMP profile endpoint
+   * Fetch current dividend yield using datalake adapter
    * GET /v3/profile/{symbol}
    * Extracts yield from dividendYield field, or calculates from lastDiv and price
    */
   async getCurrentYield(symbol: string): Promise<number | null> {
-    const apiKey = this.env.FMP_API_KEY ?? API_KEY;
     const normalizedSymbol = symbol.trim().toUpperCase();
     
-    const url = `${API_URL}/v3/profile/${normalizedSymbol}?apikey=${apiKey}`;
-    
     try {
-      const data = await this.fetchWithRetry(url);
+      const adapter = await this.getAdapter('profile-v3');
+      let data: any;
+
+      if (adapter) {
+        data = await adapter.fetch('/v3/profile/{symbol}', { symbol: normalizedSymbol });
+      } else {
+        // Fallback to direct FMP
+        const { API_URL, API_KEY } = await import('../../util');
+        const apiKey = this.env.FMP_API_KEY ?? API_KEY;
+        const res = await fetch(`${API_URL}/v3/profile/${normalizedSymbol}?apikey=${apiKey}`, {
+          headers: { Accept: "application/json" },
+          signal: AbortSignal.timeout(30000),
+        });
+        if (res.status === 404) {
+          this.logger?.info(`No profile data found for ${normalizedSymbol}`);
+          return null;
+        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        data = await res.json();
+      }
       
       // Handle empty or null response
       if (!data) {

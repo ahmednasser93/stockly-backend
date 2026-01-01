@@ -37,7 +37,7 @@ describe('Config', () => {
       // Assert
       expect(config.marketCache?.newsTtlSec).toBe(3600);
       expect(config.marketCache?.prefetchCronInterval).toBe('0 * * * *');
-      expect(config.marketCache?.marketDataTtlSec).toBe(300);
+      expect(config.marketCache?.marketDataTtlSec).toBe(600);
       expect(config.marketCache?.sectorsTtlSec).toBe(2700);
     });
 
@@ -94,7 +94,7 @@ describe('Config', () => {
       const config = await getConfig(mockEnv);
 
       // Assert
-      expect(config.marketCache?.marketDataTtlSec).toBe(300);
+      expect(config.marketCache?.marketDataTtlSec).toBe(600);
       expect(config.marketCache?.sectorsTtlSec).toBe(2700);
       expect(config.marketCache?.newsTtlSec).toBe(3600);
       expect(config.marketCache?.prefetchCronInterval).toBe('0 * * * *');
@@ -116,7 +116,7 @@ describe('Config', () => {
 
       // Assert
       expect(updated.marketCache?.newsTtlSec).toBe(1800);
-      expect(updated.marketCache?.marketDataTtlSec).toBe(300); // Unchanged
+      expect(updated.marketCache?.marketDataTtlSec).toBe(600); // Unchanged (default is now 600)
       expect(updated.marketCache?.sectorsTtlSec).toBe(2700); // Unchanged
       expect(updated.marketCache?.prefetchCronInterval).toBe('0 * * * *'); // Unchanged
       expect(mockKv.put).toHaveBeenCalled();
@@ -137,7 +137,7 @@ describe('Config', () => {
       // Assert
       expect(updated.marketCache?.prefetchCronInterval).toBe('0 */2 * * *');
       expect(updated.marketCache?.newsTtlSec).toBe(3600); // Unchanged
-      expect(updated.marketCache?.marketDataTtlSec).toBe(300); // Unchanged
+      expect(updated.marketCache?.marketDataTtlSec).toBe(600); // Unchanged (default is now 600)
       expect(updated.marketCache?.sectorsTtlSec).toBe(2700); // Unchanged
     });
 

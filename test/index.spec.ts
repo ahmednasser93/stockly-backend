@@ -104,7 +104,12 @@ import * as workingHoursMock from "../src/utils/working-hours";
 import type { Env } from "../src/index";
 
 const makeRequest = (path: string, method: string = "GET") =>
-  new Request(`https://example.com${path}`, { method });
+  new Request(`https://example.com${path}`, { 
+    method,
+    headers: {
+      "Origin": "http://localhost:5173", // Add Origin header for client authentication in tests
+    }
+  });
 
 const createMockEnv = (): Env => ({
   stockly: {

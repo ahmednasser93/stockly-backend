@@ -10,6 +10,7 @@ import type { Logger } from '../logging/logger';
 import { getMarketDataFromKV, setMarketDataToKV, getSectorsDataFromKV, setSectorsDataToKV, getStaleMarketDataFromKV, getStaleSectorsDataFromKV, getMarketDataSliceFromKV } from '../api/market-cache';
 import { getConfig } from '../api/config';
 import { isWithinWorkingHours } from '../utils/working-hours';
+import { kvGetWithWorkingHours, kvPutWithWorkingHours } from '../utils/kv-working-hours';
 import { createCommonStocksService } from '../factories/createCommonStocksService';
 import { MarketCalculationService } from './market-calculation.service';
 
@@ -41,10 +42,11 @@ export class MarketService {
     const fullCacheKey = 'market:gainers:full';
     const kv = this.env.marketKv;
     const ttl = (await this.getCacheTTLs()).marketData;
+    const config = await getConfig(this.env);
 
     // Check top50 cache first for fast response (when offset=0 and limit <= 50)
     if (kv && offset === 0 && limit <= 50) {
-      const cached = await getMarketDataFromKV(kv, top50CacheKey);
+      const cached = await getMarketDataFromKV(kv, top50CacheKey, config);
       if (cached) {
         this.logger?.info('Cache hit for market gainers (top50)', {
           cachedAt: cached.cachedAt,
@@ -57,7 +59,7 @@ export class MarketService {
     if (kv) {
       if (offset > 0 || limit > 50) {
         // Need full cache for pagination
-        const cached = await getMarketDataFromKV(kv, fullCacheKey);
+        const cached = await getMarketDataFromKV(kv, fullCacheKey, config);
         if (cached) {
           this.logger?.info('Cache hit for market gainers (full)', {
             cachedAt: cached.cachedAt,
@@ -66,7 +68,7 @@ export class MarketService {
         }
       } else {
         // Try full cache as fallback
-        const cached = await getMarketDataFromKV(kv, fullCacheKey);
+        const cached = await getMarketDataFromKV(kv, fullCacheKey, config);
         if (cached) {
           this.logger?.info('Cache hit for market gainers (full)', {
             cachedAt: cached.cachedAt,
@@ -86,10 +88,10 @@ export class MarketService {
       // Store in cache (non-blocking)
       if (kv) {
         const top50 = data.slice(0, 50);
-        setMarketDataToKV(kv, top50CacheKey, top50, ttl).catch(error => {
+        setMarketDataToKV(kv, top50CacheKey, top50, config, ttl).catch(error => {
           this.logger?.warn('Failed to cache market gainers top50', error);
         });
-        setMarketDataToKV(kv, fullCacheKey, data, ttl).catch(error => {
+        setMarketDataToKV(kv, fullCacheKey, data, config, ttl).catch(error => {
           this.logger?.warn('Failed to cache market gainers full', error);
         });
       }
@@ -113,10 +115,10 @@ export class MarketService {
         // Store in cache (non-blocking)
         if (kv) {
           const top50 = data.slice(0, 50);
-          setMarketDataToKV(kv, top50CacheKey, top50, ttl).catch(error => {
+          setMarketDataToKV(kv, top50CacheKey, top50, config, ttl).catch(error => {
             this.logger?.warn('Failed to cache market gainers top50 (fallback)', error);
           });
-          setMarketDataToKV(kv, fullCacheKey, data, ttl).catch(error => {
+          setMarketDataToKV(kv, fullCacheKey, data, config, ttl).catch(error => {
             this.logger?.warn('Failed to cache market gainers full (fallback)', error);
           });
         }
@@ -126,7 +128,7 @@ export class MarketService {
         this.logger?.error('500-stock calculation fallback failed for gainers', fallbackError);
         // Try stale cache as last resort
         if (kv) {
-          const stale = await getStaleMarketDataFromKV(kv, fullCacheKey);
+          const stale = await getStaleMarketDataFromKV(kv, fullCacheKey, config);
           if (stale) {
             this.logger?.warn('Using stale cache for gainers as last resort', {
               cachedAt: stale.cachedAt,
@@ -149,10 +151,11 @@ export class MarketService {
     const fullCacheKey = 'market:losers:full';
     const kv = this.env.marketKv;
     const ttl = (await this.getCacheTTLs()).marketData;
+    const config = await getConfig(this.env);
 
     // Check top50 cache first for fast response (when offset=0 and limit <= 50)
     if (kv && offset === 0 && limit <= 50) {
-      const cached = await getMarketDataFromKV(kv, top50CacheKey);
+      const cached = await getMarketDataFromKV(kv, top50CacheKey, config);
       if (cached) {
         this.logger?.info('Cache hit for market losers (top50)', {
           cachedAt: cached.cachedAt,
@@ -164,7 +167,7 @@ export class MarketService {
     // Check full cache for pagination or larger requests
     if (kv) {
       if (offset > 0 || limit > 50) {
-        const cached = await getMarketDataFromKV(kv, fullCacheKey);
+        const cached = await getMarketDataFromKV(kv, fullCacheKey, config);
         if (cached) {
           this.logger?.info('Cache hit for market losers (full)', {
             cachedAt: cached.cachedAt,
@@ -172,7 +175,7 @@ export class MarketService {
           return cached.data.slice(offset, offset + limit);
         }
       } else {
-        const cached = await getMarketDataFromKV(kv, fullCacheKey);
+        const cached = await getMarketDataFromKV(kv, fullCacheKey, config);
         if (cached) {
           this.logger?.info('Cache hit for market losers (full)', {
             cachedAt: cached.cachedAt,
@@ -192,10 +195,10 @@ export class MarketService {
       // Store in cache (non-blocking)
       if (kv) {
         const top50 = data.slice(0, 50);
-        setMarketDataToKV(kv, top50CacheKey, top50, ttl).catch(error => {
+        setMarketDataToKV(kv, top50CacheKey, top50, config, ttl).catch(error => {
           this.logger?.warn('Failed to cache market losers top50', error);
         });
-        setMarketDataToKV(kv, fullCacheKey, data, ttl).catch(error => {
+        setMarketDataToKV(kv, fullCacheKey, data, config, ttl).catch(error => {
           this.logger?.warn('Failed to cache market losers full', error);
         });
       }
@@ -219,10 +222,10 @@ export class MarketService {
         // Store in cache (non-blocking)
         if (kv) {
           const top50 = data.slice(0, 50);
-          setMarketDataToKV(kv, top50CacheKey, top50, ttl).catch(error => {
+          setMarketDataToKV(kv, top50CacheKey, top50, config, ttl).catch(error => {
             this.logger?.warn('Failed to cache market losers top50 (fallback)', error);
           });
-          setMarketDataToKV(kv, fullCacheKey, data, ttl).catch(error => {
+          setMarketDataToKV(kv, fullCacheKey, data, config, ttl).catch(error => {
             this.logger?.warn('Failed to cache market losers full (fallback)', error);
           });
         }
@@ -232,7 +235,7 @@ export class MarketService {
         this.logger?.error('500-stock calculation fallback failed for losers', fallbackError);
         // Try stale cache as last resort
         if (kv) {
-          const stale = await getStaleMarketDataFromKV(kv, fullCacheKey);
+          const stale = await getStaleMarketDataFromKV(kv, fullCacheKey, config);
           if (stale) {
             this.logger?.warn('Using stale cache for losers as last resort', {
               cachedAt: stale.cachedAt,
@@ -255,10 +258,11 @@ export class MarketService {
     const fullCacheKey = 'market:actives:full';
     const kv = this.env.marketKv;
     const ttl = (await this.getCacheTTLs()).marketData;
+    const config = await getConfig(this.env);
 
     // Check top50 cache first for fast response (when offset=0 and limit <= 50)
     if (kv && offset === 0 && limit <= 50) {
-      const cached = await getMarketDataFromKV(kv, top50CacheKey);
+      const cached = await getMarketDataFromKV(kv, top50CacheKey, config);
       if (cached) {
         this.logger?.info('Cache hit for market actives (top50)', {
           cachedAt: cached.cachedAt,
@@ -270,7 +274,7 @@ export class MarketService {
     // Check full cache for pagination or larger requests
     if (kv) {
       if (offset > 0 || limit > 50) {
-        const cached = await getMarketDataFromKV(kv, fullCacheKey);
+        const cached = await getMarketDataFromKV(kv, fullCacheKey, config);
         if (cached) {
           this.logger?.info('Cache hit for market actives (full)', {
             cachedAt: cached.cachedAt,
@@ -278,7 +282,7 @@ export class MarketService {
           return cached.data.slice(offset, offset + limit);
         }
       } else {
-        const cached = await getMarketDataFromKV(kv, fullCacheKey);
+        const cached = await getMarketDataFromKV(kv, fullCacheKey, config);
         if (cached) {
           this.logger?.info('Cache hit for market actives (full)', {
             cachedAt: cached.cachedAt,
@@ -298,10 +302,10 @@ export class MarketService {
       // Store in cache (non-blocking)
       if (kv) {
         const top50 = data.slice(0, 50);
-        setMarketDataToKV(kv, top50CacheKey, top50, ttl).catch(error => {
+        setMarketDataToKV(kv, top50CacheKey, top50, config, ttl).catch(error => {
           this.logger?.warn('Failed to cache market actives top50', error);
         });
-        setMarketDataToKV(kv, fullCacheKey, data, ttl).catch(error => {
+        setMarketDataToKV(kv, fullCacheKey, data, config, ttl).catch(error => {
           this.logger?.warn('Failed to cache market actives full', error);
         });
       }
@@ -325,10 +329,10 @@ export class MarketService {
         // Store in cache (non-blocking)
         if (kv) {
           const top50 = data.slice(0, 50);
-          setMarketDataToKV(kv, top50CacheKey, top50, ttl).catch(error => {
+          setMarketDataToKV(kv, top50CacheKey, top50, config, ttl).catch(error => {
             this.logger?.warn('Failed to cache market actives top50 (fallback)', error);
           });
-          setMarketDataToKV(kv, fullCacheKey, data, ttl).catch(error => {
+          setMarketDataToKV(kv, fullCacheKey, data, config, ttl).catch(error => {
             this.logger?.warn('Failed to cache market actives full (fallback)', error);
           });
         }
@@ -338,7 +342,7 @@ export class MarketService {
         this.logger?.error('500-stock calculation fallback failed for actives', fallbackError);
         // Try stale cache as last resort
         if (kv) {
-          const stale = await getStaleMarketDataFromKV(kv, fullCacheKey);
+          const stale = await getStaleMarketDataFromKV(kv, fullCacheKey, config);
           if (stale) {
             this.logger?.warn('Using stale cache for actives as last resort', {
               cachedAt: stale.cachedAt,
@@ -367,7 +371,7 @@ export class MarketService {
 
     // Check KV cache first
     if (kv) {
-      const cached = await getMarketDataFromKV(kv, cacheKey);
+      const cached = await getMarketDataFromKV(kv, cacheKey, config);
       if (cached) {
         this.logger?.info('Cache hit for market screener', {
           cachedAt: cached.cachedAt,
@@ -378,7 +382,7 @@ export class MarketService {
 
     // Outside working hours - return stale cache if available
     if (outsideHours && kv) {
-      const stale = await getStaleMarketDataFromKV(kv, cacheKey);
+      const stale = await getStaleMarketDataFromKV(kv, cacheKey, config);
       if (stale) {
         this.logger?.info('Outside working hours, returning stale cache for market screener', {
           cachedAt: stale.cachedAt,
@@ -397,7 +401,7 @@ export class MarketService {
       // Store in KV cache (non-blocking)
       if (kv) {
         const ttl = (await this.getCacheTTLs()).marketData;
-        setMarketDataToKV(kv, cacheKey, data, ttl).catch(error => {
+        setMarketDataToKV(kv, cacheKey, data, config, ttl).catch(error => {
           this.logger?.warn('Failed to cache market screener', error);
         });
       }
@@ -406,7 +410,7 @@ export class MarketService {
     } catch (error) {
       // If FMP fails, try to return stale cache if available
       if (kv) {
-        const stale = await getStaleMarketDataFromKV(kv, cacheKey);
+        const stale = await getStaleMarketDataFromKV(kv, cacheKey, config);
         if (stale) {
           this.logger?.warn('FMP API failed, returning stale cache for screener');
           return stale.data;
@@ -430,7 +434,7 @@ export class MarketService {
 
     // Check KV cache first
     if (kv) {
-      const cached = await getSectorsDataFromKV(kv, cacheKey);
+      const cached = await getSectorsDataFromKV(kv, cacheKey, config);
       if (cached) {
         this.logger?.info('Cache hit for sectors performance', {
           cachedAt: cached.cachedAt,
@@ -441,7 +445,7 @@ export class MarketService {
 
     // Outside working hours - return stale cache if available
     if (outsideHours && kv) {
-      const stale = await getStaleSectorsDataFromKV(kv, cacheKey);
+      const stale = await getStaleSectorsDataFromKV(kv, cacheKey, config);
       if (stale) {
         this.logger?.info('Outside working hours, returning stale cache for sectors performance', {
           cachedAt: stale.cachedAt,
@@ -459,7 +463,7 @@ export class MarketService {
       
       // Store in KV cache (non-blocking)
       if (kv) {
-        setSectorsDataToKV(kv, cacheKey, data, ttl).catch(error => {
+        setSectorsDataToKV(kv, cacheKey, data, config, ttl).catch(error => {
           this.logger?.warn('Failed to cache sectors performance', error);
         });
       }
@@ -468,10 +472,177 @@ export class MarketService {
     } catch (error) {
       // If FMP fails, try to return stale cache if available
       if (kv) {
-        const stale = await getStaleSectorsDataFromKV(kv, cacheKey);
+        const stale = await getStaleSectorsDataFromKV(kv, cacheKey, config);
         if (stale) {
           this.logger?.warn('FMP API failed, returning stale cache for sectors performance');
           return stale.data;
+        }
+      }
+      
+      // No cache available, rethrow error
+      throw error;
+    }
+  }
+
+  /**
+   * Get market status with caching
+   * Caching: 5 minutes (increased from 60 seconds to reduce KV writes)
+   */
+  async getMarketStatus(): Promise<{ isTheStockMarketOpen: boolean }> {
+    const cacheKey = 'market:status';
+    const kv = this.env.marketKv;
+    const ttl = 300; // 5 minutes cache (increased from 60 seconds to reduce KV writes)
+    const config = await getConfig(this.env);
+
+    // Check KV cache first
+    if (kv) {
+      try {
+        const raw = await kvGetWithWorkingHours(kv, cacheKey, config);
+        if (raw) {
+          const entry = JSON.parse(raw) as { data: { isTheStockMarketOpen: boolean }; cachedAt: number; expiresAt: number };
+          const now = Date.now();
+          if (entry.data && entry.expiresAt && now < entry.expiresAt) {
+            this.logger?.info('Cache hit for market status', {
+              cachedAt: entry.cachedAt,
+            });
+            return entry.data;
+          }
+        }
+      } catch (error) {
+        // Cache read error - continue to fetch
+        this.logger?.warn('Failed to read market status cache', error);
+      }
+    }
+
+    // Cache miss - fetch from repository
+    try {
+      const data = await this.repository.getMarketStatus();
+      
+      // Store in cache (non-blocking)
+      if (kv) {
+        const now = Date.now();
+        const cacheEntry = {
+          data,
+          cachedAt: now,
+          expiresAt: now + ttl * 1000,
+        };
+        kvPutWithWorkingHours(kv, cacheKey, JSON.stringify(cacheEntry), config).catch(error => {
+          this.logger?.warn('Failed to cache market status', error);
+        });
+      }
+      
+      return data;
+    } catch (error) {
+      // If FMP fails, try to return stale cache if available
+      if (kv) {
+        try {
+          const raw = await kvGetWithWorkingHours(kv, cacheKey, config);
+          if (raw) {
+            const entry = JSON.parse(raw) as { data: { isTheStockMarketOpen: boolean }; cachedAt: number };
+            if (entry.data) {
+              this.logger?.warn('FMP API failed, returning stale cache for market status');
+              return entry.data;
+            }
+          }
+        } catch (cacheError) {
+          // Ignore cache read errors
+        }
+      }
+      
+      // No cache available, rethrow error
+      throw error;
+    }
+  }
+
+  /**
+   * Get social sentiment with caching
+   * Caching: 5 minutes
+   */
+  async getSocialSentiment(type: 'bullish' | 'bearish' = 'bullish', limit: number = 10, offset: number = 0): Promise<MarketStockItem[]> {
+    const cacheKey = `market:social-sentiment:${type}`;
+    const kv = this.env.marketKv;
+    const ttl = 300; // 5 minutes cache
+    const config = await getConfig(this.env);
+
+    // Check KV cache first
+    if (kv) {
+      const cached = await getMarketDataFromKV(kv, cacheKey, config);
+      if (cached) {
+        this.logger?.info('Cache hit for social sentiment', {
+          type,
+          cachedAt: cached.cachedAt,
+        });
+        return cached.data.slice(offset, offset + limit);
+      }
+    }
+
+    // Cache miss - fetch from repository
+    try {
+      const data = await this.repository.getSocialSentiment(type);
+      
+      // Store in cache (non-blocking)
+      if (kv) {
+        setMarketDataToKV(kv, cacheKey, data, config, ttl).catch(error => {
+          this.logger?.warn('Failed to cache social sentiment', error);
+        });
+      }
+      
+      return data.slice(offset, offset + limit);
+    } catch (error) {
+      // If FMP fails, try to return stale cache if available
+      if (kv) {
+        const stale = await getStaleMarketDataFromKV(kv, cacheKey, config);
+        if (stale) {
+          this.logger?.warn('FMP API failed, returning stale cache for social sentiment');
+          return stale.data.slice(offset, offset + limit);
+        }
+      }
+      
+      // No cache available, rethrow error
+      throw error;
+    }
+  }
+
+  /**
+   * Get crypto quotes with caching
+   * Caching: 2 minutes (increased from 1 minute to reduce KV writes)
+   */
+  async getCryptoQuotes(limit: number = 10, offset: number = 0): Promise<MarketStockItem[]> {
+    const cacheKey = 'market:crypto-quotes';
+    const kv = this.env.marketKv;
+    const ttl = 120; // 2 minutes cache (increased from 60 seconds to reduce KV writes)
+    const config = await getConfig(this.env);
+
+    // Check KV cache first
+    if (kv) {
+      const cached = await getMarketDataFromKV(kv, cacheKey, config);
+      if (cached) {
+        this.logger?.info('Cache hit for crypto quotes', {
+          cachedAt: cached.cachedAt,
+        });
+        return cached.data.slice(offset, offset + limit);
+      }
+    }
+
+    // Cache miss - fetch from repository
+    try {
+      const data = await this.repository.getCryptoQuotes();
+      
+      // Store in cache (non-blocking)
+      if (kv) {
+        setMarketDataToKV(kv, cacheKey, data, config, ttl).catch(error => {
+          this.logger?.warn('Failed to cache crypto quotes', error);
+        });
+      }
+      
+      return data.slice(offset, offset + limit);
+    } catch (error) {
+      // If FMP fails, try to return stale cache if available
+      if (kv) {
+        const stale = await getStaleMarketDataFromKV(kv, cacheKey, config);
+        if (stale) {
+          this.logger?.warn('FMP API failed, returning stale cache for crypto quotes');
+          return stale.data.slice(offset, offset + limit);
         }
       }
       

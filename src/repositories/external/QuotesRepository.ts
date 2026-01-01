@@ -1,13 +1,15 @@
 import type { IQuotesRepository } from '../interfaces/IQuotesRepository';
 import type { IDatabase } from '../../infrastructure/database/IDatabase';
 import type { Quote } from '@stockly/shared/types';
-import { API_KEY, API_URL } from '../../util';
+import { API_KEY } from '../../util';
 import { getCacheIfValid, setCache } from '../../api/cache';
 import { getConfig } from '../../api/config';
 import { fetchAndSaveHistoricalPrice } from '../../api/historical-prices';
 import { fetchProfileFromApi } from './profile-fetcher';
 import type { Env } from '../../index';
 import type { Logger } from '../../logging/logger';
+import type { DatalakeService } from '../../services/datalake.service';
+import type { DatalakeAdapter } from '../../infrastructure/datalake/DatalakeAdapter';
 
 type QuoteRecord = {
   symbol: string;
@@ -75,19 +77,47 @@ async function getLatestFromDb(db: IDatabase, symbol: string): Promise<QuoteReco
 
 // Profile fetching logic moved to profile-fetcher.ts for better testability
 
-async function fetchQuoteFromApi(symbol: string, logger?: Logger): Promise<any> {
-  const api = `${API_URL}/quote?symbol=${symbol}&apikey=${API_KEY}`;
-  const res = await fetch(api);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch ${symbol}`);
+async function fetchQuoteFromApi(
+  symbol: string, 
+  logger?: Logger,
+  datalakeService?: DatalakeService,
+  env?: Env
+): Promise<any> {
+  let data: any;
+  
+  if (datalakeService) {
+    const envApiKey = env?.FMP_API_KEY || API_KEY;
+    const adapter = await datalakeService.getAdapterForEndpoint('quote', envApiKey);
+    if (adapter) {
+      data = await adapter.fetch('/quote', { symbol });
+    } else {
+      // Fallback to direct FMP
+      const { API_URL, API_KEY } = await import('../../util');
+      const res = await fetch(`${API_URL}/quote?symbol=${symbol}&apikey=${API_KEY}`);
+      if (!res.ok) throw new Error(`Failed to fetch ${symbol}`);
+      data = await res.json();
+    }
+  } else {
+    // Fallback to direct FMP
+    const { API_URL, API_KEY } = await import('../../util');
+    const res = await fetch(`${API_URL}/quote?symbol=${symbol}&apikey=${API_KEY}`);
+    if (!res.ok) throw new Error(`Failed to fetch ${symbol}`);
+    data = await res.json();
   }
-  const data = await res.json();
+  
   const payload = Array.isArray(data) ? data[0] : data;
   if (!payload) {
     throw new Error(`Empty payload for ${symbol}`);
   }
 
-  const { profile, description } = await fetchProfileFromApi(symbol, payload, logger);
+  // Get adapter for profile endpoint if available
+  let profileAdapter: import('../../infrastructure/datalake/DatalakeAdapter').DatalakeAdapter | null = null;
+  if (datalakeService) {
+    const envApiKey = env?.FMP_API_KEY || API_KEY;
+    profileAdapter = await datalakeService.getAdapterForEndpoint('profile', envApiKey);
+  }
+  
+  const { profile, description } = await fetchProfileFromApi(symbol, payload, logger, profileAdapter);
 
   const parsed = {
     ...payload,
@@ -100,10 +130,15 @@ async function fetchQuoteFromApi(symbol: string, logger?: Logger): Promise<any> 
   return parsed;
 }
 
-async function fetchQuotesBatchFromApi(symbols: string[], logger?: Logger): Promise<any[]> {
+async function fetchQuotesBatchFromApi(
+  symbols: string[], 
+  logger?: Logger,
+  datalakeService?: DatalakeService,
+  env?: Env
+): Promise<any[]> {
   if (symbols.length === 0) return [];
 
-  const quotePromises = symbols.map((symbol) => fetchQuoteFromApi(symbol, logger));
+  const quotePromises = symbols.map((symbol) => fetchQuoteFromApi(symbol, logger, datalakeService, env));
   const quoteResults = await Promise.allSettled(quotePromises);
 
   const results: any[] = [];
@@ -130,7 +165,12 @@ async function insertQuote(db: IDatabase, quote: QuoteRecord): Promise<void> {
 }
 
 export class QuotesRepository implements IQuotesRepository {
-  constructor(private db: IDatabase, private env: Env, private logger: Logger) {}
+  constructor(
+    private db: IDatabase, 
+    private env: Env, 
+    private logger: Logger,
+    private datalakeService?: DatalakeService
+  ) {}
 
   async getQuote(symbol: string): Promise<Quote> {
     const normalizedSymbol = normalizeSymbol(symbol);
@@ -160,7 +200,7 @@ export class QuotesRepository implements IQuotesRepository {
     }
 
     // Fetch from API
-    const quote = await fetchQuoteFromApi(normalizedSymbol, this.logger);
+    const quote = await fetchQuoteFromApi(normalizedSymbol, this.logger, this.datalakeService, this.env);
 
     // Save to DB
     const dbQuote = mapQuotePayload(normalizedSymbol, quote);
@@ -204,7 +244,7 @@ export class QuotesRepository implements IQuotesRepository {
     }
 
     if (toRefresh.length) {
-      const refreshed = await fetchQuotesBatchFromApi(toRefresh, this.logger);
+      const refreshed = await fetchQuotesBatchFromApi(toRefresh, this.logger, this.datalakeService, this.env);
 
       await Promise.all(
         refreshed.map(async (quote) => {

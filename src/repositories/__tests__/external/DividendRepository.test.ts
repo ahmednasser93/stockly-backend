@@ -28,6 +28,7 @@ describe('DividendRepository', () => {
       error: vi.fn(),
     } as any;
 
+    // Create repository without datalakeService so it falls back to direct FMP
     repository = new DividendRepository(mockEnv, mockLogger);
     vi.clearAllMocks();
     vi.resetAllMocks();
@@ -101,25 +102,17 @@ describe('DividendRepository', () => {
       await expect(repository.getHistoricalDividends('KO')).rejects.toThrow();
     });
 
-    it('should handle rate limiting with retry', async () => {
-      // Arrange
-      vi.mocked(global.fetch)
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 429,
-        } as Response)
-        .mockResolvedValueOnce({
-          ok: true,
-          status: 200,
-          json: async () => ({ historical: [] }),
-        } as Response);
+    it('should handle rate limiting by throwing error', async () => {
+      // Arrange - Repository is created without datalakeService, so it uses direct FMP
+      vi.mocked(global.fetch).mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        text: async () => 'Rate limit exceeded',
+      } as Response);
 
-      // Act
-      const result = await repository.getHistoricalDividends('KO');
-
-      // Assert
-      expect(result).toEqual([]);
-      expect(global.fetch).toHaveBeenCalledTimes(2);
+      // Act & Assert - Should throw error on rate limit (no retry logic in repository)
+      await expect(repository.getHistoricalDividends('KO')).rejects.toThrow('HTTP 429');
+      expect(global.fetch).toHaveBeenCalledTimes(1);
     });
   });
 

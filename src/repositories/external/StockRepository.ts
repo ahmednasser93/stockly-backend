@@ -1,6 +1,6 @@
 /**
  * Stock Repository Implementation
- * Fetches stock data from external APIs (FMP) and manages caching
+ * Fetches stock data from external APIs via DatalakeAdapter and manages caching
  * Note: Stock data is not stored in D1, only cached in KV
  */
 
@@ -8,14 +8,17 @@ import type { IStockRepository } from '../interfaces/IStockRepository';
 import type { StockDetails, StockProfile, StockQuote, StockChart, StockFinancials, StockNews, StockPeer, ChartDataPoint } from '@stockly/shared/types';
 import { getCacheIfValid, setCache } from '../../api/cache';
 import { getConfig } from '../../api/config';
-import { API_URL, API_KEY } from '../../util';
+import { API_KEY } from '../../util';
 import type { Env } from '../../index';
 import type { Logger } from '../../logging/logger';
+import type { DatalakeService } from '../../services/datalake.service';
+import type { DatalakeAdapter } from '../../infrastructure/datalake/DatalakeAdapter';
 
 export class StockRepository implements IStockRepository {
   constructor(
     private env: Env,
-    private logger?: Logger
+    private logger?: Logger,
+    private datalakeService?: DatalakeService
   ) {}
 
   /**
@@ -43,85 +46,61 @@ export class StockRepository implements IStockRepository {
     pollingIntervalSec: number
   ): Promise<void> {
     const cacheKey = `stock-details:${symbol}`;
-    setCache(cacheKey, data, pollingIntervalSec + 5); // TTL slightly longer than polling interval
+    // Increased TTL from 35 seconds to 2 minutes to reduce KV writes
+    // Stock prices 2 minutes old are acceptable for most use cases
+    setCache(cacheKey, data, 120); // 2 minutes (was: pollingIntervalSec + 5 = 35 seconds)
   }
 
   /**
-   * Fetch from FMP API with retry logic for rate limits and timeouts
+   * Get adapter for an endpoint, with fallback to direct FMP if datalake service not available
    */
-  private async fetchWithRetry(url: string, maxRetries: number = 3): Promise<any> {
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        const res = await fetch(url, {
-          headers: {
-            Accept: "application/json",
-          },
-          // 30 second timeout
-          signal: AbortSignal.timeout(30000),
-        });
-
-        if (res.status === 429) {
-          // Rate limited - wait and retry with exponential backoff
-          const delay = Math.pow(2, i) * 1000;
-          this.logger?.warn(`Rate limited, retrying in ${delay}ms...`);
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          continue;
-        }
-
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
-
-        const data = await res.json();
-        
-        // Check for FMP API error messages
-        if (data && typeof data === "object") {
-          if ("Error Message" in data || "error" in data) {
-            throw new Error("FMP API error response");
-          }
-        }
-
-        return data;
-      } catch (error: any) {
-        // If it's a timeout or abort, retry
-        if (error.name === "AbortError" || error.name === "TimeoutError") {
-          if (i === maxRetries - 1) throw error;
-          const delay = Math.pow(2, i) * 1000;
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          continue;
-        }
-
-        // If last retry, throw the error
-        if (i === maxRetries - 1) throw error;
-
-        // Retry with exponential backoff
-        const delay = Math.pow(2, i) * 1000;
-        await new Promise((resolve) => setTimeout(resolve, delay));
-      }
+  private async getAdapter(endpointId: string): Promise<DatalakeAdapter | null> {
+    if (!this.datalakeService) {
+      return null; // Fallback to direct FMP calls
     }
-    throw new Error("Max retries exceeded");
+    const envApiKey = this.env.FMP_API_KEY || API_KEY;
+    return this.datalakeService.getAdapterForEndpoint(endpointId, envApiKey);
   }
 
   /**
-   * Fetch profile data from FMP
+   * Fetch profile data using datalake adapter
    */
   private async fetchProfile(symbol: string): Promise<any> {
-    // Try multiple profile endpoints (same pattern as get-stock.ts)
-    const endpoints = [
-      `${API_URL}/profile?symbol=${symbol}&apikey=${API_KEY}`,
-      `${API_URL}/profile/${symbol}?apikey=${API_KEY}`,
-      `${API_URL}/company/profile/${symbol}?apikey=${API_KEY}`,
-    ];
+    const adapter = await this.getAdapter('profile');
+    if (!adapter) {
+      // Fallback to direct FMP (legacy behavior)
+      const { API_URL, API_KEY } = await import('../../util');
+      const endpoints = [
+        `${API_URL}/profile?symbol=${symbol}&apikey=${API_KEY}`,
+        `${API_URL}/profile/${symbol}?apikey=${API_KEY}`,
+        `${API_URL}/company/profile/${symbol}?apikey=${API_KEY}`,
+      ];
+      for (const url of endpoints) {
+        try {
+          const res = await fetch(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(30000) });
+          if (!res.ok) continue;
+          const data = await res.json();
+          const profile = Array.isArray(data) && data.length > 0 ? data[0] : data;
+          if (profile && (profile.symbol || profile.Symbol)) return profile;
+        } catch { continue; }
+      }
+      throw new Error("All profile endpoints failed");
+    }
 
-    for (const url of endpoints) {
+    // Try multiple profile endpoint paths
+    const endpointPaths = ['/profile', '/profile/{symbol}', '/company/profile/{symbol}'];
+    for (const path of endpointPaths) {
       try {
-        const data = await this.fetchWithRetry(url);
+        const params: Record<string, string> = path.includes('{symbol}') 
+          ? { symbol } 
+          : { symbol };
+        const data = await adapter.fetch(path, params);
         const profile = Array.isArray(data) && data.length > 0 ? data[0] : data;
         if (profile && (profile.symbol || profile.Symbol)) {
           return profile;
         }
       } catch (error) {
-        // Try next endpoint
+        this.logger?.warn(`Profile endpoint ${path} failed, trying next...`, error);
         continue;
       }
     }
@@ -129,51 +108,246 @@ export class StockRepository implements IStockRepository {
   }
 
   /**
-   * Fetch quote data from FMP
+   * Fetch quote data using datalake adapter
    */
   private async fetchQuote(symbol: string): Promise<any> {
-    const url = `${API_URL}/quote?symbol=${symbol}&apikey=${API_KEY}`;
-    return this.fetchWithRetry(url);
+    const adapter = await this.getAdapter('quote');
+    if (!adapter) {
+      // Fallback to direct FMP
+      const { API_URL, API_KEY } = await import('../../util');
+      const res = await fetch(`${API_URL}/quote?symbol=${symbol}&apikey=${API_KEY}`, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+    return adapter.fetch('/quote', { symbol });
   }
 
   /**
-   * Fetch historical price data from FMP
+   * Fetch historical price data using datalake adapter
    */
   private async fetchHistorical(symbol: string): Promise<any> {
-    const url = `${API_URL}/historical-price-full/${symbol}?serietype=line&timeseries=365&apikey=${API_KEY}`;
-    return this.fetchWithRetry(url);
+    const adapter = await this.getAdapter('historical-price-full');
+    if (!adapter) {
+      // Fallback to direct FMP
+      const { API_URL, API_KEY } = await import('../../util');
+      const res = await fetch(`${API_URL}/historical-price-full/${symbol}?serietype=line&timeseries=365&apikey=${API_KEY}`, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+    return adapter.fetch('/historical-price-full/{symbol}', { symbol, serietype: 'line', timeseries: '365' });
   }
 
   /**
-   * Fetch key metrics from FMP
+   * Fetch key metrics using datalake adapter
    */
   private async fetchKeyMetrics(symbol: string): Promise<any> {
-    const url = `${API_URL}/key-metrics/${symbol}?limit=4&apikey=${API_KEY}`;
-    return this.fetchWithRetry(url);
+    const adapter = await this.getAdapter('key-metrics');
+    if (!adapter) {
+      // Fallback to direct FMP
+      const { API_URL, API_KEY } = await import('../../util');
+      const res = await fetch(`${API_URL}/key-metrics/${symbol}?limit=4&apikey=${API_KEY}`, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+    return adapter.fetch('/key-metrics/{symbol}', { symbol, limit: '4' });
   }
 
   /**
-   * Fetch income statement from FMP
+   * Fetch income statement using datalake adapter
    */
   private async fetchIncomeStatement(symbol: string): Promise<any> {
-    const url = `${API_URL}/income-statement/${symbol}?limit=4&apikey=${API_KEY}`;
-    return this.fetchWithRetry(url);
+    const adapter = await this.getAdapter('income-statement');
+    if (!adapter) {
+      // Fallback to direct FMP
+      const { API_URL, API_KEY } = await import('../../util');
+      const res = await fetch(`${API_URL}/income-statement/${symbol}?limit=4&apikey=${API_KEY}`, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+    return adapter.fetch('/income-statement/{symbol}', { symbol, limit: '4' });
   }
 
   /**
-   * Fetch stock news from FMP
+   * Fetch stock news using datalake adapter
    */
   private async fetchNews(symbol: string): Promise<any> {
-    const url = `${API_URL}/stock_news?tickers=${symbol}&limit=6&apikey=${API_KEY}`;
-    return this.fetchWithRetry(url);
+    const adapter = await this.getAdapter('stock-news');
+    if (!adapter) {
+      // Fallback to direct FMP
+      const { API_URL, API_KEY } = await import('../../util');
+      const res = await fetch(`${API_URL}/stock_news?tickers=${symbol}&limit=6&apikey=${API_KEY}`, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+    return adapter.fetch('/stock_news', { tickers: symbol, limit: '6' });
   }
 
   /**
-   * Fetch financial ratios from FMP
+   * Fetch financial ratios using datalake adapter
    */
   private async fetchRatios(symbol: string): Promise<any> {
-    const url = `${API_URL}/ratios/${symbol}?limit=3&apikey=${API_KEY}`;
-    return this.fetchWithRetry(url);
+    const adapter = await this.getAdapter('ratios');
+    if (!adapter) {
+      // Fallback to direct FMP
+      const { API_URL, API_KEY } = await import('../../util');
+      const res = await fetch(`${API_URL}/ratios/${symbol}?limit=3&apikey=${API_KEY}`, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+    return adapter.fetch('/ratios/{symbol}', { symbol, limit: '3' });
+  }
+
+  /**
+   * Fetch key executives using datalake adapter
+   */
+  private async fetchKeyExecutives(symbol: string): Promise<any> {
+    const adapter = await this.getAdapter('key-executives');
+    if (!adapter) {
+      // Fallback to direct FMP
+      const { API_URL, API_KEY } = await import('../../util');
+      const res = await fetch(`${API_URL}/key-executives?symbol=${symbol}&apikey=${API_KEY}`, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+    return adapter.fetch('/key-executives', { symbol });
+  }
+
+  /**
+   * Fetch analyst estimates using datalake adapter
+   */
+  private async fetchAnalystEstimates(symbol: string, period: 'annual' | 'quarter' = 'annual'): Promise<any> {
+    const adapter = await this.getAdapter('analyst-estimates');
+    if (!adapter) {
+      // Fallback to direct FMP
+      const { API_URL, API_KEY } = await import('../../util');
+      const res = await fetch(`${API_URL}/analyst-estimates?symbol=${symbol}&period=${period}&apikey=${API_KEY}`, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+    return adapter.fetch('/analyst-estimates', { symbol, period });
+  }
+
+  /**
+   * Fetch financial growth using datalake adapter
+   */
+  private async fetchFinancialGrowth(symbol: string): Promise<any> {
+    const adapter = await this.getAdapter('financial-growth');
+    if (!adapter) {
+      // Fallback to direct FMP
+      const { API_URL, API_KEY } = await import('../../util');
+      const res = await fetch(`${API_URL}/financial-growth?symbol=${symbol}&apikey=${API_KEY}`, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+    return adapter.fetch('/financial-growth', { symbol });
+  }
+
+  /**
+   * Fetch DCF valuation using datalake adapter
+   */
+  private async fetchDCF(symbol: string): Promise<any> {
+    const adapter = await this.getAdapter('discounted-cash-flow');
+    if (!adapter) {
+      // Fallback to direct FMP
+      const { API_URL, API_KEY } = await import('../../util');
+      const res = await fetch(`${API_URL}/discounted-cash-flow?symbol=${symbol}&apikey=${API_KEY}`, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+    return adapter.fetch('/discounted-cash-flow', { symbol });
+  }
+
+  /**
+   * Fetch financial scores using datalake adapter
+   */
+  private async fetchFinancialScores(symbol: string): Promise<any> {
+    const adapter = await this.getAdapter('financial-scores');
+    if (!adapter) {
+      // Fallback to direct FMP
+      const { API_URL, API_KEY } = await import('../../util');
+      const res = await fetch(`${API_URL}/financial-scores?symbol=${symbol}&apikey=${API_KEY}`, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+    return adapter.fetch('/financial-scores', { symbol });
+  }
+
+  /**
+   * Get key executives for a stock (public method)
+   */
+  async getKeyExecutives(symbol: string): Promise<any[]> {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    const data = await this.fetchKeyExecutives(normalizedSymbol);
+    return Array.isArray(data) ? data : [];
+  }
+
+  /**
+   * Get analyst estimates for a stock (public method)
+   */
+  async getAnalystEstimates(symbol: string, period: 'annual' | 'quarter' = 'annual'): Promise<any[]> {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    const data = await this.fetchAnalystEstimates(normalizedSymbol, period);
+    return Array.isArray(data) ? data : [];
+  }
+
+  /**
+   * Get financial growth metrics for a stock (public method)
+   */
+  async getFinancialGrowth(symbol: string): Promise<any[]> {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    const data = await this.fetchFinancialGrowth(normalizedSymbol);
+    return Array.isArray(data) ? data : [];
+  }
+
+  /**
+   * Get DCF valuation for a stock (public method)
+   */
+  async getDCF(symbol: string): Promise<any> {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    const data = await this.fetchDCF(normalizedSymbol);
+    return Array.isArray(data) ? data[0] : data;
+  }
+
+  /**
+   * Get financial scores for a stock (public method)
+   */
+  async getFinancialScores(symbol: string): Promise<any> {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    const data = await this.fetchFinancialScores(normalizedSymbol);
+    return Array.isArray(data) ? data[0] : data;
   }
 
   /**

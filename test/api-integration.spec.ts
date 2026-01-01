@@ -75,7 +75,11 @@ const createUrl = (path: string, params: Record<string, string> = {}) => {
 
 const createRequest = (path: string, params: Record<string, string> = {}) => {
   const url = createUrl(path, params);
-  return new Request(url.toString());
+  return new Request(url.toString(), {
+    headers: {
+      "Origin": "http://localhost:5173", // Add Origin header for client authentication in tests
+    }
+  });
 };
 
 const createEnv = (): Env => {
@@ -446,10 +450,26 @@ describe("API Integration - Search Stock", () => {
       { symbol: "AMZN", name: "Amazon.com Inc.", currency: "USD", exchangeFullName: "NASDAQ" },
     ];
 
-    vi.spyOn(globalThis as any, "fetch").mockResolvedValue({
-      ok: true,
-      json: async () => mockResults,
-    } as Response);
+    // Mock fetch to intercept FMP API calls
+    // The repository will try datalake first (FMP default), so we need to mock the full FMP URL
+    vi.spyOn(globalThis as any, "fetch").mockImplementation((url: string | URL, init?: RequestInit) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      // Match FMP base URL pattern: https://financialmodelingprep.com/stable/search-name or search-symbol
+      if (urlStr.includes("financialmodelingprep.com") && 
+          (urlStr.includes("search-name") || urlStr.includes("search-symbol"))) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => mockResults,
+        } as Response);
+      }
+      // For any other URL, return 404 to allow fallback logic
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        json: async () => ({}),
+      } as Response);
+    });
 
     const env = createEnv();
     const request = createRequest("/v1/api/search-stock", { query: "AP" });
@@ -650,7 +670,10 @@ describe("API Integration - Alerts", () => {
 
     const request = new Request("https://example.com/v1/api/alerts", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Origin": "http://localhost:5173",
+        "Content-Type": "application/json" 
+      },
       body: JSON.stringify(createRequest),
     });
     const env = createEnv();
@@ -692,7 +715,10 @@ describe("API Integration - Alerts", () => {
 
     const request = new Request(`https://example.com/v1/api/alerts/${alertId}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Origin": "http://localhost:5173",
+        "Content-Type": "application/json" 
+      },
       body: JSON.stringify(updateRequest),
     });
     const env = createEnv();
@@ -716,6 +742,7 @@ describe("API Integration - Alerts", () => {
 
     const request = new Request(`https://example.com/v1/api/alerts/${alertId}`, {
       method: "DELETE",
+      headers: { "Origin": "http://localhost:5173" }
     });
     const env = createEnv();
     const logger = createMockLogger();
@@ -735,7 +762,10 @@ describe("API Integration - Alerts", () => {
     };
     vi.mocked(createAlertService).mockReturnValue(mockService as any);
 
-    const request = new Request(`https://example.com/v1/api/alerts/${alertId}`, { method: "GET" });
+    const request = new Request(`https://example.com/v1/api/alerts/${alertId}`, { 
+      method: "GET",
+      headers: { "Origin": "http://localhost:5173" }
+    });
     const env = createEnv();
     const logger = createMockLogger();
     const alertService = createAlertService(env, logger);
@@ -804,11 +834,15 @@ describe("API Integration - Market Endpoints", () => {
       
       expect(response.status).toBe(200);
       const data = await response.json();
-      expect(validateMarketResponse(data)).toBe(true);
-      expect(data.length).toBe(2);
-      expect(validateMarketStockItem(data[0])).toBe(true);
-      expect(data[0].symbol).toBe("AAPL");
-      expect(data[0].changesPercentage).toBe(1.0);
+      // Controller returns paginated response: { data, pagination }
+      expect(data).toHaveProperty("data");
+      expect(data).toHaveProperty("pagination");
+      expect(Array.isArray(data.data)).toBe(true);
+      expect(validateMarketResponse(data.data)).toBe(true);
+      expect(data.data.length).toBe(2);
+      expect(validateMarketStockItem(data.data[0])).toBe(true);
+      expect(data.data[0].symbol).toBe("AAPL");
+      expect(data.data[0].changesPercentage).toBe(1.0);
     });
 
     it("respects limit parameter", async () => {
@@ -835,7 +869,10 @@ describe("API Integration - Market Endpoints", () => {
       
       expect(response.status).toBe(200);
       const data = await response.json();
-      expect(validateMarketResponse(data)).toBe(true);
+      // Controller returns paginated response: { data, pagination }
+      expect(data).toHaveProperty("data");
+      expect(Array.isArray(data.data)).toBe(true);
+      expect(validateMarketResponse(data.data)).toBe(true);
     });
 
     it("returns 400 for invalid limit (too low)", async () => {
@@ -930,10 +967,13 @@ describe("API Integration - Market Endpoints", () => {
       
       expect(response.status).toBe(200);
       const data = await response.json();
-      expect(validateMarketResponse(data)).toBe(true);
-      expect(data.length).toBe(1);
-      expect(data[0].symbol).toBe("STOCK1");
-      expect(data[0].changesPercentage).toBe(-9.09);
+      // Controller returns paginated response: { data, pagination }
+      expect(data).toHaveProperty("data");
+      expect(Array.isArray(data.data)).toBe(true);
+      expect(validateMarketResponse(data.data)).toBe(true);
+      expect(data.data.length).toBe(1);
+      expect(data.data[0].symbol).toBe("STOCK1");
+      expect(data.data[0].changesPercentage).toBe(-9.09);
     });
   });
 
@@ -966,10 +1006,13 @@ describe("API Integration - Market Endpoints", () => {
       
       expect(response.status).toBe(200);
       const data = await response.json();
-      expect(validateMarketResponse(data)).toBe(true);
-      expect(data.length).toBe(1);
-      expect(data[0].symbol).toBe("ACTIVE1");
-      expect(data[0].volume).toBe(5000000);
+      // Controller returns paginated response: { data, pagination }
+      expect(data).toHaveProperty("data");
+      expect(Array.isArray(data.data)).toBe(true);
+      expect(validateMarketResponse(data.data)).toBe(true);
+      expect(data.data.length).toBe(1);
+      expect(data.data[0].symbol).toBe("ACTIVE1");
+      expect(data.data[0].volume).toBe(5000000);
     });
   });
 

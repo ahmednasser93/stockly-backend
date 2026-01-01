@@ -113,8 +113,23 @@ wrangler d1 execute stockly --remote --yes --file=./migrations/022_create_device
 echo "Migration 23/24: 023_migrate_user_push_tokens_to_devices.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/023_migrate_user_push_tokens_to_devices.sql || echo "⚠️  Migration 23 already applied or failed"
 
-echo "Migration 24/24: 024_create_common_stocks.sql"
+echo "Migration 24/29: 024_create_common_stocks.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/024_create_common_stocks.sql || echo "⚠️  Migration 24 already applied or failed"
+
+echo "Migration 25/29: 025_create_senate_trades.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/025_create_senate_trades.sql || echo "⚠️  Migration 25 already applied or failed"
+
+echo "Migration 26/29: 026_create_user_senator_follows.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/026_create_user_senator_follows.sql || echo "⚠️  Migration 26 already applied or failed"
+
+echo "Migration 27/29: 027_add_senator_alert_preferences.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/027_add_senator_alert_preferences.sql || echo "⚠️  Migration 27 already applied or failed"
+
+echo "Migration 28/29: 028_create_datalake_tables.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/028_create_datalake_tables.sql || echo "⚠️  Migration 28 already applied or failed"
+
+echo "Migration 29/29: 029_seed_datalake_data.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/029_seed_datalake_data.sql || echo "⚠️  Migration 29 already applied or failed"
 
 echo ""
 echo "✅ Database migrations complete"

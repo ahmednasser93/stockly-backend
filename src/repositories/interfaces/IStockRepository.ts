@@ -19,5 +19,30 @@ export interface IStockRepository {
    * Useful for mobile app to get periodic price updates
    */
   watchStockDetails(symbol: string): Promise<AsyncIterable<StockDetails>>;
+
+  /**
+   * Get key executives for a stock
+   */
+  getKeyExecutives(symbol: string): Promise<any[]>;
+
+  /**
+   * Get analyst estimates for a stock
+   */
+  getAnalystEstimates(symbol: string, period?: 'annual' | 'quarter'): Promise<any[]>;
+
+  /**
+   * Get financial growth metrics for a stock
+   */
+  getFinancialGrowth(symbol: string): Promise<any[]>;
+
+  /**
+   * Get DCF valuation for a stock
+   */
+  getDCF(symbol: string): Promise<any>;
+
+  /**
+   * Get financial scores for a stock
+   */
+  getFinancialScores(symbol: string): Promise<any>;
 }
 

@@ -1,9 +1,11 @@
 import type { ISearchRepository } from '../interfaces/ISearchRepository';
 import type { IDatabase } from '../../infrastructure/database/IDatabase';
 import type { StockSearchResult } from '@stockly/shared/types';
-import { API_KEY, API_URL } from '../../util';
+import { API_KEY } from '../../util';
 import { getCache, setCache } from '../../api/cache';
 import type { Logger } from '../../logging/logger';
+import type { DatalakeService } from '../../services/datalake.service';
+import type { DatalakeAdapter } from '../../infrastructure/datalake/DatalakeAdapter';
 
 const DB_CACHE_TTL_SECONDS = 20 * 60;
 
@@ -61,7 +63,12 @@ function calculateMatchScore(query: string, item: any): number {
 }
 
 export class SearchRepository implements ISearchRepository {
-  constructor(private db: IDatabase, private logger: Logger, private env: any) {}
+  constructor(
+    private db: IDatabase, 
+    private logger: Logger, 
+    private env: any,
+    private datalakeService?: DatalakeService
+  ) {}
 
   private async getDbCachedResults(query: string): Promise<any[] | null> {
     try {
@@ -124,42 +131,67 @@ export class SearchRepository implements ISearchRepository {
     }
 
     try {
-      const apiKey = this.env.FMP_API_KEY ?? API_KEY;
-
-      // Use /search-name endpoint for company name searches
-      // Fallback to /search-symbol for symbol searches
-      const nameApi = `${API_URL}/search-name?query=${encodeURIComponent(query)}&limit=20&apikey=${apiKey}`;
-      const symbolApi = `${API_URL}/search-symbol?query=${encodeURIComponent(query)}&limit=20&apikey=${apiKey}`;
-
-      // Fetch from both endpoints in parallel
-      const [nameRes, symbolRes] = await Promise.all([
-        fetch(nameApi).catch(() => null),
-        fetch(symbolApi).catch(() => null),
-      ]);
-
       let combinedData: any[] = [];
 
-      // Parse /search-name results
-      if (nameRes && nameRes.ok) {
-        try {
-          const nameData = await nameRes.json();
-          if (Array.isArray(nameData) && nameData.length > 0) {
-            combinedData.push(...nameData);
+      if (this.datalakeService) {
+        const envApiKey = this.env.FMP_API_KEY ?? API_KEY;
+        const nameAdapter = await this.datalakeService.getAdapterForEndpoint('search-name', envApiKey);
+        const symbolAdapter = await this.datalakeService.getAdapterForEndpoint('search-symbol', envApiKey);
+
+        // If both adapters are null, fall back to direct FMP
+        if (!nameAdapter && !symbolAdapter) {
+          this.logger?.warn('Datalake adapters not available for search endpoints, falling back to direct FMP');
+          // Fall through to direct FMP fallback below
+        } else {
+          // Fetch from both endpoints in parallel
+          const [nameData, symbolData] = await Promise.allSettled([
+            nameAdapter ? nameAdapter.fetch('/search-name', { query, limit: '20' }) : Promise.resolve([]),
+            symbolAdapter ? symbolAdapter.fetch('/search-symbol', { query, limit: '20' }) : Promise.resolve([]),
+          ]);
+
+          if (nameData.status === 'fulfilled' && Array.isArray(nameData.value) && nameData.value.length > 0) {
+            combinedData.push(...nameData.value);
           }
-        } catch (e) {
-          this.logger.warn('Failed to parse /search-name response', e);
+
+          if (symbolData.status === 'fulfilled' && Array.isArray(symbolData.value) && symbolData.value.length > 0) {
+            combinedData.push(...symbolData.value);
+          }
         }
       }
+      
+      // Fallback to direct FMP if datalake service not available or adapters are null
+      if (combinedData.length === 0) {
+        // Fallback to direct FMP
+        const { API_URL, API_KEY } = await import('../../util');
+        const apiKey = this.env.FMP_API_KEY ?? API_KEY;
+        const nameApi = `${API_URL}/search-name?query=${encodeURIComponent(query)}&limit=20&apikey=${apiKey}`;
+        const symbolApi = `${API_URL}/search-symbol?query=${encodeURIComponent(query)}&limit=20&apikey=${apiKey}`;
 
-      // Parse /search-symbol results
-      if (symbolRes && symbolRes.ok) {
-        try {
-          const symbolData = await symbolRes.json();
-          if (Array.isArray(symbolData) && symbolData.length > 0) {
-            combinedData.push(...symbolData);
+        const [nameRes, symbolRes] = await Promise.all([
+          fetch(nameApi).catch(() => null),
+          fetch(symbolApi).catch(() => null),
+        ]);
+
+        if (nameRes && nameRes.ok) {
+          try {
+            const nameData = await nameRes.json();
+            if (Array.isArray(nameData) && nameData.length > 0) {
+              combinedData.push(...nameData);
+            }
+          } catch (e) {
+            this.logger.warn('Failed to parse /search-name response', e);
           }
-        } catch (e) {
-          this.logger.warn('Failed to parse /search-symbol response', e);
+        }
+
+        if (symbolRes && symbolRes.ok) {
+          try {
+            const symbolData = await symbolRes.json();
+            if (Array.isArray(symbolData) && symbolData.length > 0) {
+              combinedData.push(...symbolData);
+            }
+          } catch (e) {
+            this.logger.warn('Failed to parse /search-symbol response', e);
+          }
         }
       }
 

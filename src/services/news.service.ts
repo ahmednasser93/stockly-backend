@@ -81,8 +81,9 @@ export class NewsService {
     }
 
     // Check KV cache first
-    if (kv && useCache) {
-      const cached = await getNewsDataFromKV(kv, cacheKey);
+    if (kv && useCache && this.env) {
+      const config = await getConfig(this.env);
+      const cached = await getNewsDataFromKV(kv, cacheKey, config);
       if (cached) {
         this.logger?.info('Cache hit for general news', {
           cachedAt: cached.cachedAt,
@@ -92,8 +93,9 @@ export class NewsService {
     }
 
     // Outside working hours - return stale cache if available
-    if (outsideHours && kv && useCache) {
-      const stale = await getStaleNewsDataFromKV(kv, cacheKey);
+    if (outsideHours && kv && useCache && this.env) {
+      const config = await getConfig(this.env);
+      const stale = await getStaleNewsDataFromKV(kv, cacheKey, config);
       if (stale) {
         this.logger?.info('Outside working hours, returning stale cache for general news', {
           cachedAt: stale.cachedAt,
@@ -113,8 +115,9 @@ export class NewsService {
       const result = await this.newsRepo.getGeneralNews(options);
       
       // Store in KV cache (non-blocking, only for first page)
-      if (kv && useCache) {
-        setNewsDataToKV(kv, cacheKey, result, ttl).catch(error => {
+      if (kv && useCache && this.env) {
+        const config = await getConfig(this.env);
+        setNewsDataToKV(kv, cacheKey, result, config, ttl).catch(error => {
           this.logger?.warn('Failed to cache general news', error);
         });
       }
@@ -122,8 +125,9 @@ export class NewsService {
       return result;
     } catch (error) {
       // If FMP fails, try to return stale cache if available
-      if (kv && useCache) {
-        const stale = await getStaleNewsDataFromKV(kv, cacheKey);
+      if (kv && useCache && this.env) {
+        const config = await getConfig(this.env);
+        const stale = await getStaleNewsDataFromKV(kv, cacheKey, config);
         if (stale) {
           this.logger?.warn('FMP API failed, returning stale cache for general news');
           return stale.data;

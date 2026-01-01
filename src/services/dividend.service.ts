@@ -6,6 +6,9 @@
 import type { DividendRepository, DividendHistory } from '../repositories/external/DividendRepository';
 import type { Env } from '../index';
 import type { Logger } from '../logging/logger';
+import { getConfig } from '../api/config';
+import type { AdminConfig } from '../api/config';
+import { kvGetWithWorkingHours, kvPutWithWorkingHours } from '../utils/kv-working-hours';
 
 export interface DividendData {
   symbol: string;
@@ -61,10 +64,11 @@ export class DividendService {
     const normalizedSymbol = symbol.trim().toUpperCase();
     const cacheKey = `dividend:data:${normalizedSymbol}`;
     const kv = this.env.marketKv; // Reuse marketKv namespace
+    const config = await getConfig(this.env);
 
     // Check cache first
     if (kv) {
-      const cached = await this.getDividendDataFromKV(kv, cacheKey);
+      const cached = await this.getDividendDataFromKV(kv, cacheKey, config);
       if (cached) {
         this.logger?.info('Cache hit for dividend data', {
           symbol: normalizedSymbol,
@@ -105,7 +109,7 @@ export class DividendService {
 
       // Store in cache (non-blocking)
       if (kv) {
-        this.setDividendDataToKV(kv, cacheKey, dividendData, DEFAULT_TTL_SECONDS).catch(error => {
+        this.setDividendDataToKV(kv, cacheKey, dividendData, config, DEFAULT_TTL_SECONDS).catch(error => {
           this.logger?.warn('Failed to cache dividend data', error);
         });
       }
@@ -302,13 +306,15 @@ export class DividendService {
 
   /**
    * Get dividend data from KV cache
+   * Skips KV read outside working hours to save on KV operations
    */
   private async getDividendDataFromKV(
     kv: any,
-    key: string
+    key: string,
+    config: AdminConfig
   ): Promise<{ data: DividendData; cachedAt: number } | null> {
     try {
-      const raw = await kv.get(key);
+      const raw = await kvGetWithWorkingHours(kv, key, config);
       if (!raw) {
         return null;
       }
@@ -336,11 +342,13 @@ export class DividendService {
 
   /**
    * Store dividend data in KV cache
+   * Skips KV write outside working hours to save on KV operations
    */
   private async setDividendDataToKV(
     kv: any,
     key: string,
     data: DividendData,
+    config: AdminConfig,
     ttlSeconds: number
   ): Promise<void> {
     try {
@@ -351,7 +359,7 @@ export class DividendService {
         expiresAt: now + ttlSeconds * 1000,
       };
 
-      await kv.put(key, JSON.stringify(cacheEntry));
+      await kvPutWithWorkingHours(kv, key, JSON.stringify(cacheEntry), config, { expirationTtl: ttlSeconds });
     } catch (error) {
       this.logger?.warn(`Failed to cache dividend data for key ${key}`, error);
       throw error;

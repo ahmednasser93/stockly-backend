@@ -11,6 +11,9 @@ export interface NotificationPreferences {
   quietEnd?: string | null;
   allowedSymbols?: string[] | null;
   maxDaily?: number | null;
+  senatorAlertsEnabled?: boolean;
+  senatorAlertHoldingsOnly?: boolean;
+  senatorAlertFollowedOnly?: boolean;
   updatedAt: string;
 }
 
@@ -65,7 +68,8 @@ export async function getPreferences(
 
     const row = await env.stockly
       .prepare(
-        `SELECT user_id, enabled, quiet_start, quiet_end, allowed_symbols, max_daily, updated_at
+        `SELECT user_id, enabled, quiet_start, quiet_end, allowed_symbols, max_daily, 
+                senator_alerts_enabled, senator_alert_holdings_only, senator_alert_followed_only, updated_at
          FROM user_notification_preferences WHERE username = ?`
       )
       .bind(username)
@@ -76,6 +80,9 @@ export async function getPreferences(
         quiet_end: string | null;
         allowed_symbols: string | null;
         max_daily: number | null;
+        senator_alerts_enabled: number | null;
+        senator_alert_holdings_only: number | null;
+        senator_alert_followed_only: number | null;
         updated_at: string;
       }>();
 
@@ -89,6 +96,9 @@ export async function getPreferences(
           ? row.allowed_symbols.split(",")
           : null,
         maxDaily: row.max_daily,
+        senatorAlertsEnabled: row.senator_alerts_enabled !== null ? Boolean(row.senator_alerts_enabled) : true,
+        senatorAlertHoldingsOnly: row.senator_alert_holdings_only !== null ? Boolean(row.senator_alert_holdings_only) : false,
+        senatorAlertFollowedOnly: row.senator_alert_followed_only !== null ? Boolean(row.senator_alert_followed_only) : false,
         updatedAt: row.updated_at,
       };
       return json(preferences, 200, request);
@@ -101,6 +111,9 @@ export async function getPreferences(
         quietEnd: null,
         allowedSymbols: null,
         maxDaily: null,
+        senatorAlertsEnabled: true,
+        senatorAlertHoldingsOnly: false,
+        senatorAlertFollowedOnly: false,
         updatedAt: new Date().toISOString(),
       };
       return json(defaultPreferences, 200, request);
@@ -157,7 +170,7 @@ export async function updatePreferences(
     const userId = user.id;
 
     const payload = await request.json();
-    const { enabled, quietStart, quietEnd, allowedSymbols, maxDaily } = payload;
+    const { enabled, quietStart, quietEnd, allowedSymbols, maxDaily, senatorAlertsEnabled, senatorAlertHoldingsOnly, senatorAlertFollowedOnly } = payload;
     // userId is from JWT authentication, not from payload
 
     // Validate enabled is boolean
@@ -193,6 +206,23 @@ export async function updatePreferences(
       symbolsString = allowedSymbols.join(",");
     }
 
+    // Validate senator alert preferences if provided
+    if (senatorAlertsEnabled !== null && senatorAlertsEnabled !== undefined) {
+      if (typeof senatorAlertsEnabled !== "boolean") {
+        return json({ error: "senatorAlertsEnabled must be a boolean" }, 400, request);
+      }
+    }
+    if (senatorAlertHoldingsOnly !== null && senatorAlertHoldingsOnly !== undefined) {
+      if (typeof senatorAlertHoldingsOnly !== "boolean") {
+        return json({ error: "senatorAlertHoldingsOnly must be a boolean" }, 400, request);
+      }
+    }
+    if (senatorAlertFollowedOnly !== null && senatorAlertFollowedOnly !== undefined) {
+      if (typeof senatorAlertFollowedOnly !== "boolean") {
+        return json({ error: "senatorAlertFollowedOnly must be a boolean" }, 400, request);
+      }
+    }
+
     const now = new Date().toISOString();
 
     // Check if preferences already exist for user (by username)
@@ -201,12 +231,47 @@ export async function updatePreferences(
       .bind(username)
       .first();
 
+    // Prepare senator alert values (use existing values if not provided, default to true/false/false)
+    const senatorAlertsEnabledValue = senatorAlertsEnabled !== null && senatorAlertsEnabled !== undefined 
+      ? (senatorAlertsEnabled ? 1 : 0)
+      : null;
+    const senatorAlertHoldingsOnlyValue = senatorAlertHoldingsOnly !== null && senatorAlertHoldingsOnly !== undefined
+      ? (senatorAlertHoldingsOnly ? 1 : 0)
+      : null;
+    const senatorAlertFollowedOnlyValue = senatorAlertFollowedOnly !== null && senatorAlertFollowedOnly !== undefined
+      ? (senatorAlertFollowedOnly ? 1 : 0)
+      : null;
+
     if (existing) {
+      // Get existing values first to preserve them if not provided
+      const existingRow = await env.stockly
+        .prepare(`SELECT senator_alerts_enabled, senator_alert_holdings_only, senator_alert_followed_only 
+                   FROM user_notification_preferences WHERE username = ?`)
+        .bind(username)
+        .first<{
+          senator_alerts_enabled: number | null;
+          senator_alert_holdings_only: number | null;
+          senator_alert_followed_only: number | null;
+        }>();
+
+      // Use provided values or keep existing values
+      const finalSenatorAlertsEnabled = senatorAlertsEnabledValue !== null 
+        ? senatorAlertsEnabledValue 
+        : (existingRow?.senator_alerts_enabled ?? 1);
+      const finalSenatorAlertHoldingsOnly = senatorAlertHoldingsOnlyValue !== null
+        ? senatorAlertHoldingsOnlyValue
+        : (existingRow?.senator_alert_holdings_only ?? 0);
+      const finalSenatorAlertFollowedOnly = senatorAlertFollowedOnlyValue !== null
+        ? senatorAlertFollowedOnlyValue
+        : (existingRow?.senator_alert_followed_only ?? 0);
+
       // Update existing preferences
       await env.stockly
         .prepare(
           `UPDATE user_notification_preferences
-           SET enabled = ?, quiet_start = ?, quiet_end = ?, allowed_symbols = ?, max_daily = ?, updated_at = ?
+           SET enabled = ?, quiet_start = ?, quiet_end = ?, allowed_symbols = ?, max_daily = ?,
+               senator_alerts_enabled = ?, senator_alert_holdings_only = ?, senator_alert_followed_only = ?,
+               updated_at = ?
            WHERE username = ?`
         )
         .bind(
@@ -215,6 +280,9 @@ export async function updatePreferences(
           quietEnd || null,
           symbolsString,
           maxDaily ?? null,
+          finalSenatorAlertsEnabled,
+          finalSenatorAlertHoldingsOnly,
+          finalSenatorAlertFollowedOnly,
           now,
           username
         )
@@ -222,10 +290,12 @@ export async function updatePreferences(
       return json({ success: true, message: "Preferences updated" }, 200, request);
     } else {
       // Insert new preferences (with both user_id and username)
+      // Default senator alert values: enabled=true, holdingsOnly=false, followedOnly=false
       await env.stockly
         .prepare(
-          `INSERT INTO user_notification_preferences (user_id, username, enabled, quiet_start, quiet_end, allowed_symbols, max_daily, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO user_notification_preferences (user_id, username, enabled, quiet_start, quiet_end, allowed_symbols, max_daily, 
+                                                      senator_alerts_enabled, senator_alert_holdings_only, senator_alert_followed_only, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           userId,
@@ -235,6 +305,9 @@ export async function updatePreferences(
           quietEnd || null,
           symbolsString,
           maxDaily ?? null,
+          senatorAlertsEnabledValue ?? 1, // Default to enabled
+          senatorAlertHoldingsOnlyValue ?? 0, // Default to false
+          senatorAlertFollowedOnlyValue ?? 0, // Default to false
           now
         )
         .run();
