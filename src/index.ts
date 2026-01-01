@@ -26,6 +26,7 @@ import { runAlertCron } from "./cron/alerts-cron";
 import { runNewsAlertCron } from "./cron/news-alert-cron";
 import { runMarketPrefetchCron } from "./cron/market-prefetch-cron";
 import { runSenateTradingCron } from "./cron/senate-trading-cron";
+import { runHouseTradingCron } from "./cron/house-trading-cron";
 import { createHistoricalService } from "./factories/createHistoricalService";
 import { HistoricalController } from "./controllers/historical.controller";
 import { createMarketService } from "./factories/createMarketService";
@@ -38,6 +39,7 @@ import { getOpenApiSpec } from "./api/openapi";
 import { createCommonStocksService } from "./factories/createCommonStocksService";
 import { CommonStocksController } from "./controllers/common-stocks.controller";
 import { SenateTradingController } from "./controllers/senate-trading.controller";
+import { HouseTradingController } from "./controllers/house-trading.controller";
 import { createDatalakeService } from "./factories/createDatalakeService";
 import { DatalakeController } from "./controllers/datalake.controller";
 import {
@@ -331,6 +333,9 @@ export default {
       } else if (pathname.startsWith("/v1/api/senate-trading")) {
         const senateTradingController = new SenateTradingController(loggedEnv, logger);
         response = await senateTradingController.handleRequest(request);
+      } else if (pathname.startsWith("/v1/api/house-trading")) {
+        const houseTradingController = new HouseTradingController(loggedEnv, logger);
+        response = await houseTradingController.handleRequest(request);
       } else if (pathname === "/v1/api/users/all" && request.method === "GET") {
         response = await getAllUsers(request, loggedEnv, logger);
       } else if (pathname.startsWith("/v1/api/users/") && request.method === "GET") {
@@ -578,6 +583,7 @@ export default {
     // Note: Using same schedule as news alerts, but could be separate
     if (event.cron === "0 */6 * * *") {
       ctx.waitUntil(runSenateTradingCron(env, ctx));
+      ctx.waitUntil(runHouseTradingCron(env, ctx));
     }
 
     // Run market data & news prefetch every 1 hour (hourly) to warm cache

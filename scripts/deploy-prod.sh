@@ -128,8 +128,11 @@ wrangler d1 execute stockly --remote --yes --file=./migrations/027_add_senator_a
 echo "Migration 28/29: 028_create_datalake_tables.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/028_create_datalake_tables.sql || echo "⚠️  Migration 28 already applied or failed"
 
-echo "Migration 29/29: 029_seed_datalake_data.sql"
+echo "Migration 29/30: 029_seed_datalake_data.sql"
 wrangler d1 execute stockly --remote --yes --file=./migrations/029_seed_datalake_data.sql || echo "⚠️  Migration 29 already applied or failed"
+
+echo "Migration 30/30: 030_create_house_trades.sql"
+wrangler d1 execute stockly --remote --yes --file=./migrations/030_create_house_trades.sql || echo "⚠️  Migration 30 already applied or failed"
 
 echo ""
 echo "✅ Database migrations complete"

@@ -5,7 +5,7 @@
 
 import type { Env } from "../index";
 import type { Logger } from "../logging/logger";
-import { fetchSenateTradingFromFmp } from "../api/senate-trading";
+import { fetchSenateTradingFromFmp, fetchSenateTradesByName } from "../api/senate-trading";
 import * as SenateTradingRepository from "../repositories/senate-trading.repository";
 import * as UserSenatorFollowsRepository from "../repositories/user-senator-follows.repository";
 import type {
@@ -26,6 +26,7 @@ export class SenateTradingService {
   /**
    * Sync senate trades from FMP API
    * Fetches new trades and stores them in the database
+   * Uses pagination to fetch multiple pages if needed
    */
   async syncSenateTrades(): Promise<{ added: number; updated: number; errors: number }> {
     this.logger.info("Starting senate trades sync from FMP API");
@@ -35,11 +36,34 @@ export class SenateTradingService {
     let errors = 0;
 
     try {
-      // Fetch all trades from FMP (no symbol filter to get everything)
-      const fmpTrades = await fetchSenateTradingFromFmp(undefined, this.env);
-      this.logger.info(`Fetched ${fmpTrades.length} trades from FMP API`);
+      // Fetch trades from FMP using pagination
+      // Start with page 0, limit 100 (as recommended by FMP API)
+      let page = 0;
+      const limit = 100;
+      let allFmpTrades: typeof import("../senate-trading/types").SenateTrade[] = [];
+      let hasMore = true;
 
-      for (const fmpTrade of fmpTrades) {
+      while (hasMore) {
+        const fmpTrades = await fetchSenateTradingFromFmp(undefined, this.env, page, limit);
+        allFmpTrades = allFmpTrades.concat(fmpTrades);
+        this.logger.info(`Fetched page ${page}: ${fmpTrades.length} trades from FMP API`);
+
+        // If we got fewer trades than the limit, we've reached the end
+        if (fmpTrades.length < limit) {
+          hasMore = false;
+        } else {
+          page++;
+          // Limit to fetching first 5 pages (500 trades max per sync) to avoid rate limits
+          if (page >= 5) {
+            hasMore = false;
+            this.logger.info("Reached maximum page limit (5 pages), stopping pagination");
+          }
+        }
+      }
+
+      this.logger.info(`Fetched total ${allFmpTrades.length} trades from FMP API across ${page + 1} page(s)`);
+
+      for (const fmpTrade of allFmpTrades) {
         try {
           // Check if trade already exists by fmp_id
           let existingTrade: SenateTradeRecord | null = null;
@@ -89,7 +113,7 @@ export class SenateTradingService {
         added,
         updated,
         errors,
-        total: fmpTrades.length,
+        total: allFmpTrades.length,
       });
 
       return { added, updated, errors };
@@ -156,10 +180,37 @@ export class SenateTradingService {
 
   /**
    * Search senators by name (autocomplete)
+   * Uses FMP API to get real-time results, then combines with local database results
    */
   async searchSenators(query: string, limit: number = 20): Promise<string[]> {
     try {
-      return await SenateTradingRepository.searchSenators(this.env, query, limit);
+      const uniqueSenators = new Set<string>();
+
+      // First, try to get results from FMP API for real-time data
+      try {
+        const fmpTrades = await fetchSenateTradesByName(query, this.env);
+        for (const trade of fmpTrades) {
+          uniqueSenators.add(trade.senatorName);
+        }
+        this.logger.info(`Found ${fmpTrades.length} trades from FMP API for query "${query}"`);
+      } catch (error) {
+        this.logger.warn("Error fetching from FMP API for senator search, falling back to local DB", error);
+      }
+
+      // Also search local database as fallback/supplement
+      try {
+        const localSenators = await SenateTradingRepository.searchSenators(this.env, query, limit);
+        for (const senator of localSenators) {
+          uniqueSenators.add(senator);
+        }
+      } catch (error) {
+        this.logger.warn("Error searching local database for senators", error);
+      }
+
+      // Convert to array and limit results
+      const results = Array.from(uniqueSenators).slice(0, limit);
+      this.logger.info(`Returning ${results.length} unique senators for query "${query}"`);
+      return results;
     } catch (error) {
       this.logger.error("Error searching senators", error, { query });
       throw error;
